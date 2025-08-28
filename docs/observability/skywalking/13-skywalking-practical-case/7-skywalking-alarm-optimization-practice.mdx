@@ -1,0 +1,134 @@
+---
+title: SkyWalking 告警优化实践
+description: "学习如何通过SkyWalking的告警功能监控系统异常，并通过优化规则和配置提升告警的准确性与实用性。"
+---
+
+# SkyWalking 告警优化实践
+
+## 介绍
+
+SkyWalking是一个开源的APM（应用性能监控）系统，其告警功能可以帮助开发者快速发现系统中的异常行为。然而，默认的告警规则可能无法完全匹配实际业务需求，因此告警优化成为提升监控效率的关键步骤。本章将介绍如何优化SkyWalking告警规则，并通过实战案例展示优化前后的对比。
+
+---
+
+## 告警基础概念
+
+SkyWalking的告警功能基于以下核心组件：
+1. **告警规则（Alarm Rules）**：定义触发告警的条件。
+2. **告警触发（Trigger）**：当规则条件满足时，触发告警。
+3. **告警通知（Notification）**：通过Webhook、邮件等方式发送告警信息。
+
+默认告警规则可能过于宽松或严格，导致频繁误报或漏报。优化告警的核心目标是：
+- 减少误报（False Positives）。
+- 提高告警的针对性（如区分业务异常和基础设施问题）。
+
+---
+
+## 告警规则优化实践
+
+### 1. 优化响应时间告警
+
+默认规则可能对所有服务的响应时间设置统一阈值，但不同服务的性能要求不同。例如：
+
+```yaml
+# 默认规则（不推荐）
+rules:
+  - name: service_resp_time_rule
+    expression: service_resp_time > 1000
+    period: 5
+    silence-period: 5
+    message: Service {name} 响应时间超过1秒
+```
+
+优化后的规则可以针对核心服务设置更严格的阈值：
+
+```yaml
+# 优化后规则
+rules:
+  - name: core_service_resp_time_rule
+    expression: service_resp_time > 500 && tag("service").startsWith("core-")
+    period: 3
+    silence-period: 10
+    message: 核心服务 {name} 响应时间超过500毫秒
+```
+
+:::tip
+- `tag("service").startsWith("core-")` 通过标签过滤核心服务。
+- `silence-period` 避免短时间内重复告警。
+:::
+
+---
+
+### 2. 错误率告警优化
+
+默认错误率告警可能忽略低流量服务的误报问题：
+
+```yaml
+# 优化前（低流量服务易误报）
+rules:
+  - name: service_error_rate
+    expression: service_error_rate > 0.1
+```
+
+优化方案：结合请求量阈值，避免低流量服务因少量错误触发告警。
+
+```yaml
+# 优化后
+rules:
+  - name: high_traffic_error_rate
+    expression: service_error_rate > 0.1 && service_cpm > 10
+    message: 高流量服务 {name} 错误率超过10%
+```
+
+---
+
+## 实战案例：电商平台告警优化
+
+### 场景描述
+某电商平台的订单服务（`order-service`）在促销期间频繁触发响应时间告警，但实际用户体验未受影响。经分析发现：
+- 默认阈值（1秒）未区分高峰和日常流量。
+- 未排除外部API调用的延迟。
+
+### 优化步骤
+1. **区分流量时段**：
+   ```yaml
+   rules:
+     - name: order_service_peak_time
+       expression: service_resp_time > 2000 && hour() >= 20 && hour() <= 23
+       message: 高峰时段订单服务响应时间超过2秒
+   ```
+
+2. **排除外部依赖**：
+   ```yaml
+   rules:
+     - name: order_service_external_excluded
+       expression: service_resp_time > 1000 && !endpoint.contains("/external/")
+   ```
+
+3. **结果对比**：
+   ```mermaid
+   pie
+       title 告警数量对比
+       "优化前" : 120
+       "优化后" : 15
+   ```
+
+---
+
+## 总结
+
+通过优化SkyWalking告警规则，可以实现：
+- **更精准的告警**：基于业务场景调整阈值和条件。
+- **减少噪音**：通过标签、流量过滤无关告警。
+- **提升响应效率**：区分核心与非核心服务。
+
+---
+
+## 扩展练习
+1. 为你的测试服务设置一条基于错误率和请求量的复合告警规则。
+2. 尝试使用 `tag()` 函数为特定环境（如`prod`）配置独立告警。
+
+:::note 附加资源
+- [SkyWalking 告警配置文档](https://skywalking.apache.org/docs/)
+- [PromQL 语法参考](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+:::

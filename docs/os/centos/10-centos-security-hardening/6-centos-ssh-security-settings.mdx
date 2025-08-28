@@ -1,0 +1,189 @@
+---
+title: CentOS SSH安全设置
+description: 学习如何在CentOS系统中通过SSH安全设置来保护你的服务器免受未经授权的访问和攻击。
+---
+
+# CentOS SSH安全设置
+
+SSH（Secure Shell）是一种用于远程登录和管理服务器的加密协议。它是Linux系统中最重要的远程管理工具之一。然而，如果配置不当，SSH也可能成为攻击者的入口。因此，对SSH进行安全加固是保护CentOS服务器的关键步骤之一。
+
+本文将逐步介绍如何通过配置SSH来提高CentOS服务器的安全性。
+
+---
+
+## 1. 修改SSH默认端口
+
+默认情况下，SSH服务监听在22端口。攻击者通常会扫描这个端口以寻找潜在的目标。通过修改SSH端口，可以减少被扫描到的风险。
+
+### 操作步骤：
+1. 打开SSH配置文件：
+   ```bash
+   sudo vi /etc/ssh/sshd_config
+   ```
+2. 找到 `#Port 22` 这一行，去掉注释并将端口号改为一个非标准端口（例如 `2222`）：
+   ```bash
+   Port 2222
+   ```
+3. 保存并退出编辑器。
+4. 重启SSH服务以应用更改：
+   ```bash
+   sudo systemctl restart sshd
+   ```
+
+:::caution
+修改端口后，确保防火墙允许新端口的流量通过。例如，使用以下命令允许新端口：
+```bash
+sudo firewall-cmd --permanent --add-port=2222/tcp
+sudo firewall-cmd --reload
+```
+:::
+
+---
+
+## 2. 禁用root用户直接登录
+
+允许root用户直接通过SSH登录是一个安全隐患。攻击者可以通过暴力破解尝试获取root权限。建议禁用root用户的SSH登录，并使用普通用户登录后再切换到root。
+
+### 操作步骤：
+1. 打开SSH配置文件：
+   ```bash
+   sudo vi /etc/ssh/sshd_config
+   ```
+2. 找到 `#PermitRootLogin yes` 这一行，将其改为：
+   ```bash
+   PermitRootLogin no
+   ```
+3. 保存并退出编辑器。
+4. 重启SSH服务：
+   ```bash
+   sudo systemctl restart sshd
+   ```
+
+:::tip
+如果需要以root身份执行命令，可以先以普通用户登录，然后使用 `sudo` 或 `su` 切换到root用户。
+:::
+
+---
+
+## 3. 使用密钥认证代替密码认证
+
+密码认证容易受到暴力破解攻击。相比之下，使用SSH密钥认证更加安全。密钥认证基于公钥加密技术，只有拥有私钥的用户才能登录。
+
+### 操作步骤：
+1. 在本地生成SSH密钥对（如果尚未生成）：
+   ```bash
+   ssh-keygen -t rsa -b 4096
+   ```
+   按提示保存密钥对并设置密码。
+
+2. 将公钥上传到服务器：
+   ```bash
+   ssh-copy-id -i ~/.ssh/id_rsa.pub user@your_server_ip -p 2222
+   ```
+
+3. 打开SSH配置文件：
+   ```bash
+   sudo vi /etc/ssh/sshd_config
+   ```
+4. 确保以下配置项已启用：
+   ```bash
+   PubkeyAuthentication yes
+   PasswordAuthentication no
+   ```
+5. 保存并退出编辑器。
+6. 重启SSH服务：
+   ```bash
+   sudo systemctl restart sshd
+   ```
+
+:::warning
+在禁用密码认证之前，请确保你已经成功配置了密钥认证，并且可以正常登录。否则，可能会被锁在服务器外。
+:::
+
+---
+
+## 4. 限制SSH访问的IP地址
+
+通过限制允许访问SSH的IP地址范围，可以进一步减少攻击面。例如，只允许特定IP地址或IP段访问SSH服务。
+
+### 操作步骤：
+1. 打开SSH配置文件：
+   ```bash
+   sudo vi /etc/ssh/sshd_config
+   ```
+2. 在文件末尾添加以下内容（将 `192.168.1.0/24` 替换为你的IP段）：
+   ```bash
+   AllowUsers user@192.168.1.0/24
+   ```
+3. 保存并退出编辑器。
+4. 重启SSH服务：
+   ```bash
+   sudo systemctl restart sshd
+   ```
+
+:::note
+如果你需要从多个IP地址访问服务器，可以添加多个 `AllowUsers` 行。
+:::
+
+---
+
+## 5. 启用SSH登录失败监控
+
+通过监控SSH登录失败尝试，可以及时发现并阻止暴力破解攻击。可以使用 `fail2ban` 工具来实现这一点。
+
+### 操作步骤：
+1. 安装 `fail2ban`：
+   ```bash
+   sudo yum install epel-release
+   sudo yum install fail2ban
+   ```
+2. 配置 `fail2ban` 监控SSH登录：
+   ```bash
+   sudo vi /etc/fail2ban/jail.local
+   ```
+   添加以下内容：
+   ```bash
+   [sshd]
+   enabled = true
+   port = 2222
+   filter = sshd
+   logpath = /var/log/secure
+   maxretry = 3
+   bantime = 3600
+   ```
+3. 启动并启用 `fail2ban` 服务：
+   ```bash
+   sudo systemctl start fail2ban
+   sudo systemctl enable fail2ban
+   ```
+
+:::tip
+`fail2ban` 还可以监控其他服务（如FTP、HTTP等），只需在配置文件中添加相应的规则即可。
+:::
+
+---
+
+## 实际案例
+
+假设你管理着一台运行CentOS的Web服务器，该服务器需要从多个地点远程管理。通过以下步骤，你可以显著提高服务器的安全性：
+1. 将SSH端口从22改为2222。
+2. 禁用root用户直接登录，使用普通用户登录后切换到root。
+3. 配置SSH密钥认证，并禁用密码认证。
+4. 限制SSH访问的IP地址为办公室和家庭的IP段。
+5. 安装并配置 `fail2ban` 监控SSH登录失败尝试。
+
+---
+
+## 总结
+
+通过以上步骤，你可以显著提高CentOS服务器的SSH安全性。这些措施包括修改默认端口、禁用root登录、使用密钥认证、限制访问IP地址以及启用登录失败监控。这些方法可以有效减少服务器被攻击的风险。
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试在自己的CentOS服务器上实施上述安全设置，并测试是否能够正常登录。
+2. **进一步学习**：阅读 [OpenSSH官方文档](https://www.openssh.com/manual.html) 了解更多高级配置选项。
+3. **扩展工具**：探索 `fail2ban` 的其他功能，例如监控FTP或HTTP服务的登录尝试。
+
+通过不断学习和实践，你将能够更好地保护你的服务器免受潜在威胁。

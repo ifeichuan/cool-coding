@@ -1,0 +1,188 @@
+---
+title: Apache Drill 数据发现案例
+description: 通过实际案例学习如何使用 Apache Drill 进行数据发现，适合初学者掌握数据查询和分析的基本技能。
+---
+
+## 介绍
+
+Apache Drill 是一个开源的分布式 SQL 查询引擎，专为大数据分析而设计。它支持对多种数据源（如文件、NoSQL 数据库、关系型数据库等）进行实时查询，而无需预先定义模式。数据发现是 Apache Drill 的核心功能之一，它允许用户在查询时动态发现数据的结构和内容。
+
+在本教程中，我们将通过一个实际案例，展示如何使用 Apache Drill 进行数据发现，并逐步讲解相关概念。
+
+---
+
+## 案例背景
+
+假设我们有一个包含销售数据的 JSON 文件，文件名为 `sales_data.json`，内容如下：
+
+```json
+[
+  {
+    "order_id": 101,
+    "customer_name": "Alice",
+    "items": [
+      {"product": "Laptop", "quantity": 1, "price": 1200},
+      {"product": "Mouse", "quantity": 2, "price": 25}
+    ],
+    "order_date": "2023-10-01"
+  },
+  {
+    "order_id": 102,
+    "customer_name": "Bob",
+    "items": [
+      {"product": "Keyboard", "quantity": 1, "price": 50},
+      {"product": "Monitor", "quantity": 1, "price": 300}
+    ],
+    "order_date": "2023-10-02"
+  }
+]
+```
+
+我们的目标是通过 Apache Drill 查询这些数据，并发现其中的结构和内容。
+
+---
+
+## 步骤 1：启动 Apache Drill
+
+首先，确保你已经安装并启动了 Apache Drill。可以通过以下命令启动 Drill 的嵌入式模式：
+
+```bash
+./bin/drill-embedded
+```
+
+启动后，访问 `http://localhost:8047` 进入 Drill 的 Web UI。
+
+---
+
+## 步骤 2：配置存储插件
+
+在 Drill 中，存储插件用于连接不同的数据源。我们需要配置一个文件系统存储插件来访问本地文件。
+
+1. 进入 Web UI 的 "Storage" 页面。
+2. 点击 "Enable" 启用 `dfs` 插件。
+3. 确保 `dfs` 插件的配置中包含你的文件路径（例如 `/path/to/data`）。
+
+---
+
+## 步骤 3：查询数据
+
+接下来，我们使用 SQL 查询 `sales_data.json` 文件。在 Drill 的查询页面中输入以下 SQL 语句：
+
+```sql
+SELECT * FROM dfs.`/path/to/data/sales_data.json`;
+```
+
+执行查询后，你会看到以下输出：
+
+| order_id | customer_name | items                                                                                             | order_date   |
+|----------|---------------|---------------------------------------------------------------------------------------------------|--------------|
+| 101      | Alice         | `[{"product":"Laptop","quantity":1,"price":1200},{"product":"Mouse","quantity":2,"price":25}]`    | `2023-10-01` |
+| 102      | Bob           | `[{"product":"Keyboard","quantity":1,"price":50},{"product":"Monitor","quantity":1,"price":300}]` | `2023-10-02` |
+
+:::note
+注意：`items` 字段是一个嵌套的 JSON 数组，Drill 会自动将其解析为复杂数据类型。
+:::
+
+---
+
+## 步骤 4：数据发现
+
+Apache Drill 支持动态模式发现，这意味着我们可以在查询时探索数据的结构。例如，我们可以使用 `DESCRIBE` 命令查看数据的模式：
+
+```sql
+DESCRIBE dfs.`/path/to/data/sales_data.json`;
+```
+
+输出结果如下：
+
+| COLUMN_NAME    | DATA_TYPE |
+|----------------|-----------|
+| order_id       | INTEGER   |
+| customer_name  | VARCHAR   |
+| items          | LIST      |
+| order_date     | VARCHAR   |
+
+:::tip
+提示：`items` 字段的类型是 `LIST`，表示它是一个包含多个元素的数组。
+:::
+
+---
+
+## 步骤 5：深入分析嵌套数据
+
+为了进一步分析嵌套的 `items` 字段，我们可以使用 `FLATTEN` 函数将其展开：
+
+```sql
+SELECT
+  order_id,
+  customer_name,
+  items.product AS product,
+  items.quantity AS quantity,
+  items.price AS price,
+  order_date
+FROM dfs.`/path/to/data/sales_data.json`
+FLATTEN(items);
+```
+
+执行后，输出如下：
+
+| order_id | customer_name | product  | quantity | price | order_date  |
+|----------|---------------|----------|----------|-------|-------------|
+| 101      | Alice         | Laptop   | 1        | 1200  | 2023-10-01  |
+| 101      | Alice         | Mouse    | 2        | 25    | 2023-10-01  |
+| 102      | Bob           | Keyboard | 1        | 50    | 2023-10-02  |
+| 102      | Bob           | Monitor  | 1        | 300   | 2023-10-02  |
+
+:::caution
+注意：`FLATTEN` 函数会将嵌套数组中的每个元素展开为单独的行。
+:::
+
+---
+
+## 实际应用场景
+
+假设我们需要计算每个订单的总金额。可以通过以下查询实现：
+
+```sql
+SELECT
+  order_id,
+  customer_name,
+  SUM(items.quantity * items.price) AS total_amount,
+  order_date
+FROM dfs.`/path/to/data/sales_data.json`
+FLATTEN(items)
+GROUP BY order_id, customer_name, order_date;
+```
+
+输出结果：
+
+| order_id | customer_name | total_amount | order_date  |
+|----------|---------------|--------------|-------------|
+| 101      | Alice         | 1250         | 2023-10-01  |
+| 102      | Bob           | 350          | 2023-10-02  |
+
+---
+
+## 总结
+
+通过本案例，我们学习了如何使用 Apache Drill 进行数据发现和分析。以下是关键点总结：
+
+1. **动态模式发现**：Drill 无需预先定义模式即可查询数据。
+2. **嵌套数据处理**：使用 `FLATTEN` 函数可以轻松处理嵌套的 JSON 数据。
+3. **灵活查询**：Drill 支持标准的 SQL 语法，适合复杂的数据分析任务。
+
+---
+
+## 附加资源
+
+- [Apache Drill 官方文档](https://drill.apache.org/docs/)
+- [Drill 查询示例](https://drill.apache.org/docs/querying-data/)
+- [Drill 存储插件配置指南](https://drill.apache.org/docs/plugin-configuration/)
+
+---
+
+## 练习
+
+1. 修改 `sales_data.json` 文件，添加更多订单数据，并尝试查询。
+2. 使用 Drill 查询其他格式的文件（如 CSV 或 Parquet），并比较查询结果。
+3. 尝试使用 `JOIN` 操作将多个数据源的数据结合起来分析。

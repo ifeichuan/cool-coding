@@ -1,0 +1,140 @@
+---
+title: RabbitMQ 消息拒绝
+description: 了解如何在 RabbitMQ 中拒绝消息，包括基本概念、代码示例和实际应用场景。
+---
+
+# RabbitMQ 消息拒绝
+
+在 RabbitMQ 中，消息拒绝（Message Rejection）是一种处理消息的机制，允许消费者明确拒绝接收到的消息。这种机制在处理错误或无法处理的消息时非常有用。本文将详细介绍 RabbitMQ 消息拒绝的概念、使用方法以及实际应用场景。
+
+## 什么是消息拒绝？
+
+消息拒绝是指消费者在接收到消息后，明确告诉 RabbitMQ 该消息无法被处理。拒绝消息的方式有两种：
+
+1. **拒绝并丢弃消息**：消息会被直接丢弃，不会重新进入队列。
+2. **拒绝并重新入队**：消息会被重新放回队列，以便其他消费者可以尝试处理。
+
+消息拒绝通常用于以下场景：
+- 消息格式错误或内容不符合预期。
+- 消费者无法处理该消息（例如，资源不足或业务逻辑不匹配）。
+- 需要将消息重新分配给其他消费者。
+
+## 如何拒绝消息？
+
+在 RabbitMQ 中，消息拒绝是通过 `basic.reject` 或 `basic.nack` 方法实现的。以下是这两种方法的区别：
+
+- `basic.reject`：只能拒绝单条消息，并且可以选择是否重新入队。
+- `basic.nack`：可以拒绝单条或多条消息，并且可以选择是否重新入队。
+
+### 使用 `basic.reject` 拒绝消息
+
+以下是一个使用 `basic.reject` 拒绝消息的示例代码：
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明队列
+channel.queue_declare(queue='test_queue')
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(f"接收到消息: {body}")
+    # 拒绝消息并重新入队
+    ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
+    print("消息已拒绝并重新入队")
+
+# 设置消费者
+channel.basic_consume(queue='test_queue', on_message_callback=callback)
+
+# 开始消费消息
+print('等待消息...')
+channel.start_consuming()
+```
+
+在这个示例中，消费者接收到消息后，使用 `basic_reject` 方法拒绝消息，并将消息重新放回队列（`requeue=True`）。
+
+### 使用 `basic.nack` 拒绝消息
+
+`basic.nack` 方法与 `basic.reject` 类似，但它支持批量拒绝消息。以下是一个使用 `basic.nack` 的示例：
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明队列
+channel.queue_declare(queue='test_queue')
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(f"接收到消息: {body}")
+    # 拒绝消息并重新入队
+    ch.basic_nack(delivery_tag=method.delivery_tag, multiple=False, requeue=True)
+    print("消息已拒绝并重新入队")
+
+# 设置消费者
+channel.basic_consume(queue='test_queue', on_message_callback=callback)
+
+# 开始消费消息
+print('等待消息...')
+channel.start_consuming()
+```
+
+在这个示例中，`basic_nack` 方法用于拒绝消息，并且可以选择是否批量拒绝（`multiple=False` 表示只拒绝当前消息）。
+
+## 实际应用场景
+
+### 场景 1：处理错误消息
+
+假设你有一个处理订单的系统，消费者接收到订单消息后，需要验证订单的有效性。如果订单无效，你可以使用 `basic.reject` 拒绝消息，并将消息重新放回队列，以便其他消费者可以尝试处理。
+
+```python
+def callback(ch, method, properties, body):
+    order = json.loads(body)
+    if not validate_order(order):
+        print("订单无效，拒绝消息")
+        ch.basic_reject(delivery_tag=method.delivery_tag, requeue=True)
+    else:
+        process_order(order)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+```
+
+### 场景 2：资源不足时的消息处理
+
+在某些情况下，消费者可能因为资源不足而无法处理消息。此时，你可以使用 `basic.nack` 拒绝消息，并将消息重新入队，以便在资源恢复后重新处理。
+
+```python
+def callback(ch, method, properties, body):
+    if not has_enough_resources():
+        print("资源不足，拒绝消息")
+        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+    else:
+        process_message(body)
+        ch.basic_ack(delivery_tag=method.delivery_tag)
+```
+
+## 总结
+
+RabbitMQ 的消息拒绝机制为处理错误或无法处理的消息提供了灵活的方式。通过 `basic.reject` 和 `basic.nack`，消费者可以明确拒绝消息，并选择是否将消息重新放回队列。这种机制在实际应用中非常有用，尤其是在处理错误消息或资源不足的情况下。
+
+:::tip
+在实际使用中，建议结合死信队列（Dead Letter Exchange, DLX）来处理被多次拒绝的消息，以避免消息在队列中无限循环。
+:::
+
+## 附加资源
+
+- [RabbitMQ 官方文档](https://www.rabbitmq.com/documentation.html)
+- [RabbitMQ 消息确认与拒绝](https://www.rabbitmq.com/confirms.html)
+
+## 练习
+
+1. 修改上述代码示例，使用 `basic.nack` 批量拒绝多条消息。
+2. 尝试结合死信队列，处理被多次拒绝的消息。
+
+通过以上内容，你应该对 RabbitMQ 的消息拒绝机制有了全面的了解。继续实践和探索，你将能够更好地应用这一机制来解决实际问题。

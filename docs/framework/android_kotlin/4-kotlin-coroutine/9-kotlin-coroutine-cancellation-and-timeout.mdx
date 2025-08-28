@@ -1,0 +1,225 @@
+---
+title: Kotlin协程取消与超时
+description: 了解如何在Kotlin协程中实现取消与超时机制，确保协程在不需要时能够优雅地停止，并避免资源浪费。
+---
+
+# Kotlin协程取消与超时
+
+在Kotlin协程中，取消与超时是非常重要的概念。它们帮助我们管理协程的生命周期，确保在不需要时能够优雅地停止协程，避免资源浪费。本文将详细介绍如何实现协程的取消与超时，并通过实际案例展示其应用场景。
+
+## 协程取消
+
+协程取消是指在某些条件下，主动停止正在运行的协程。Kotlin协程提供了`cancel()`方法来实现这一功能。
+
+### 基本用法
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    val job = launch {
+        repeat(1000) { i ->
+            println("I'm sleeping $i ...")
+            delay(500L)
+        }
+    }
+    delay(1300L) // 延迟一段时间
+    println("main: I'm tired of waiting!")
+    job.cancel() // 取消协程
+    job.join() // 等待协程结束
+    println("main: Now I can quit.")
+}
+```
+
+**输出：**
+```
+I'm sleeping 0 ...
+I'm sleeping 1 ...
+I'm sleeping 2 ...
+main: I'm tired of waiting!
+main: Now I can quit.
+```
+
+在这个例子中，我们启动了一个协程，并在1.3秒后取消了它。协程在取消后立即停止执行。
+
+### 检查取消状态
+
+在协程中，我们可以通过`isActive`属性来检查协程是否仍然处于活动状态。如果协程被取消，`isActive`将返回`false`。
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    val job = launch {
+        repeat(1000) { i ->
+            if (!isActive) {
+                return@launch
+            }
+            println("I'm sleeping $i ...")
+            delay(500L)
+        }
+    }
+    delay(1300L)
+    println("main: I'm tired of waiting!")
+    job.cancelAndJoin() // 取消并等待协程结束
+    println("main: Now I can quit.")
+}
+```
+
+**输出：**
+```
+I'm sleeping 0 ...
+I'm sleeping 1 ...
+I'm sleeping 2 ...
+main: I'm tired of waiting!
+main: Now I can quit.
+```
+
+在这个例子中，我们在每次循环中检查`isActive`状态，如果协程被取消，则提前退出。
+
+## 协程超时
+
+协程超时是指在一定时间内未完成任务的协程将被自动取消。Kotlin协程提供了`withTimeout`和`withTimeoutOrNull`函数来实现超时机制。
+
+### 使用`withTimeout`
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    try {
+        withTimeout(1300L) {
+            repeat(1000) { i ->
+                println("I'm sleeping $i ...")
+                delay(500L)
+            }
+        }
+    } catch (e: TimeoutCancellationException) {
+        println("Timed out!")
+    }
+}
+```
+
+**输出：**
+```
+I'm sleeping 0 ...
+I'm sleeping 1 ...
+I'm sleeping 2 ...
+Timed out!
+```
+
+在这个例子中，我们使用`withTimeout`函数设置了一个1.3秒的超时时间。如果协程在1.3秒内未完成，则会抛出`TimeoutCancellationException`异常。
+
+### 使用`withTimeoutOrNull`
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    val result = withTimeoutOrNull(1300L) {
+        repeat(1000) { i ->
+            println("I'm sleeping $i ...")
+            delay(500L)
+        }
+        "Done" // 如果协程完成，返回此值
+    }
+    println("Result is $result")
+}
+```
+
+**输出：**
+```
+I'm sleeping 0 ...
+I'm sleeping 1 ...
+I'm sleeping 2 ...
+Result is null
+```
+
+在这个例子中，我们使用`withTimeoutOrNull`函数设置了一个1.3秒的超时时间。如果协程在1.3秒内未完成，则返回`null`，而不会抛出异常。
+
+## 实际应用场景
+
+### 场景1：网络请求超时
+
+在进行网络请求时，我们通常希望在一定时间内获取响应。如果请求超时，我们可以取消请求并处理超时情况。
+
+```kotlin
+import kotlinx.coroutines.*
+
+suspend fun fetchData(): String {
+    delay(2000L) // 模拟网络请求
+    return "Data"
+}
+
+fun main() = runBlocking {
+    val result = withTimeoutOrNull(1000L) {
+        fetchData()
+    }
+    if (result == null) {
+        println("Request timed out!")
+    } else {
+        println("Data received: $result")
+    }
+}
+```
+
+**输出：**
+```
+Request timed out!
+```
+
+在这个例子中，我们模拟了一个网络请求，并设置了1秒的超时时间。由于请求需要2秒才能完成，因此请求超时并返回`null`。
+
+### 场景2：任务取消
+
+在某些情况下，我们可能需要取消正在运行的任务。例如，用户可能取消了某个操作，我们需要立即停止相关任务。
+
+```kotlin
+import kotlinx.coroutines.*
+
+fun main() = runBlocking {
+    val job = launch {
+        try {
+            repeat(1000) { i ->
+                println("Processing item $i ...")
+                delay(500L)
+            }
+        } finally {
+            println("Cleanup resources...")
+        }
+    }
+    delay(1300L)
+    println("Cancelling job...")
+    job.cancelAndJoin()
+    println("Job cancelled.")
+}
+```
+
+**输出：**
+```
+Processing item 0 ...
+Processing item 1 ...
+Processing item 2 ...
+Cancelling job...
+Cleanup resources...
+Job cancelled.
+```
+
+在这个例子中，我们启动了一个任务，并在1.3秒后取消了它。在取消时，我们执行了资源清理操作。
+
+## 总结
+
+Kotlin协程的取消与超时机制为我们提供了强大的工具来管理协程的生命周期。通过合理使用这些机制，我们可以确保协程在不需要时能够优雅地停止，并避免资源浪费。
+
+### 附加资源
+
+- [Kotlin协程官方文档](https://kotlinlang.org/docs/coroutines-guide.html)
+- [Kotlin协程取消与超时](https://kotlinlang.org/docs/cancellation-and-timeouts.html)
+
+### 练习
+
+1. 修改第一个示例，使协程在取消时打印一条消息。
+2. 使用`withTimeout`函数实现一个任务，如果任务在2秒内未完成，则抛出异常。
+3. 编写一个模拟文件下载的协程，如果下载时间超过5秒，则取消下载并打印超时消息。
+
+通过完成这些练习，你将更好地理解Kotlin协程的取消与超时机制。

@@ -1,0 +1,155 @@
+---
+title: Minio存储配置
+description: 学习如何在Grafana Loki中配置Minio作为日志存储后端，实现高可用、可扩展的日志存储方案。
+---
+
+# Minio存储配置
+
+## 介绍
+
+Minio是一个高性能的分布式对象存储服务器，兼容Amazon S3 API。在Grafana Loki的架构中，Minio常被用作日志数据的存储后端，为日志索引和块数据提供持久化存储方案。本章将指导你完成Minio与Loki的集成配置。
+
+:::note 为什么选择Minio？
+- **开源免费**：完全兼容S3协议的开源解决方案
+- **易于部署**：单节点模式适合开发测试，分布式模式满足生产需求
+- **高性能**：专为云原生和容器化环境优化
+:::
+
+## 前置条件
+
+在开始前，请确保：
+1. 已安装并运行Minio服务（[官方文档](https://min.io/docs/minio/linux/index.html)）
+2. 已部署Grafana Loki实例
+3. 拥有Minio的访问密钥和密钥（Access Key/Secret Key）
+
+## 基础配置
+
+### 1. 创建Minio存储桶
+
+首先为Loki创建专用存储桶：
+
+```bash
+# 使用Minio客户端创建bucket
+mc mb minio/loki-data
+```
+
+### 2. Loki配置Minio存储
+
+修改Loki的配置文件（通常为`loki-config.yaml`），添加Minio存储配置：
+
+```yaml
+storage_config:
+  aws:
+    s3: http://minio:9000  # Minio服务地址
+    bucketnames: loki-data  # 存储桶名称
+    region: us-east-1       # 任意区域（Minio不校验）
+    access_key_id: minioadmin     # 替换为你的Access Key
+    secret_access_key: minioadmin # 替换为你的Secret Key
+    s3forcepathstyle: true  # 必须设置为true
+```
+
+:::caution 安全提示
+实际部署中应通过环境变量或密钥管理服务传递敏感信息，而非直接写在配置文件中。
+:::
+
+## 高级配置
+
+### 数据分片策略
+
+Minio支持存储桶级别的对象锁定和版本控制，这对Loki的日志保留策略很有帮助：
+
+```yaml
+common:
+  storage:
+    bucketnames: loki-data-{01...12}  # 使用12个分片桶
+    prefix: logs_  # 对象前缀
+```
+
+### 生命周期管理
+
+配置Minio自动清理旧日志（示例为保留30天）：
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "loki-retention",
+      "Status": "Enabled",
+      "Expiration": {
+        "Days": 30
+      }
+    }
+  ]
+}
+```
+
+## 实际案例
+
+### 场景：开发环境配置
+
+开发环境中常使用单节点Minio，docker-compose配置示例：
+
+```yaml
+services:
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  loki:
+    image: grafana/loki
+    depends_on:
+      - minio
+    volumes:
+      - ./loki-config.yaml:/etc/loki/config.yaml
+```
+
+### 验证配置
+
+检查Loki是否成功写入Minio：
+
+```bash
+# 列出存储桶内容
+mc ls minio/loki-data
+```
+
+预期输出应包含类似内容：
+```
+[2023-01-01 12:00:00 UTC] 1.2KiB STANDARD logs_01/compactor-1/...
+```
+
+## 故障排查
+
+常见问题及解决方案：
+
+| 问题现象 | 可能原因 | 解决方法 |
+|---------|---------|---------|
+| 403 Forbidden | 密钥错误 | 检查Access Key/Secret Key |
+| 连接超时 | 网络不通 | 验证Minio服务可达性 |
+| Bucket不存在 | 未创建存储桶 | 使用`mc mb`创建对应桶 |
+
+## 总结
+
+通过本章学习，你应该已经掌握：
+- Minio作为Loki存储后端的配置方法
+- 基础和高阶存储配置选项
+- 实际部署中的最佳实践
+- 常见问题的诊断方法
+
+## 延伸学习
+
+1. [Minio官方文档](https://min.io/docs/minio/linux/index.html)
+2. [Loki存储架构白皮书](https://grafana.com/docs/loki/latest/storage/)
+3. 动手练习：尝试配置分布式Minio集群并测试故障转移
+
+:::tip 性能优化建议
+对于生产环境：
+- 为Minio配置SSD存储
+- 启用分布式模式（至少4节点）
+- 监控存储空间使用率
+:::

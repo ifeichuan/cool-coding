@@ -1,0 +1,182 @@
+---
+title: Loki 配置文件详解
+description: 全面解析Grafana Loki的配置文件结构及各配置项功能，帮助初学者快速掌握Loki部署的核心配置方法。
+---
+
+# Loki 配置文件详解
+
+## 介绍
+
+Grafana Loki的配置文件是部署和运维过程中最重要的组成部分之一。它采用YAML格式，定义了Loki的运行参数、存储后端、日志摄取方式等核心功能。本指南将带你逐步理解配置文件中的关键部分，并通过实际案例演示如何根据需求进行定制化配置。
+
+## 配置文件基础结构
+
+Loki的标准配置文件通常包含以下主要部分：
+
+```yaml
+auth_enabled: false
+server:
+  http_listen_port: 3100
+common:
+  path_prefix: /tmp/loki
+  storage:
+    filesystem:
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+```
+
+:::note 配置文件位置
+默认情况下Loki会尝试从以下路径加载配置：
+- `/etc/loki/local-config.yaml`
+- `./loki-local-config.yaml`
+也可以通过`-config.file`参数指定路径
+:::
+
+## 核心配置模块详解
+
+### 1. 服务器配置 (server)
+
+```yaml
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+  http_server_read_timeout: 30s
+  http_server_write_timeout: 30s
+```
+
+- `http_listen_port`: Loki服务的HTTP API端口
+- `grpc_listen_port`: 组件间通信的gRPC端口
+- `log_level`: 日志级别(debug, info, warn, error)
+
+### 2. 存储配置 (storage)
+
+```yaml
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /tmp/loki/boltdb-shipper-active
+    cache_location: /tmp/loki/boltdb-shipper-cache
+    shared_store: filesystem
+  filesystem:
+    directory: /tmp/loki/chunks
+```
+
+:::tip 生产环境建议
+开发环境可以使用`filesystem`存储，但生产环境建议使用：
+- 对象存储(S3, GCS, Azure Blob)
+- 分布式存储(Cassandra, Bigtable)
+:::
+
+### 3. 日志摄取配置 (ingester)
+
+```yaml
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 30m
+  max_chunk_age: 1h
+```
+
+- `chunk_idle_period`: 内存中日志块保持活跃的最长时间
+- `max_chunk_age`: 日志块被压缩前的最大存活时间
+
+### 4. 查询限制 (limits_config)
+
+```yaml
+limits_config:
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  max_query_length: 721h
+```
+
+## 实际配置案例
+
+### 开发环境最小配置
+
+```yaml
+auth_enabled: false
+server:
+  http_listen_port: 3100
+common:
+  storage:
+    filesystem:
+      chunks_directory: ./data/chunks
+      rules_directory: ./data/rules
+  replication_factor: 1
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+```
+
+### 生产环境S3存储配置
+
+```yaml
+common:
+  storage:
+    s3:
+      access_key_id: YOUR_ACCESS_KEY
+      secret_access_key: YOUR_SECRET_KEY
+      bucketnames: YOUR_BUCKET_NAME
+      endpoint: s3.amazonaws.com
+      region: us-east-1
+```
+
+## 配置验证与测试
+
+使用以下命令验证配置文件语法：
+
+```bash
+loki -config.file=./loki-config.yaml -verify-config
+```
+
+:::caution 配置变更注意事项
+修改存储配置后需要重启服务才能生效，而某些运行时参数(如日志级别)支持热更新
+:::
+
+## 总结
+
+Loki的配置文件是系统运行的核心，通过本文你应该已经了解：
+
+1. 配置文件的基本结构和主要模块
+2. 各关键配置项的作用和推荐值
+3. 不同环境下的配置差异
+4. 配置验证和调试方法
+
+## 延伸学习
+
+- 官方配置文档: [https://grafana.com/docs/loki/latest/configuration/](https://grafana.com/docs/loki/latest/configuration/)
+- 配置版本迁移指南
+- 性能调优最佳实践
+
+## 练习建议
+
+1. 尝试在本地创建最小化配置文件并启动Loki
+2. 修改日志级别观察输出变化
+3. 配置不同的存储后端并测试日志写入功能
+4. 设置查询限制参数并验证效果

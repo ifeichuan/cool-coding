@@ -1,0 +1,183 @@
+---
+title: Seata 环境搭建
+description: 本文详细介绍了如何搭建Seata分布式事务框架的环境，适合初学者快速上手。
+---
+
+# Seata 环境搭建
+
+## 介绍
+
+Seata 是一款开源的分布式事务解决方案，旨在解决微服务架构下的分布式事务问题。它提供了高性能、易用的事务管理能力，支持多种事务模式，如 AT（自动补偿事务）、TCC（Try-Confirm-Cancel）、Saga 等。在开始使用 Seata 之前，我们需要先搭建好它的运行环境。
+
+本文将逐步指导你如何搭建 Seata 的环境，包括数据库配置、Seata Server 的启动以及如何与 Spring Boot 项目集成。
+
+## 环境准备
+
+在开始之前，请确保你已经安装了以下软件：
+
+- JDK 1.8 或更高版本
+- MySQL 5.7 或更高版本
+- Maven 3.x
+- Spring Boot 2.x
+
+## 步骤 1：下载 Seata
+
+首先，我们需要从 Seata 的官方 GitHub 仓库下载最新版本的 Seata Server。
+
+```bash
+wget https://github.com/seata/seata/releases/download/v1.4.2/seata-server-1.4.2.zip
+unzip seata-server-1.4.2.zip
+```
+
+解压后，你会得到一个 `seata` 目录，其中包含了 Seata Server 的所有文件。
+
+## 步骤 2：配置数据库
+
+Seata 需要一个数据库来存储事务日志和全局锁信息。我们使用 MySQL 作为示例数据库。
+
+### 创建数据库
+
+首先，登录 MySQL 并创建一个新的数据库：
+
+```sql
+CREATE DATABASE seata;
+```
+
+### 导入表结构
+
+Seata 提供了 SQL 脚本来初始化数据库表结构。你可以在 `seata/script/server/db` 目录下找到这些脚本。
+
+```bash
+mysql -u root -p seata < seata/script/server/db/mysql.sql
+```
+
+这将创建 Seata 所需的所有表。
+
+## 步骤 3：配置 Seata Server
+
+接下来，我们需要配置 Seata Server 以连接到我们刚刚创建的数据库。
+
+### 修改配置文件
+
+打开 `seata/conf/file.conf` 文件，找到 `store` 部分，修改为以下内容：
+
+```conf
+store {
+  mode = "db"
+  db {
+    datasource = "druid"
+    dbType = "mysql"
+    driverClassName = "com.mysql.cj.jdbc.Driver"
+    url = "jdbc:mysql://127.0.0.1:3306/seata?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC"
+    user = "root"
+    password = "your_password"
+  }
+}
+```
+
+确保将 `your_password` 替换为你的 MySQL 密码。
+
+### 启动 Seata Server
+
+在 `seata/bin` 目录下，运行以下命令启动 Seata Server：
+
+```bash
+./seata-server.sh
+```
+
+如果一切顺利，你应该会看到 Seata Server 成功启动的日志信息。
+
+## 步骤 4：集成 Spring Boot
+
+现在，我们已经成功启动了 Seata Server，接下来我们需要将其集成到 Spring Boot 项目中。
+
+### 添加依赖
+
+在你的 Spring Boot 项目的 `pom.xml` 文件中，添加 Seata 的依赖：
+
+```xml
+<dependency>
+    <groupId>io.seata</groupId>
+    <artifactId>seata-spring-boot-starter</artifactId>
+    <version>1.4.2</version>
+</dependency>
+```
+
+### 配置 Seata
+
+在 `application.yml` 文件中，添加以下配置：
+
+```yaml
+seata:
+  enabled: true
+  application-id: your_app_name
+  tx-service-group: my_tx_group
+  service:
+    vgroup-mapping:
+      my_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+```
+
+确保将 `your_app_name` 替换为你的应用名称。
+
+### 示例代码
+
+下面是一个简单的 Spring Boot 服务示例，展示了如何使用 Seata 进行分布式事务管理。
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        orderMapper.insert(order);
+        // 调用其他服务
+    }
+}
+```
+
+在这个示例中，`@GlobalTransactional` 注解用于标记一个全局事务。当 `createOrder` 方法被调用时，Seata 会自动管理事务的提交和回滚。
+
+## 实际案例
+
+假设我们有一个电商系统，用户下单时需要同时更新库存和创建订单。我们可以使用 Seata 来确保这两个操作要么同时成功，要么同时失败。
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @Autowired
+    private InventoryService inventoryService;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        orderMapper.insert(order);
+        inventoryService.deductStock(order.getProductId(), order.getQuantity());
+    }
+}
+```
+
+在这个案例中，如果库存扣减失败，Seata 会自动回滚订单的创建操作，确保数据的一致性。
+
+## 总结
+
+通过本文，你已经学会了如何搭建 Seata 的环境，并将其集成到 Spring Boot 项目中。Seata 提供了强大的分布式事务管理能力，能够帮助你在微服务架构下轻松处理复杂的业务场景。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [Spring Boot 官方文档](https://spring.io/projects/spring-boot)
+
+## 练习
+
+1. 尝试在你的本地环境中搭建 Seata Server，并集成到一个简单的 Spring Boot 项目中。
+2. 修改 `createOrder` 方法，模拟一个分布式事务失败的情况，观察 Seata 的回滚行为。
+
+希望本文对你有所帮助，祝你在学习 Seata 的过程中取得成功！

@@ -1,0 +1,133 @@
+---
+title: Kubernetes 调度器扩展
+description: 了解如何扩展Kubernetes调度器以满足自定义调度需求。本文适合初学者，涵盖基本概念、代码示例和实际应用场景。
+---
+
+# Kubernetes 调度器扩展
+
+Kubernetes调度器是Kubernetes集群中的核心组件之一，负责将Pod分配到合适的节点上运行。默认情况下，Kubernetes调度器会根据资源需求、节点亲和性、污点和容忍等规则进行调度。然而，在某些场景下，默认的调度策略可能无法满足特定的业务需求。这时，我们可以通过扩展Kubernetes调度器来实现自定义的调度逻辑。
+
+## 什么是Kubernetes调度器扩展？
+
+Kubernetes调度器扩展允许开发者通过编写自定义的调度插件或调度器来扩展或替换默认的调度行为。这些扩展可以基于特定的业务需求，例如根据节点的硬件特性、网络拓扑、成本等因素进行调度。
+
+:::note
+Kubernetes调度器扩展通常通过实现自定义的调度插件（Scheduler Plugin）或编写全新的调度器来实现。
+:::
+
+## 如何扩展Kubernetes调度器？
+
+### 1. 使用调度插件（Scheduler Plugin）
+
+Kubernetes调度器插件是一种轻量级的扩展方式，允许开发者在现有的调度框架中添加自定义的调度逻辑。调度插件可以通过实现特定的接口来参与调度决策。
+
+#### 示例：自定义调度插件
+
+以下是一个简单的调度插件示例，该插件会优先选择具有特定标签的节点：
+
+```go
+package main
+
+import (
+    "context"
+    "k8s.io/kubernetes/pkg/scheduler/framework"
+)
+
+type CustomPlugin struct{}
+
+func (cp *CustomPlugin) Name() string {
+    return "CustomPlugin"
+}
+
+func (cp *CustomPlugin) Filter(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
+    if nodeInfo.Node().Labels["custom-label"] == "preferred" {
+        return framework.NewStatus(framework.Success, "Node is preferred")
+    }
+    return framework.NewStatus(framework.Unschedulable, "Node is not preferred")
+}
+
+func NewCustomPlugin(_ runtime.Object, _ framework.Handle) (framework.Plugin, error) {
+    return &CustomPlugin{}, nil
+}
+```
+
+在这个示例中，`CustomPlugin` 实现了 `Filter` 方法，该方法会检查节点是否具有 `custom-label=preferred` 标签。如果节点具有该标签，则调度器会优先选择该节点。
+
+### 2. 编写自定义调度器
+
+如果调度插件无法满足需求，开发者还可以编写一个全新的调度器。自定义调度器可以完全控制调度逻辑，但需要处理更多的细节。
+
+#### 示例：自定义调度器
+
+以下是一个简单的自定义调度器示例，该调度器会随机选择一个节点来运行Pod：
+
+```go
+package main
+
+import (
+    "context"
+    "math/rand"
+    "time"
+    "k8s.io/api/core/v1"
+    "k8s.io/client-go/kubernetes"
+    "k8s.io/client-go/tools/clientcmd"
+)
+
+func main() {
+    config, _ := clientcmd.BuildConfigFromFlags("", "/path/to/kubeconfig")
+    clientset, _ := kubernetes.NewForConfig(config)
+
+    nodes, _ := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+    rand.Seed(time.Now().UnixNano())
+    selectedNode := nodes.Items[rand.Intn(len(nodes.Items))]
+
+    pod := &v1.Pod{
+        ObjectMeta: metav1.ObjectMeta{
+            Name: "random-scheduled-pod",
+        },
+        Spec: v1.PodSpec{
+            Containers: []v1.Container{
+                {
+                    Name:  "nginx",
+                    Image: "nginx:1.14.2",
+                },
+            },
+            NodeName: selectedNode.Name,
+        },
+    }
+
+    clientset.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+}
+```
+
+在这个示例中，自定义调度器会随机选择一个节点，并将Pod调度到该节点上。
+
+## 实际应用场景
+
+### 场景1：基于硬件特性的调度
+
+在某些场景下，Pod可能需要运行在具有特定硬件特性（如GPU）的节点上。通过扩展调度器，可以优先选择具有这些硬件特性的节点。
+
+### 场景2：基于成本的调度
+
+在多云环境中，不同云服务提供商的节点成本可能不同。通过扩展调度器，可以根据成本因素选择最经济的节点。
+
+## 总结
+
+Kubernetes调度器扩展为开发者提供了强大的工具，可以根据业务需求自定义调度逻辑。无论是通过调度插件还是编写全新的调度器，都可以实现灵活的调度策略。
+
+:::tip
+在实际生产环境中，建议先通过调度插件进行扩展，只有在插件无法满足需求时，才考虑编写自定义调度器。
+:::
+
+## 附加资源
+
+- [Kubernetes调度器官方文档](https://kubernetes.io/docs/concepts/scheduling-eviction/kube-scheduler/)
+- [Kubernetes调度器插件开发指南](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
+
+## 练习
+
+1. 尝试编写一个调度插件，优先选择具有特定硬件标签的节点。
+2. 修改自定义调度器示例，使其优先选择资源利用率最低的节点。
+
+通过以上练习，你将更深入地理解Kubernetes调度器扩展的实现和应用。

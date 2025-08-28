@@ -1,0 +1,511 @@
+---
+title: C++ 智能指针与容器
+description: 本文详细探讨了C++智能指针在STL容器中的使用，包括如何管理容器中动态分配的对象、避免内存泄漏，以及实际应用场景。
+---
+
+# C++ 智能指针与容器
+
+## 引言
+
+在C++编程中，内存管理是一个至关重要的话题。随着程序复杂度的增加，手动管理内存很容易导致内存泄漏或悬挂指针等问题。智能指针和容器是C++中两个强大的工具，它们的结合使用可以大大简化内存管理，提高代码质量。本文将详细介绍如何在C++容器中使用智能指针，以及这种组合带来的好处和注意事项。
+
+## 智能指针基础回顾
+
+在深入讨论智能指针与容器的结合之前，让我们简要回顾一下C++中的智能指针类型：
+
+1. **`std::unique_ptr`**：独占所有权的智能指针，不能复制，只能移动
+2. **`std::shared_ptr`**：共享所有权的智能指针，使用引用计数管理资源
+3. **`std::weak_ptr`**：不参与所有权计数的智能指针，用于打破循环引用
+
+## 为什么在容器中使用智能指针？
+
+在容器中存储普通指针可能会导致各种内存管理问题：
+
+```cpp
+std::vector<MyClass*> vec;
+for (int i = 0; i < 5; i++) {
+    vec.push_back(new MyClass());
+}
+// 如果忘记删除元素，将导致内存泄漏
+// 需要手动遍历并删除每个元素
+```
+
+使用智能指针可以解决这些问题：
+
+```cpp
+std::vector<std::unique_ptr<MyClass>> vec;
+for (int i = 0; i < 5; i++) {
+    vec.push_back(std::make_unique<MyClass>());
+}
+// 当vector销毁时，所有unique_ptr自动销毁，从而释放资源
+```
+
+## 在容器中使用unique_ptr
+
+`std::unique_ptr`是最轻量级的智能指针，当你需要容器拥有对象的独占所有权时，它是理想的选择。
+
+### 基本用法
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <memory>
+
+class Resource {
+public:
+    Resource(int id) : id_(id) { 
+        std::cout << "Resource " << id_ << " created\n"; 
+    }
+    ~Resource() { 
+        std::cout << "Resource " << id_ << " destroyed\n"; 
+    }
+    void use() { 
+        std::cout << "Using resource " << id_ << "\n"; 
+    }
+private:
+    int id_;
+};
+
+int main() {
+    std::vector<std::unique_ptr<Resource>> resources;
+    
+    // 添加元素
+    resources.push_back(std::make_unique<Resource>(1));
+    resources.push_back(std::make_unique<Resource>(2));
+    resources.push_back(std::make_unique<Resource>(3));
+    
+    // 使用元素
+    for (const auto& res : resources) {
+        res->use();
+    }
+    
+    // vector销毁时，会自动释放所有资源
+    return 0;
+}
+```
+
+**输出**：
+```
+Resource 1 created
+Resource 2 created
+Resource 3 created
+Using resource 1
+Using resource 2
+Using resource 3
+Resource 3 destroyed
+Resource 2 destroyed
+Resource 1 destroyed
+```
+
+### 注意事项
+
+由于`unique_ptr`不可复制，只能移动，所以在向容器添加元素时需要使用`std::move`或`std::make_unique`：
+
+```cpp
+std::vector<std::unique_ptr<Resource>> resources;
+
+// 正确：使用make_unique
+resources.push_back(std::make_unique<Resource>(1));
+
+// 正确：使用move
+std::unique_ptr<Resource> res = std::make_unique<Resource>(2);
+resources.push_back(std::move(res)); // 现在res为nullptr
+
+// 错误：不能复制unique_ptr
+// resources.push_back(res); // 编译错误
+```
+
+:::caution
+在使用`std::move`后，原始指针变为`nullptr`，不应再被访问。
+:::
+
+## 在容器中使用shared_ptr
+
+当多个容器或多个位置需要共享同一资源的所有权时，`std::shared_ptr`是理想的选择。
+
+### 基本用法
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <memory>
+#include <list>
+
+class Resource {
+public:
+    Resource(int id) : id_(id) { 
+        std::cout << "Resource " << id_ << " created\n"; 
+    }
+    ~Resource() { 
+        std::cout << "Resource " << id_ << " destroyed\n"; 
+    }
+    void use() { 
+        std::cout << "Using resource " << id_ << "\n"; 
+    }
+private:
+    int id_;
+};
+
+int main() {
+    std::vector<std::shared_ptr<Resource>> vec1;
+    std::list<std::shared_ptr<Resource>> list1;
+    
+    // 添加到第一个容器
+    auto res1 = std::make_shared<Resource>(1);
+    auto res2 = std::make_shared<Resource>(2);
+    vec1.push_back(res1);
+    vec1.push_back(res2);
+    
+    // 同样的资源添加到第二个容器
+    list1.push_back(res1);
+    list1.push_back(res2);
+    
+    // 使用第一个容器中的元素
+    std::cout << "Accessing from vector:\n";
+    for (const auto& res : vec1) {
+        res->use();
+        std::cout << "Reference count: " << res.use_count() << "\n";
+    }
+    
+    // 清空第一个容器
+    std::cout << "\nClearing vector...\n";
+    vec1.clear();
+    
+    // 资源仍然存在，因为list1还持有引用
+    std::cout << "\nAccessing from list after vector is cleared:\n";
+    for (const auto& res : list1) {
+        res->use();
+        std::cout << "Reference count: " << res.use_count() << "\n";
+    }
+    
+    // 清空第二个容器，此时资源会被销毁
+    std::cout << "\nClearing list...\n";
+    list1.clear();
+    
+    return 0;
+}
+```
+
+**输出**：
+```
+Resource 1 created
+Resource 2 created
+Accessing from vector:
+Using resource 1
+Reference count: 2
+Using resource 2
+Reference count: 2
+
+Clearing vector...
+
+Accessing from list after vector is cleared:
+Using resource 1
+Reference count: 1
+Using resource 2
+Reference count: 1
+
+Clearing list...
+Resource 1 destroyed
+Resource 2 destroyed
+```
+
+### 避免循环引用
+
+`std::shared_ptr`最常见的问题是循环引用，可能导致内存泄漏。解决方案是使用`std::weak_ptr`：
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <memory>
+
+class Node;
+using NodePtr = std::shared_ptr<Node>;
+using WeakNodePtr = std::weak_ptr<Node>;
+
+class Node {
+public:
+    Node(int value) : value_(value) {
+        std::cout << "Node " << value_ << " created\n";
+    }
+    
+    ~Node() {
+        std::cout << "Node " << value_ << " destroyed\n";
+    }
+    
+    void addChild(NodePtr child) {
+        children_.push_back(child);
+        // 子节点会持有父节点的弱引用，避免循环引用
+        child->parent_ = shared_from_this();
+    }
+    
+    int getValue() const { return value_; }
+    
+private:
+    int value_;
+    std::vector<NodePtr> children_;
+    WeakNodePtr parent_;  // 使用weak_ptr避免循环引用
+};
+
+int main() {
+    {
+        auto root = std::make_shared<Node>(0);
+        auto child1 = std::make_shared<Node>(1);
+        auto child2 = std::make_shared<Node>(2);
+        
+        root->addChild(child1);
+        root->addChild(child2);
+        
+        std::cout << "Exiting scope...\n";
+    } // 所有Node对象在这里应该被销毁
+    
+    std::cout << "All nodes should be destroyed now.\n";
+    return 0;
+}
+```
+
+**输出**：
+```
+Node 0 created
+Node 1 created
+Node 2 created
+Exiting scope...
+Node 2 destroyed
+Node 1 destroyed
+Node 0 destroyed
+All nodes should be destroyed now.
+```
+
+:::tip
+在对象关系图中使用`std::weak_ptr`可以避免循环引用导致的内存泄漏。通常，父对象持有子对象的`shared_ptr`，而子对象持有父对象的`weak_ptr`。
+:::
+
+## 容器中智能指针的最佳实践
+
+### 1. 选择合适的智能指针类型
+
+- 使用`unique_ptr`当容器需要独占对象所有权时
+- 使用`shared_ptr`当需要在多处共享对象时
+- 使用`weak_ptr`打破循环引用
+
+### 2. 优先使用make_函数
+
+```cpp
+// 优先使用这种方式
+container.push_back(std::make_unique<MyClass>(arg1, arg2));
+container.push_back(std::make_shared<MyClass>(arg1, arg2));
+
+// 而不是
+container.push_back(std::unique_ptr<MyClass>(new MyClass(arg1, arg2)));
+container.push_back(std::shared_ptr<MyClass>(new MyClass(arg1, arg2)));
+```
+
+### 3. 使用emplace_back而非push_back
+
+```cpp
+// 更高效
+container.emplace_back(std::make_unique<MyClass>(arg1, arg2));
+
+// 而不是
+container.push_back(std::make_unique<MyClass>(arg1, arg2));
+```
+
+### 4. 使用引用访问容器中的智能指针对象
+
+```cpp
+for (const auto& ptr : container) {
+    ptr->doSomething(); // 不会复制智能指针
+}
+```
+
+## 实际应用场景
+
+### 场景1：异构对象集合（多态）
+
+智能指针与容器的组合在管理多态对象集合时特别有用：
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <memory>
+
+class Shape {
+public:
+    virtual ~Shape() = default;
+    virtual void draw() const = 0;
+};
+
+class Circle : public Shape {
+public:
+    Circle(double radius) : radius_(radius) {}
+    void draw() const override {
+        std::cout << "Drawing Circle with radius " << radius_ << "\n";
+    }
+private:
+    double radius_;
+};
+
+class Rectangle : public Shape {
+public:
+    Rectangle(double width, double height) : width_(width), height_(height) {}
+    void draw() const override {
+        std::cout << "Drawing Rectangle with width " << width_ 
+                  << " and height " << height_ << "\n";
+    }
+private:
+    double width_;
+    double height_;
+};
+
+int main() {
+    // 使用智能指针存储不同类型的Shape
+    std::vector<std::unique_ptr<Shape>> shapes;
+    
+    shapes.push_back(std::make_unique<Circle>(5.0));
+    shapes.push_back(std::make_unique<Rectangle>(4.0, 3.0));
+    shapes.push_back(std::make_unique<Circle>(2.5));
+    
+    // 绘制所有图形
+    for (const auto& shape : shapes) {
+        shape->draw();
+    }
+    
+    return 0; // 所有图形对象自动释放
+}
+```
+
+**输出**：
+```
+Drawing Circle with radius 5
+Drawing Rectangle with width 4 and height 3
+Drawing Circle with radius 2.5
+```
+
+### 场景2：资源池（Resource Pool）
+
+智能指针和容器的组合可以用来实现资源池：
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <memory>
+#include <string>
+#include <algorithm>
+
+class Connection {
+public:
+    Connection(const std::string& id) : id_(id), inUse_(false) { 
+        std::cout << "Connection " << id_ << " created\n"; 
+    }
+    
+    ~Connection() { 
+        std::cout << "Connection " << id_ << " destroyed\n"; 
+    }
+    
+    bool isInUse() const { return inUse_; }
+    void use() { 
+        inUse_ = true;
+        std::cout << "Using connection " << id_ << "\n";
+    }
+    void release() { 
+        inUse_ = false;
+        std::cout << "Connection " << id_ << " released\n";
+    }
+    
+private:
+    std::string id_;
+    bool inUse_;
+};
+
+class ConnectionPool {
+public:
+    ConnectionPool(size_t poolSize) {
+        // 预先创建连接并添加到池中
+        for (size_t i = 0; i < poolSize; ++i) {
+            connections_.push_back(
+                std::make_shared<Connection>("Conn-" + std::to_string(i))
+            );
+        }
+    }
+    
+    std::shared_ptr<Connection> getConnection() {
+        // 查找可用连接
+        auto it = std::find_if(connections_.begin(), connections_.end(),
+                              [](const auto& conn) { return !conn->isInUse(); });
+        
+        if (it != connections_.end()) {
+            (*it)->use();
+            return *it;
+        }
+        
+        std::cout << "No available connections!\n";
+        return nullptr;
+    }
+    
+private:
+    std::vector<std::shared_ptr<Connection>> connections_;
+};
+
+int main() {
+    ConnectionPool pool(3);
+    
+    // 获取连接
+    auto conn1 = pool.getConnection();
+    auto conn2 = pool.getConnection();
+    
+    // 释放连接
+    if (conn1) conn1->release();
+    
+    // 获取另一个连接
+    auto conn3 = pool.getConnection();
+    auto conn4 = pool.getConnection();
+    
+    return 0;
+}
+```
+
+**输出**：
+```
+Connection Conn-0 created
+Connection Conn-1 created
+Connection Conn-2 created
+Using connection Conn-0
+Using connection Conn-1
+Connection Conn-0 released
+Using connection Conn-0
+No available connections!
+Connection Conn-0 destroyed
+Connection Conn-1 destroyed
+Connection Conn-2 destroyed
+```
+
+## 总结
+
+在C++中，容器和智能指针的结合是一种非常强大的内存管理技术。这种组合可以：
+
+1. **自动管理内存**：避免了手动释放资源的繁琐和风险
+2. **清晰表达所有权语义**：通过选择不同的智能指针类型表达不同的所有权关系
+3. **提高代码安全性**：减少内存泄漏、悬挂指针等常见问题
+
+使用智能指针与容器时，记住这些关键原则：
+
+- 使用`std::unique_ptr`表示独占所有权
+- 使用`std::shared_ptr`表示共享所有权
+- 使用`std::weak_ptr`避免循环引用
+- 优先使用`std::make_unique`和`std::make_shared`创建智能指针
+- 使用`emplace_back`而非`push_back`以提高效率
+- 通过引用访问容器中的智能指针以避免不必要的复制
+
+掌握了这些技术，你将能够编写更加安全、高效的C++代码，特别是在处理复杂的资源管理场景时。
+
+## 练习
+
+1. 创建一个使用`std::unique_ptr`的`vector`来管理一组动态分配的字符串。
+2. 实现一个简单的观察者模式，其中主题使用`std::weak_ptr`存储观察者，避免循环引用。
+3. 创建一个缓存系统，使用`std::shared_ptr`存储共享资源，并使用`std::weak_ptr`避免资源在未使用时被释放。
+4. 将`std::unique_ptr`容器转换为`std::shared_ptr`容器，并解释转换过程中发生的所有权变化。
+
+## 进一步阅读
+
+- C++ 标准库中关于智能指针的文档（`<memory>` 头文件）
+- 《Effective Modern C++》by Scott Meyers（特别是关于智能指针的章节）
+- 《C++ Concurrency in Action》by Anthony Williams（关于在多线程环境中使用智能指针）

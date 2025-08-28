@@ -1,0 +1,166 @@
+---
+title: Django Celery
+description: 了解如何使用 Django Celery 处理异步任务和定时任务，提升 Django 应用的性能和可扩展性。
+---
+
+# Django Celery
+
+在现代 Web 应用中，许多任务（如发送电子邮件、处理图像或执行复杂的计算）可能需要较长时间才能完成。如果这些任务在请求-响应周期中同步执行，可能会导致用户体验变差，甚至超时。Django Celery 是一个强大的工具，可以帮助我们处理这些异步任务和定时任务，从而提升应用的性能和可扩展性。
+
+## 什么是 Celery？
+
+Celery 是一个分布式任务队列，用于处理异步任务和定时任务。它允许你将耗时的任务放入队列中，由后台的工作进程（worker）异步执行。Celery 可以与 Django 无缝集成，成为 Django 应用中处理异步任务的理想选择。
+
+### 核心概念
+
+- **任务（Task）**：Celery 中的基本执行单元。任务是一个函数，可以被异步调用。
+- **队列（Queue）**：任务被放入队列中，等待工作进程处理。
+- **工作进程（Worker）**：负责从队列中取出任务并执行。
+- **消息代理（Broker）**：用于在任务生产者（Django 应用）和工作进程之间传递消息。常用的消息代理包括 Redis 和 RabbitMQ。
+
+## 安装与配置
+
+### 1. 安装 Celery 和 Redis
+
+首先，确保你已经安装了 Django。然后，使用 pip 安装 Celery 和 Redis：
+
+```bash
+pip install celery redis
+```
+
+### 2. 配置 Django 项目
+
+在 Django 项目的 `settings.py` 文件中，添加以下配置：
+
+```python
+# settings.py
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+```
+
+### 3. 创建 Celery 应用
+
+在 Django 项目的根目录下创建一个 `celery.py` 文件，并添加以下内容：
+
+```python
+# celery.py
+import os
+from celery import Celery
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'your_project.settings')
+
+app = Celery('your_project')
+app.config_from_object('django.conf:settings', namespace='CELERY')
+app.autodiscover_tasks()
+```
+
+### 4. 在 `__init__.py` 中导入 Celery 应用
+
+在 Django 项目的 `__init__.py` 文件中，添加以下内容：
+
+```python
+# __init__.py
+from .celery import app as celery_app
+
+__all__ = ('celery_app',)
+```
+
+## 创建并执行异步任务
+
+### 1. 定义任务
+
+在 Django 应用的 `tasks.py` 文件中，定义一个简单的任务：
+
+```python
+# tasks.py
+from celery import shared_task
+
+@shared_task
+def send_email(to, subject, message):
+    # 模拟发送电子邮件
+    print(f"Sending email to {to} with subject '{subject}' and message '{message}'")
+    return f"Email sent to {to}"
+```
+
+### 2. 调用任务
+
+在 Django 视图或其他地方调用任务：
+
+```python
+# views.py
+from django.http import JsonResponse
+from .tasks import send_email
+
+def send_email_view(request):
+    send_email.delay("user@example.com", "Hello", "This is a test email")
+    return JsonResponse({"status": "Email sent"})
+```
+
+### 3. 启动 Celery Worker
+
+在终端中启动 Celery Worker：
+
+```bash
+celery -A your_project worker --loglevel=info
+```
+
+### 4. 测试任务
+
+访问 `send_email_view` 对应的 URL，你会看到任务被放入队列并由 Celery Worker 执行。
+
+## 定时任务
+
+Celery 还支持定时任务（也称为周期性任务）。你可以使用 Celery Beat 来调度这些任务。
+
+### 1. 配置定时任务
+
+在 `settings.py` 中添加以下配置：
+
+```python
+# settings.py
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'send-daily-email': {
+        'task': 'your_app.tasks.send_email',
+        'schedule': crontab(hour=8, minute=0),  # 每天上午8点执行
+        'args': ("user@example.com", "Daily Update", "This is your daily update."),
+    },
+}
+```
+
+### 2. 启动 Celery Beat
+
+在终端中启动 Celery Beat：
+
+```bash
+celery -A your_project beat --loglevel=info
+```
+
+## 实际应用场景
+
+### 1. 发送批量电子邮件
+
+假设你有一个需要向大量用户发送电子邮件的功能。使用 Celery，你可以将每个电子邮件任务放入队列中，由工作进程异步处理，从而避免阻塞主线程。
+
+### 2. 处理图像上传
+
+当用户上传图像时，你可能需要对图像进行压缩、裁剪或生成缩略图。这些操作可以放入 Celery 任务中异步执行，确保用户能够快速获得响应。
+
+### 3. 数据导入与导出
+
+如果你的应用需要处理大量数据的导入或导出，这些操作可以放入 Celery 任务中，避免阻塞主线程并提高性能。
+
+## 总结
+
+Django Celery 是一个强大的工具，可以帮助你处理异步任务和定时任务，从而提升 Django 应用的性能和可扩展性。通过将耗时的任务放入队列中，你可以确保用户获得快速的响应，同时后台工作进程可以高效地处理这些任务。
+
+## 附加资源与练习
+
+- **官方文档**：[Celery 官方文档](https://docs.celeryproject.org/en/stable/)
+- **练习**：尝试在你的 Django 项目中实现一个异步任务，例如发送电子邮件或处理图像上传。
+- **扩展阅读**：了解如何使用 RabbitMQ 作为 Celery 的消息代理，并比较其与 Redis 的优缺点。
+
+:::tip
+如果你在配置或使用 Celery 时遇到问题，可以参考官方文档或在社区论坛中寻求帮助。Celery 的社区非常活跃，许多问题都能找到解决方案。
+:::

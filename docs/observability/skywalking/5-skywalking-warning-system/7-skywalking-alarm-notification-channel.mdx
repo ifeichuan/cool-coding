@@ -1,0 +1,162 @@
+---
+title: SkyWalking 告警通知渠道
+description: "学习如何配置和使用SkyWalking的告警通知渠道，实现监控告警的实时推送与集成"
+---
+
+## 介绍
+
+SkyWalking的告警系统能够监控服务的性能指标，并在触发预设规则时发送通知。告警通知渠道（Notification Channels）是将这些告警信息传递到外部系统的桥梁，支持多种推送方式（如Webhook、Slack、邮件等）。本章将详细介绍如何配置和使用这些渠道。
+
+:::note
+告警通知渠道需结合告警规则使用。确保已熟悉[告警规则配置](skywalking-alert-rules)后再学习本章。
+:::
+
+---
+
+## 核心通知渠道类型
+
+SkyWalking支持以下常用通知渠道：
+
+1. **Webhook**：通过HTTP请求将告警推送到自定义API
+2. **Slack**：发送消息到Slack频道
+3. **邮件（SMTP）**：通过邮件发送告警
+4. **钉钉（DingTalk）**：推送到钉钉群机器人
+5. **企业微信（WeCom）**：推送到企业微信应用
+
+---
+
+## 配置方法
+
+### 1. 修改配置文件
+编辑 `config/alarm-settings.yml`，添加通知渠道配置：
+
+```yaml
+# 示例：Webhook + Slack配置
+webhooks:
+  - url: http://your-api-endpoint/alert
+    secret: your_secure_token
+
+slackHooks:
+  textTemplate: |-
+    {
+      "type": "message",
+      "attachments": [{
+        "title": "SkyWalking 告警",
+        "text": $content
+      }]
+    }
+  webhookUrl: https://hooks.slack.com/services/your-webhook-url
+```
+
+### 2. 动态更新（无需重启）
+通过SkyWalking OAP的GraphQL API动态更新配置：
+
+```graphql
+mutation {
+  updateAlarmSettings(
+    settings: """
+    webhooks:
+      - url: "http://new-api/alert"
+    """
+  )
+}
+```
+
+---
+
+## 实际案例
+
+### 案例1：Webhook对接运维系统
+```yaml
+webhooks:
+  - url: http://internal-ops-system/alerts
+    secret: "ops-2023-token"
+    headers:
+      - key: "X-Env"
+        value: "production"
+```
+
+当触发告警时，SkyWalking会发送如下JSON到目标API：
+```json
+{
+  "scope": "SERVICE",
+  "name": "order-service",
+  "ruleName": "service_resp_time_rule",
+  "alarmMessage": "响应时间超过2000ms阈值"
+}
+```
+
+### 案例2：钉钉机器人通知
+```yaml
+dingtalkHooks:
+  textTemplate: |-
+    {
+      "msgtype": "markdown",
+      "markdown": {
+        "title": "SkyWalking告警",
+        "text": "**服务异常** \n > 服务: $name \n > 信息: $alarmMessage"
+      }
+    }
+  webhookUrl: https://oapi.dingtalk.com/robot/send?access_token=your_token
+```
+
+---
+
+## 高级配置技巧
+
+### 自定义消息模板
+使用`$`符号引用变量（支持所有告警规则中的变量）：
+```yaml
+slackHooks:
+  textTemplate: |-
+    {
+      "text": "[$scope] $name 触发告警: $alarmMessage (规则: $ruleName)"
+    }
+```
+
+### 多渠道组合
+通过`rules`配置不同告警使用不同渠道：
+```yaml
+rules:
+  - name: critical_rule
+    notification-channels:
+      - webhook
+      - slack
+  - name: warning_rule
+    notification-channels:
+      - mail
+```
+
+---
+
+## 故障排查
+
+常见问题及解决方案：
+1. **通知未发送**：
+   - 检查OAP日志中的`alarm`相关日志
+   - 测试渠道连通性（如用`curl`测试Webhook）
+2. **模板解析失败**：
+   - 确保YAML格式正确（推荐使用在线校验工具）
+   - 转义JSON中的特殊字符
+
+:::warning
+生产环境建议为Webhook配置HTTPS和认证，避免敏感信息泄露。
+:::
+
+---
+
+## 总结与练习
+
+### 关键点总结
+- 通知渠道需在`alarm-settings.yml`中配置
+- 支持变量插值实现动态消息内容
+- 可通过GraphQL API动态更新配置
+
+### 练习建议
+1. 配置一个Slack通知渠道，接收CPU使用率告警
+2. 使用Webhook将告警转发到本地测试HTTP服务器（如httpbin.org）
+3. 尝试为不同严重级别的告警配置不同渠道
+
+### 扩展阅读
+- [SkyWalking官方文档 - 告警配置](https://skywalking.apache.org/docs/main/latest/en/setup/backend/backend-alarm/)
+- [Webhook安全最佳实践](https://webhook-security.org)

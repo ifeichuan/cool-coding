@@ -1,0 +1,117 @@
+---
+title: Promtail标签配置
+description: 学习如何通过Promtail的标签配置优化日志流的路由和存储，掌握标签的核心概念及实践技巧。
+---
+
+# Promtail标签配置
+
+## 简介
+
+在Grafana Loki的生态系统中，**Promtail**是负责收集和发送日志的代理工具。标签（Labels）是Loki中用于索引和查询日志的关键元数据，而Promtail的标签配置决定了哪些标签会被附加到日志流中。正确配置标签能显著提升查询效率并降低存储成本。
+
+## 标签基础概念
+
+标签是键值对（如 `job="nginx"`），具有以下特点：
+- **高基数标签（如IP、用户ID）应当避免**，可能导致性能问题
+- 用于日志流的**路由和分组**
+- 在Loki中**不可修改**（配置后需重新抓取日志）
+
+## 配置标签的3种方式
+
+### 1. 静态标签（全局）
+在 `scrape_configs` 中直接定义，适用于所有匹配的日志文件：
+```yaml
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: syslog
+          env: production
+          __path__: /var/log/syslog
+```
+
+### 2. 动态标签（Pipeline阶段）
+通过 `pipeline_stages` 从日志内容提取标签：
+```yaml
+pipeline_stages:
+  - regex:
+      expression: 'level=(?P<level>\w+)'
+  - labels:
+      level:
+```
+
+### 3. 服务发现标签
+从云平台元数据自动获取标签（以Docker为例）：
+```yaml
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+```
+
+## 实际案例：Nginx日志处理
+
+### 场景需求
+- 添加 `app=frontend` 静态标签
+- 从日志路径提取环境（`/var/log/nginx/dev/access.log` → `env=dev`）
+- 从日志内容提取HTTP状态码标签
+
+### 完整配置
+```yaml
+scrape_configs:
+  - job_name: nginx
+    static_configs:
+      - targets: [localhost]
+        labels:
+          app: frontend
+          __path__: /var/log/nginx/*/access.log
+    pipeline_stages:
+      - regex:
+          expression: '/var/log/nginx/(?P<env>[^/]+)/access.log'
+          source: filename
+      - labels:
+          env:
+      - regex:
+          expression: '" (?P<status_code>\d{3}) '
+      - labels:
+          status_code:
+```
+
+## 标签最佳实践
+
+:::tip 黄金法则
+1. **限制标签数量**（通常3-5个足够）
+2. **值域有限**的标签更高效（如 `env` 可取 `dev/staging/prod`）
+3. 避免 `pod_name` 等高基数标签，改用查询过滤器
+:::
+
+## 调试技巧
+
+通过 `--dry-run` 验证标签效果：
+```bash
+promtail --config.file=promtail.yaml --dry-run
+```
+
+输出示例：
+```
+...
+[ Dry Run Mode ] Would send log entry with labels: {app="frontend", env="dev", status_code="200"}
+...
+```
+
+## 总结
+
+Promtail的标签配置直接影响Loki的查询性能和存储效率。关键要点：
+- 优先使用静态标签固定元数据
+- 谨慎使用动态标签避免高基数
+- 通过 `relabel_configs` 实现高级转换
+
+## 延伸学习
+
+1. [Loki官方文档：标签最佳实践](https://grafana.com/docs/loki/latest/best-practices/labels/)
+2. 练习：为Apache日志配置 `vhost` 和 `response_time_bucket` 标签
+3. 挑战：使用 `replace` 阶段将数字状态码转为文本（如 `200` → `OK`）

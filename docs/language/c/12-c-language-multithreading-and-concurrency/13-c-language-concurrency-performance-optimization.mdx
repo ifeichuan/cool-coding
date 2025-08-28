@@ -1,0 +1,237 @@
+---
+title: C 语言并发性能优化
+description: 学习如何在C语言中优化多线程和并发程序的性能，包括锁优化、线程池、无锁编程等技术。
+---
+
+# C 语言并发性能优化
+
+在现代计算机系统中，并发编程是提高程序性能的重要手段之一。C语言作为一种底层语言，提供了丰富的多线程和并发编程工具。然而，编写高效的并发程序并不容易，尤其是在多核处理器上运行时，性能问题可能会变得尤为突出。本文将介绍一些常见的C语言并发性能优化技术，帮助你编写更高效的多线程程序。
+
+## 1. 并发性能优化的基本概念
+
+并发性能优化是指通过改进代码结构、算法或使用特定的技术手段，使得多线程程序在并发执行时能够更高效地利用系统资源，从而提升整体性能。常见的优化目标包括减少线程竞争、降低锁的开销、提高缓存利用率等。
+
+## 2. 锁优化
+
+锁是多线程编程中常用的同步机制，但锁的使用不当会导致性能问题。以下是一些锁优化的常见方法：
+
+### 2.1 减少锁的粒度
+
+锁的粒度是指锁保护的数据范围。粗粒度锁保护的数据范围较大，容易导致线程竞争；细粒度锁保护的数据范围较小，可以减少竞争，但会增加锁管理的复杂性。
+
+```c
+// 粗粒度锁示例
+pthread_mutex_t lock;
+int shared_data = 0;
+
+void* thread_func(void* arg) {
+    pthread_mutex_lock(&lock);
+    shared_data++;
+    pthread_mutex_unlock(&lock);
+    return NULL;
+}
+
+// 细粒度锁示例
+pthread_mutex_t lock1, lock2;
+int shared_data1 = 0, shared_data2 = 0;
+
+void* thread_func(void* arg) {
+    pthread_mutex_lock(&lock1);
+    shared_data1++;
+    pthread_mutex_unlock(&lock1);
+
+    pthread_mutex_lock(&lock2);
+    shared_data2++;
+    pthread_mutex_unlock(&lock2);
+    return NULL;
+}
+```
+
+### 2.2 使用读写锁
+
+读写锁允许多个线程同时读取数据，但只允许一个线程写入数据。这种锁适用于读多写少的场景。
+
+```c
+pthread_rwlock_t rwlock;
+int shared_data = 0;
+
+void* reader_func(void* arg) {
+    pthread_rwlock_rdlock(&rwlock);
+    printf("Reader: %d\n", shared_data);
+    pthread_rwlock_unlock(&rwlock);
+    return NULL;
+}
+
+void* writer_func(void* arg) {
+    pthread_rwlock_wrlock(&rwlock);
+    shared_data++;
+    pthread_rwlock_unlock(&rwlock);
+    return NULL;
+}
+```
+
+## 3. 线程池
+
+线程池是一种管理线程的技术，通过预先创建一组线程并重复使用它们，可以减少线程创建和销毁的开销。
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define THREAD_POOL_SIZE 4
+
+pthread_t thread_pool[THREAD_POOL_SIZE];
+pthread_mutex_t lock;
+pthread_cond_t cond;
+int task_count = 0;
+
+void* worker_func(void* arg) {
+    while (1) {
+        pthread_mutex_lock(&lock);
+        while (task_count == 0) {
+            pthread_cond_wait(&cond, &lock);
+        }
+        task_count--;
+        pthread_mutex_unlock(&lock);
+
+        // 执行任务
+        printf("Task executed by thread %ld\n", (long)arg);
+    }
+    return NULL;
+}
+
+void submit_task() {
+    pthread_mutex_lock(&lock);
+    task_count++;
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&lock);
+}
+
+int main() {
+    pthread_mutex_init(&lock, NULL);
+    pthread_cond_init(&cond, NULL);
+
+    for (long i = 0; i < THREAD_POOL_SIZE; i++) {
+        pthread_create(&thread_pool[i], NULL, worker_func, (void*)i);
+    }
+
+    for (int i = 0; i < 10; i++) {
+        submit_task();
+    }
+
+    // 等待所有任务完成
+    sleep(1);
+
+    pthread_mutex_destroy(&lock);
+    pthread_cond_destroy(&cond);
+    return 0;
+}
+```
+
+## 4. 无锁编程
+
+无锁编程是一种通过原子操作和内存屏障来实现线程同步的技术，避免了锁的开销。常见的无锁数据结构包括无锁队列、无锁栈等。
+
+```c
+#include <stdatomic.h>
+#include <stdio.h>
+#include <pthread.h>
+
+atomic_int shared_data = 0;
+
+void* thread_func(void* arg) {
+    for (int i = 0; i < 100000; i++) {
+        atomic_fetch_add(&shared_data, 1);
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t thread1, thread2;
+    pthread_create(&thread1, NULL, thread_func, NULL);
+    pthread_create(&thread2, NULL, thread_func, NULL);
+
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+
+    printf("Shared data: %d\n", shared_data);
+    return 0;
+}
+```
+
+## 5. 实际案例：并发文件处理
+
+假设我们需要处理一个包含大量文件的目录，每个文件都需要进行独立的处理。使用多线程可以显著提高处理速度。
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
+#include <string.h>
+
+#define MAX_THREADS 8
+
+pthread_t threads[MAX_THREADS];
+pthread_mutex_t lock;
+int file_count = 0;
+
+void* process_file(void* arg) {
+    char* filename = (char*)arg;
+    // 模拟文件处理
+    printf("Processing file: %s\n", filename);
+    free(filename);
+    return NULL;
+}
+
+void process_directory(const char* dirname) {
+    DIR* dir = opendir(dirname);
+    if (dir == NULL) {
+        perror("opendir");
+        return;
+    }
+
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_type == DT_REG) {
+            char* filename = strdup(entry->d_name);
+            pthread_mutex_lock(&lock);
+            if (file_count < MAX_THREADS) {
+                pthread_create(&threads[file_count], NULL, process_file, filename);
+                file_count++;
+            } else {
+                // 等待线程完成
+                for (int i = 0; i < MAX_THREADS; i++) {
+                    pthread_join(threads[i], NULL);
+                }
+                file_count = 0;
+            }
+            pthread_mutex_unlock(&lock);
+        }
+    }
+
+    closedir(dir);
+}
+
+int main() {
+    pthread_mutex_init(&lock, NULL);
+    process_directory(".");
+    pthread_mutex_destroy(&lock);
+    return 0;
+}
+```
+
+## 6. 总结
+
+并发性能优化是C语言多线程编程中的重要课题。通过减少锁的粒度、使用读写锁、线程池和无锁编程等技术，可以显著提高程序的并发性能。在实际应用中，选择合适的优化策略需要根据具体的场景和需求进行权衡。
+
+## 7. 附加资源与练习
+
+- **练习1**：尝试实现一个无锁队列，并测试其性能。
+- **练习2**：使用线程池技术优化一个现有的多线程程序。
+- **资源**：[C语言并发编程指南](https://example.com/concurrency-guide)
+
+:::tip
+在实际开发中，性能优化是一个持续的过程。建议使用性能分析工具（如`gprof`或`Valgrind`）来识别性能瓶颈，并针对性地进行优化。
+:::

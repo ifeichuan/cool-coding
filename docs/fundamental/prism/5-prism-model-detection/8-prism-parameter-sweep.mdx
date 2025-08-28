@@ -1,0 +1,166 @@
+---
+title: PRISM 参数扫描
+description: 学习如何使用PRISM的概率模型检测工具进行参数扫描分析，探索模型行为随参数变化的规律。
+---
+
+# PRISM 参数扫描
+
+## 简介
+
+参数扫描（Parameter Synthesis/Sweeping）是PRISM工具的核心功能之一，它允许用户分析模型行为如何随一个或多个参数的变化而变化。对于概率系统而言，这种技术能直观展示概率或期望值等指标对参数的敏感性，常用于系统优化和可靠性分析。
+
+:::tip 典型应用场景
+- 验证协议在不同故障概率下的可靠性
+- 调整算法参数观察性能变化
+- 分析电池模型在不同放电率下的存活概率
+---
+
+## 基本语法
+
+PRISM通过`const`定义可变参数，在属性查询中使用`{min..max:step}`指定扫描范围：
+
+```prism
+// 定义可变参数（需声明为全局常量）
+const double p;
+
+// 模型定义中使用参数
+module Example
+  s : [0..1] init 0;
+  [] s=0 -> p : (s'=1) + (1-p) : (s'=0);
+endmodule
+
+// 参数扫描属性
+P=? [ F s=1 ] // 基础查询
+// 扫描语法：
+// {p起始值..p结束值:p步长} 表示扫描范围
+// 例如扫描p从0.1到0.9，步长0.1：
+P=? [ F s=1 ] {p=0.1..0.9:0.1}
+```
+
+## 操作示例
+
+### 单参数扫描
+分析简单DTMC中到达目标状态的概率随转移概率变化：
+
+```prism
+// 文件：param_sweep.pm
+dtmc
+const double p;
+
+module Walk
+  s : [0..2] init 0;
+  [] s=0 -> p : (s'=1) + (1-p) : (s'=2);
+  [] s=1 -> 1 : (s'=2);
+endmodule
+
+// 查询：扫描p从0到1，步长0.1
+P=? [ F s=2 ] {p=0..1:0.1}
+```
+
+执行命令：
+```bash
+prism param_sweep.pm -prop 'P=? [F s=2] {p=0..1:0.1}'
+```
+
+输出结果将显示类似表格：
+```
+p value | Probability
+----------------------
+0.0     | 1.0
+0.1     | 0.9
+0.2     | 0.8
+...
+1.0     | 1.0
+```
+
+### 多参数扫描
+PRISM 4.4+支持多参数扫描，语法为`{x=a1..a2:s1,y=b1..b2:s2}`：
+
+```prism
+const double p;
+const double q;
+
+module DualParam
+  s : [0..1] init 0;
+  [] s=0 -> p : (s'=1) + (1-p) : (s'=0);
+  [] s=1 -> q : (s'=0) + (1-q) : (s'=1);
+endmodule
+
+// 双参数扫描
+S=? [ s=0 ] {p=0.1..0.9:0.2, q=0.1..0.9:0.2}
+```
+
+## 可视化结果
+
+PRISM支持通过`-exportresults`导出CSV数据，推荐使用Python可视化：
+
+```python
+import matplotlib.pyplot as plt
+import pandas as pd
+
+data = pd.read_csv('results.csv')
+plt.plot(data['p'], data['Probability'])
+plt.xlabel('Transition Probability (p)')
+plt.ylabel('P(F s=2)')
+plt.show()
+```
+
+对于多参数扫描，可生成热力图：
+```python
+plt.imshow(data.pivot('p','q','SteadyState'))
+```
+
+## 实际案例：网络协议分析
+
+分析Aloha协议在不同负载下的成功传输概率：
+
+```prism
+// Aloha协议参数化模型
+const double load; // 网络负载参数
+
+module Station
+  [send] s=0 -> load : (s'=1) + (1-load) : (s'=0);
+  [collide] s=1 -> 1 : (s'=0);
+endmodule
+
+// 扫描负载从0.1到0.9
+Pmax=? [ !collide U s=1 ] {load=0.1..0.9:0.05}
+```
+
+典型输出曲线将显示经典"先升后降"特征，揭示最优负载点。
+
+---
+
+## 高级技巧
+
+1. **表达式参数**：参数可以是数学表达式
+   ```prism
+   const double p = 1/N; // N为其他常量
+   ```
+
+2. **条件扫描**：结合过滤器只扫描特定范围
+   ```prism
+   filter(range, P=? [ F s=1 ] {p=0..1:0.01}, P>=0.5)
+   ```
+
+3. **并行扫描**：使用PRISM的`-parammethod`选项加速大规模扫描
+
+---
+
+## 总结
+
+参数扫描技术使PRISM从静态验证工具升级为动态分析平台，通过本教程您已掌握：
+- 单/多参数扫描语法
+- 结果可视化方法
+- 实际系统分析案例
+
+:::note 延伸练习
+1. 修改Aloha模型，增加重传概率参数并扫描二维参数空间
+2. 对MDP模型进行期望代价的扫描分析
+3. 尝试导出JSON格式结果并用JavaScript可视化
+:::
+
+**推荐资源**：
+- PRISM手册参数扫描章节
+- 《概率模型检测》第6章参数化方法
+- 官方示例库中的`/examples/param`目录

@@ -1,0 +1,167 @@
+---
+title: 配置管理
+description: "学习如何管理Grafana Loki的配置文件，包括基本配置项、动态配置和最佳实践。"
+---
+
+# 配置管理
+
+## 介绍
+
+Grafana Loki的配置管理是运维中的核心任务之一。通过配置文件，您可以定义Loki的行为，包括存储后端、日志摄取规则、查询优化等。良好的配置管理能确保系统稳定运行，并适应不同规模的部署需求。
+
+Loki的配置文件通常采用YAML格式，支持静态配置和动态重新加载（无需重启服务）。本指南将带您了解关键配置项、动态加载机制以及实际场景中的配置示例。
+
+---
+
+## 基础配置文件结构
+
+Loki的主配置文件通常命名为 `loki-config.yaml`，包含以下主要部分：
+
+```yaml
+auth_enabled: false  # 开发环境禁用认证
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /tmp/loki
+  storage:
+    filesystem:
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
+  replication_factor: 1
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /tmp/loki/index
+    cache_location: /tmp/loki/boltdb-cache
+```
+
+:::note
+- `server`: 定义HTTP/GRPC监听端口等基础服务配置
+- `storage_config`: 指定存储后端（如本地文件系统、S3、GCS等）
+- `schema_config`: 配置索引和日志存储的版本策略
+:::
+
+---
+
+## 动态配置重新加载
+
+Loki支持运行时动态加载配置变更（部分配置项需重启）：
+
+1. 启动Loki时启用监听：
+```bash
+./loki -config.file=loki-config.yaml -config.expand-env=true -config.watch
+```
+
+2. 修改配置后发送SIGHUP信号：
+```bash
+kill -HUP $(pidof loki)
+```
+
+:::caution
+以下配置修改**需要重启服务**：
+- 任何端口变更
+- 存储后端切换
+- 认证模块变更
+:::
+
+---
+
+## 实际配置案例
+
+### 案例1：使用S3作为存储后端
+
+```yaml
+common:
+  storage:
+    s3:
+      endpoint: minio.example.com
+      bucketnames: loki-storage
+      access_key_id: ${AWS_ACCESS_KEY_ID}
+      secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+      s3forcepathstyle: true
+```
+
+### 案例2：配置租户隔离
+
+```yaml
+auth_enabled: true
+
+multi_tenant:
+  enabled: true
+
+limits_config:
+  enforce_metric_name: false
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+```
+
+---
+
+## 配置验证与调试
+
+使用Loki内置工具验证配置语法：
+```bash
+./loki -config.file=loki-config.yaml -verify-config
+```
+
+调试时查看运行时配置：
+```bash
+curl http://localhost:3100/config | jq .
+```
+
+---
+
+## 最佳实践
+
+1. **环境变量注入**：
+   ```yaml
+   storage_config:
+     gcs:
+       bucket_name: ${GCS_BUCKET}
+   ```
+   ```bash
+   GCS_BUCKET=prod-loki-storage ./loki -config.file=loki-config.yaml
+   ```
+
+2. **配置分片**：
+   - 主配置：`loki-config.yaml`
+   - 规则配置：`rules/alerting-rules.yaml`
+   - 限流配置：`limits/tenant-limits.yaml`
+
+3. **版本控制**：
+   ```mermaid
+   flowchart LR
+     Git-->|提交|CI-->|验证|Artifactory-->|分发|Kubernetes_Secrets
+   ```
+
+---
+
+## 总结与练习
+
+### 关键点总结
+- Loki配置采用YAML格式
+- 支持动态重新加载大部分配置
+- 存储后端配置决定扩展性
+- 租户配置实现多团队隔离
+
+### 练习建议
+1. 本地部署时尝试切换存储后端（文件系统→MinIO）
+2. 通过动态加载调整日志保留期限
+3. 使用`-verify-config`捕获语法错误
+
+### 延伸阅读
+- [官方配置文档](https://grafana.com/docs/loki/latest/configuration/)
+- 《云原生日志系统设计》第三章
+- Kubernetes ConfigMap与Loki集成方案

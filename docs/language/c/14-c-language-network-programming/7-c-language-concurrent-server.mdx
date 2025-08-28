@@ -1,0 +1,252 @@
+---
+title: C 语言并发服务器
+description: 学习如何使用C语言编写并发服务器，处理多个客户端连接，并理解其背后的核心概念。
+---
+
+# C 语言并发服务器
+
+在现代网络编程中，服务器需要同时处理多个客户端的请求。为了实现这一点，我们可以使用**并发服务器**。并发服务器允许多个客户端同时连接到服务器，并且每个连接都可以独立处理。本文将介绍如何使用C语言编写一个简单的并发服务器，并逐步讲解其背后的核心概念。
+
+## 什么是并发服务器？
+
+并发服务器是一种能够同时处理多个客户端请求的服务器。与单线程服务器不同，并发服务器可以同时处理多个连接，而不会阻塞其他客户端的请求。常见的并发服务器实现方式包括多进程、多线程和I/O多路复用。
+
+## 多进程并发服务器
+
+多进程并发服务器通过创建多个子进程来处理每个客户端的连接。每个子进程独立运行，处理一个客户端的请求。这种方式简单易实现，但资源消耗较大。
+
+### 代码示例
+
+以下是一个简单的多进程并发服务器的C语言实现：
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
+
+void handle_client(int client_socket) {
+    char buffer[BUFFER_SIZE];
+    int bytes_read;
+
+    while ((bytes_read = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
+        write(client_socket, buffer, bytes_read);
+    }
+
+    close(client_socket);
+}
+
+int main() {
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    // 创建套接字
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 绑定套接字
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Bind failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    // 监听连接
+    if (listen(server_socket, 5) < 0) {
+        perror("Listen failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on port %d\n", PORT);
+
+    while (1) {
+        // 接受连接
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        // 创建子进程处理客户端请求
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("Fork failed");
+            close(client_socket);
+        } else if (pid == 0) {
+            // 子进程
+            close(server_socket);
+            handle_client(client_socket);
+            exit(EXIT_SUCCESS);
+        } else {
+            // 父进程
+            close(client_socket);
+        }
+    }
+
+    close(server_socket);
+    return 0;
+}
+```
+
+### 代码解释
+
+1. **创建套接字**：使用 `socket()` 函数创建一个套接字。
+2. **绑定套接字**：使用 `bind()` 函数将套接字绑定到指定的IP地址和端口。
+3. **监听连接**：使用 `listen()` 函数开始监听连接请求。
+4. **接受连接**：使用 `accept()` 函数接受客户端的连接请求。
+5. **创建子进程**：使用 `fork()` 函数创建子进程来处理客户端的请求。
+6. **处理客户端请求**：在子进程中调用 `handle_client()` 函数处理客户端的请求。
+
+### 运行示例
+
+假设服务器运行在本地，客户端可以使用 `telnet` 或 `nc` 工具连接到服务器：
+
+```bash
+$ telnet 127.0.0.1 8080
+```
+
+客户端发送的消息将被服务器原样返回。
+
+## 多线程并发服务器
+
+多线程并发服务器通过创建多个线程来处理每个客户端的连接。每个线程独立运行，处理一个客户端的请求。这种方式比多进程更轻量，但需要注意线程安全问题。
+
+### 代码示例
+
+以下是一个简单的多线程并发服务器的C语言实现：
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#define PORT 8080
+#define BUFFER_SIZE 1024
+
+void *handle_client(void *arg) {
+    int client_socket = *(int *)arg;
+    char buffer[BUFFER_SIZE];
+    int bytes_read;
+
+    while ((bytes_read = read(client_socket, buffer, BUFFER_SIZE)) > 0) {
+        write(client_socket, buffer, bytes_read);
+    }
+
+    close(client_socket);
+    free(arg);
+    pthread_exit(NULL);
+}
+
+int main() {
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    pthread_t thread_id;
+
+    // 创建套接字
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 绑定套接字
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(PORT);
+
+    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Bind failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    // 监听连接
+    if (listen(server_socket, 5) < 0) {
+        perror("Listen failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on port %d\n", PORT);
+
+    while (1) {
+        // 接受连接
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        // 创建线程处理客户端请求
+        int *new_socket = malloc(sizeof(int));
+        *new_socket = client_socket;
+        if (pthread_create(&thread_id, NULL, handle_client, new_socket) < 0) {
+            perror("Thread creation failed");
+            free(new_socket);
+            close(client_socket);
+        }
+    }
+
+    close(server_socket);
+    return 0;
+}
+```
+
+### 代码解释
+
+1. **创建套接字**：使用 `socket()` 函数创建一个套接字。
+2. **绑定套接字**：使用 `bind()` 函数将套接字绑定到指定的IP地址和端口。
+3. **监听连接**：使用 `listen()` 函数开始监听连接请求。
+4. **接受连接**：使用 `accept()` 函数接受客户端的连接请求。
+5. **创建线程**：使用 `pthread_create()` 函数创建线程来处理客户端的请求。
+6. **处理客户端请求**：在线程中调用 `handle_client()` 函数处理客户端的请求。
+
+### 运行示例
+
+与多进程服务器类似，客户端可以使用 `telnet` 或 `nc` 工具连接到服务器。
+
+## 实际应用场景
+
+并发服务器广泛应用于需要同时处理多个客户端请求的场景，例如：
+
+- **Web服务器**：处理多个用户的HTTP请求。
+- **聊天服务器**：处理多个用户的实时消息。
+- **游戏服务器**：处理多个玩家的游戏数据。
+
+## 总结
+
+本文介绍了如何使用C语言编写并发服务器，包括多进程和多线程的实现方式。通过并发服务器，我们可以同时处理多个客户端的请求，提高服务器的性能和响应速度。
+
+:::tip
+在实际开发中，选择多进程还是多线程取决于具体的应用场景和性能需求。多进程更稳定，但资源消耗较大；多线程更轻量，但需要注意线程安全问题。
+:::
+
+## 附加资源
+
+- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)：一本经典的网络编程指南，适合初学者。
+- [POSIX Threads Programming](https://computing.llnl.gov/tutorials/pthreads/)：关于POSIX线程编程的详细教程。
+
+## 练习
+
+1. 修改多进程服务器代码，使其在子进程退出时自动回收资源。
+2. 修改多线程服务器代码，使用线程池来管理线程，避免频繁创建和销毁线程。
+3. 尝试使用I/O多路复用（如 `select()` 或 `epoll()`）实现并发服务器，并比较其性能。

@@ -1,0 +1,170 @@
+---
+title: 本地文件系统存储
+description: 学习如何在Grafana Loki中使用本地文件系统进行日志存储配置，包括基础概念、配置方法和实际应用示例。
+---
+
+# 本地文件系统存储
+
+## 介绍
+
+本地文件系统存储是Grafana Loki中最简单的存储后端之一，适合开发、测试或小规模生产环境。它将日志数据直接存储在运行Loki的服务器的磁盘上，无需依赖外部存储服务（如S3或GCS）。本节将详细介绍其工作原理、配置方法以及适用场景。
+
+:::note 适用场景
+- **开发/测试环境**：快速搭建且成本低
+- **小规模部署**：日志量有限（如每秒几千条日志）
+- **学习用途**：理解Loki存储机制的基础
+:::
+
+## 核心概念
+
+### 1. 存储目录结构
+Loki的本地文件系统存储默认使用以下目录结构：
+```
+/loki/storage/
+  ├── chunks/      # 存储压缩后的日志块
+  ├── index/       # 存储索引数据
+  └── wal/         # 预写日志（Write-Ahead Log）
+```
+
+### 2. 关键配置参数
+在 `loki-config.yaml` 中，本地存储的主要配置项如下：
+
+```yaml
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem  # 使用文件系统存储
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /loki/storage/index  # 索引存储路径
+    shared_store: filesystem
+  filesystem:
+    directory: /loki/storage/chunks  # 块数据存储路径
+```
+
+## 配置实战
+
+### 步骤1：创建存储目录
+```bash
+mkdir -p /loki/storage/{chunks,index,wal}
+chown -R 10001:10001 /loki/storage  # 通常Loki以UID 10001运行
+```
+
+### 步骤2：完整配置示例
+```yaml
+# loki-config.yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /loki/storage
+  storage:
+    filesystem:
+      chunks_directory: /loki/storage/chunks
+      rules_directory: /loki/storage/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /loki/storage/index
+    cache_location: /loki/storage/boltdb-cache
+    shared_store: filesystem
+```
+
+### 步骤3：启动Loki
+```bash
+docker run -d --name=loki \
+  -v /loki/storage:/loki/storage \
+  -v ./loki-config.yaml:/etc/loki/local-config.yaml \
+  grafana/loki:latest
+```
+
+## 性能优化建议
+
+:::tip 生产环境注意事项
+1. **磁盘类型**：使用SSD以获得更好的IO性能
+2. **目录隔离**：将 `index` 和 `chunks` 放在不同物理磁盘
+3. **监控**：监控磁盘使用率（建议预留20%空间）
+4. **备份**：定期备份 `/loki/storage` 目录
+:::
+
+## 实际案例
+
+### 场景：收集Nginx日志
+1. 配置Promtail采集日志：
+```yaml
+# promtail-config.yaml
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+- job_name: nginx
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: nginx
+      __path__: /var/log/nginx/*.log
+```
+
+2. 查询日志：
+```bash
+curl -G http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={job="nginx"}' \
+  --data-urlencode 'limit=5'
+```
+
+## 总结
+
+本地文件系统存储为Loki提供了最简单的存储解决方案，适合以下情况：
+- 需要快速验证概念（PoC）
+- 资源有限的小型环境
+- 学习Loki内部机制
+
+主要限制：
+- 不支持分布式部署
+- 扩展性有限（单磁盘容量限制）
+- 无内置数据冗余机制
+
+## 延伸学习
+
+1. **进阶练习**：
+   - 尝试配置日志保留策略（`table_manager`）
+   - 模拟磁盘写满场景，观察Loki行为
+
+2. **后续学习路径**：
+   - [对象存储配置（S3/GCS）]
+   - [Loki存储架构深度解析]
+   - [性能调优指南]
+
+3. **官方资源**：
+   - [Loki Storage Documentation](https://grafana.com/docs/loki/latest/storage/)
+   - [File System Storage Config Reference](https://grafana.com/docs/loki/latest/configuration/#filesystem)

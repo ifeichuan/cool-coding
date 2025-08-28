@@ -1,0 +1,112 @@
+---
+title: 授权策略
+description: 学习 Jaeger 中的授权策略基础，了解如何通过权限控制保护分布式追踪数据。
+---
+
+# 授权策略
+
+## 介绍
+
+授权策略（Authorization Policies）是 Jaeger 中用于控制用户或服务访问追踪数据的核心安全机制。它通过定义“谁可以访问什么”来保护敏感数据，确保只有经过验证的实体才能执行特定操作（如查看、修改或删除追踪信息）。对于初学者来说，理解授权策略是构建安全可观测性系统的第一步。
+
+:::tip 关键概念
+- **主体（Subject）**：发起请求的用户或服务（如 `user@example.com`）。
+- **资源（Resource）**：被访问的对象（如 `/api/traces`）。
+- **动作（Action）**：对资源的操作类型（如 `read`、`write`）。
+:::
+
+---
+
+## 基础授权模型
+
+Jaeger 通常支持以下授权模型：
+
+1. **基于角色的访问控制（RBAC）**  
+   用户被分配角色，角色拥有权限集。例如：
+   ```mermaid
+   graph LR
+     User -->|属于| Role[开发者角色]
+     Role -->|拥有| Permission[读取追踪数据]
+   ```
+
+2. **基于属性的访问控制（ABAC）**  
+   根据动态属性（如用户部门、请求时间）决定权限。
+
+---
+
+## 配置示例
+
+### 1. 通过 Jaeger 配置文件定义策略
+
+以下是一个 YAML 格式的 RBAC 策略示例，限制只有 `admin` 角色可以删除追踪数据：
+
+```yaml
+auth:
+  enabled: true
+  rbac:
+    roles:
+      admin:
+        permissions: ["delete"]
+      viewer:
+        permissions: ["read"]
+    roleBindings:
+      "user1@example.com": ["viewer"]
+      "admin@example.com": ["admin"]
+```
+
+### 2. 编程式授权（Go 示例）
+
+在自定义插件中验证权限：
+```go
+func authorize(user string, action string, resource string) bool {
+    // 模拟检查数据库中的角色
+    if user == "admin@example.com" && action == "delete" {
+        return true
+    }
+    return false
+}
+```
+
+---
+
+## 实际案例
+
+### 场景：多团队隔离访问
+假设公司有 `支付团队` 和 `物流团队`，需确保团队只能访问自己的追踪数据。
+
+**解决方案**：  
+1. 为每个团队创建独立角色（如 `payments-viewer`、`logistics-viewer`）。
+2. 在策略中添加资源标签匹配规则：
+   ```yaml
+   auth:
+     opa:
+       policies:
+         - query: "data.jaeger.authz.allow"
+           rules:
+             - "team == input.attributes.resource.labels.team"
+   ```
+
+---
+
+## 总结
+
+| 要点 | 说明 |
+|------|------|
+| **最小权限原则** | 只授予必要的权限 |
+| **审计日志** | 记录所有授权决策 |
+| **动态策略** | 结合 OPA/OpenPolicyAgent 实现复杂逻辑 |
+
+:::warning 安全提醒
+永远不要在客户端实现授权逻辑！始终在服务端验证请求。
+:::
+
+---
+
+## 延伸练习
+
+1. 在本地 Jaeger 实例中配置一个 RBAC 策略，禁止匿名用户访问 `/api/services`。
+2. 尝试使用 [OpenPolicyAgent](https://www.openpolicyagent.org/) 编写一条策略，限制只能在工作时间查询追踪数据。
+
+**附加资源**：  
+- [Jaeger 官方安全文档](https://www.jaegertracing.io/docs/latest/security/)
+- 《Kubernetes 安全权威指南》第 6 章

@@ -1,0 +1,153 @@
+---
+title: 客户端故障排除
+description: "学习如何诊断和解决 Zipkin 客户端集成中的常见问题，包括配置错误、连接问题和数据上报失败等场景。"
+---
+
+# 客户端故障排除
+
+## 介绍
+
+在分布式系统中，Zipkin 客户端负责收集和上报跟踪数据到 Zipkin 服务器。当客户端出现问题时，可能导致链路数据丢失或错误。本章将指导你识别和修复常见的客户端问题。
+
+## 常见问题及解决方案
+
+### 1. 客户端未上报数据
+
+**症状**：应用正常运行，但 Zipkin UI 中无跟踪数据。
+
+**可能原因**：
+- 客户端库未正确初始化
+- 采样率（Sampling Rate）设置为 0
+- 网络连接问题
+
+**检查步骤**：
+1. 验证客户端配置（以 Spring Cloud Sleuth 为例）：
+```yaml
+# application.yml 示例
+spring:
+  zipkin:
+    base-url: http://localhost:9411
+    sender:
+      type: web
+  sleuth:
+    sampler:
+      probability: 1.0  # 确保采样率为 100%
+```
+
+2. 检查网络连通性：
+```bash
+curl -v http://localhost:9411/api/v2/spans
+```
+
+:::tip
+使用 `logging.level.zipkin2=DEBUG` 开启调试日志可查看上报详情。
+:::
+
+### 2. 上报数据不完整
+
+**症状**：部分 span 缺失或字段不完整。
+
+**解决方案**：
+- 确保线程上下文正确传递
+- 检查是否有异步操作未正确包装
+
+```java
+// 错误示例 - 异步操作丢失上下文
+new Thread(() -> {
+    // 这里的操作不会继承 trace 上下文
+}).start();
+
+// 正确示例 - 使用 TraceableExecutor
+@Autowired TraceableExecutor executor;
+
+executor.execute(() -> {
+    // 保留 trace 上下文
+});
+```
+
+### 3. 连接超时错误
+
+**错误日志示例**：
+```
+Failed to send spans to Zipkin: connect timed out
+```
+
+**解决方法**：
+1. 增加超时配置：
+```yaml
+spring:
+  zipkin:
+    connect-timeout: 5000
+    read-timeout: 10000
+```
+
+2. 验证代理设置（如适用）：
+```java
+System.setProperty("http.proxyHost", "proxy.example.com");
+System.setProperty("http.proxyPort", "8080");
+```
+
+## 实际案例
+
+### 案例：微服务间调用链路断裂
+
+**场景**：服务A调用服务B，但Zipkin中只显示服务A的span。
+
+**诊断过程**：
+1. 检查服务B是否集成Zipkin客户端
+2. 验证HTTP头是否包含 `X-B3-TraceId` 等字段
+3. 使用Wireshark抓包分析HTTP头
+
+**解决方案**：
+确保服务B的Web框架正确处理了B3传播头：
+```java
+// Spring Boot 需注册 TracingFilter
+@Bean
+public Filter tracingFilter(Tracing tracing) {
+    return TracingFilter.create(tracing);
+}
+```
+
+## 调试工具与技术
+
+### 1. 日志分析
+配置客户端记录详细日志：
+```properties
+logging.level.zipkin2=DEBUG
+logging.level.reactor.netty.http.client=DEBUG
+```
+
+### 2. 本地测试验证
+使用内存存储快速验证：
+```java
+@SpringBootTest
+class TracingTest {
+    @Autowired
+    Tracer tracer;
+
+    @Test
+    void testTracing() {
+        Span span = tracer.nextSpan().name("test").start();
+        // ... 业务逻辑
+        span.finish();
+    }
+}
+```
+
+## 总结
+
+客户端故障排除的关键步骤：
+1. 验证基本配置（端点、采样率）
+2. 检查网络连接和代理设置
+3. 确保上下文正确传播
+4. 利用调试日志定位问题
+
+## 延伸学习
+
+- [Zipkin 官方故障排除指南](https://zipkin.io/pages/troubleshooting.html)
+- [Spring Cloud Sleuth 常见问题](https://docs.spring.io/spring-cloud-sleuth/docs/current/reference/html/common-problems.html)
+
+练习任务：
+1. 故意错误配置采样率，观察系统行为
+2. 模拟网络断开场景，测试客户端重试机制
+3. 创建一个异步任务丢失上下文的示例并修复它

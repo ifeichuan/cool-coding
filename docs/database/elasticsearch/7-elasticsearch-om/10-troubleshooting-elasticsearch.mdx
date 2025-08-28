@@ -1,0 +1,192 @@
+---
+title: Elasticsearch 故障排查
+description: 学习如何识别和解决Elasticsearch中的常见问题，确保集群的稳定性和性能。
+---
+
+# Elasticsearch 故障排查
+
+Elasticsearch 是一个强大的分布式搜索和分析引擎，但在实际使用中，可能会遇到各种问题。故障排查是确保 Elasticsearch 集群稳定运行的关键技能。本文将引导你逐步了解如何识别和解决 Elasticsearch 中的常见问题。
+
+## 介绍
+
+Elasticsearch 是一个复杂的系统，涉及多个组件和配置。当集群出现问题时，可能是由于硬件故障、配置错误、资源不足或数据损坏等原因。故障排查的目标是快速定位问题的根本原因，并采取适当的措施来解决问题。
+
+## 常见问题及排查步骤
+
+### 1. 集群健康状态
+
+Elasticsearch 提供了一个集群健康状态的 API，可以帮助你快速了解集群的整体状态。
+
+```bash
+GET /_cluster/health
+```
+
+**输出示例：**
+
+```json
+{
+  "cluster_name": "my_cluster",
+  "status": "green",
+  "timed_out": false,
+  "number_of_nodes": 3,
+  "number_of_data_nodes": 3,
+  "active_primary_shards": 10,
+  "active_shards": 20,
+  "relocating_shards": 0,
+  "initializing_shards": 0,
+  "unassigned_shards": 0,
+  "delayed_unassigned_shards": 0,
+  "number_of_pending_tasks": 0,
+  "number_of_in_flight_fetch": 0,
+  "task_max_waiting_in_queue_millis": 0,
+  "active_shards_percent_as_number": 100.0
+}
+```
+
+:::note
+- **status**: 集群的健康状态，可以是 `green`、`yellow` 或 `red`。
+  - `green`: 所有主分片和副本分片都正常分配。
+  - `yellow`: 所有主分片正常分配，但部分副本分片未分配。
+  - `red`: 部分主分片未分配。
+:::
+
+### 2. 节点故障
+
+节点故障是 Elasticsearch 集群中常见的问题之一。你可以通过以下命令查看节点的状态：
+
+```bash
+GET /_cat/nodes?v
+```
+
+**输出示例：**
+
+```plaintext
+ip         heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+192.168.1.1           45          95   2    0.15    0.10     0.05 di        -      node-1
+192.168.1.2           50          90   3    0.20    0.15     0.10 di        *      node-2
+192.168.1.3           55          85   4    0.25    0.20     0.15 di        -      node-3
+```
+
+:::caution
+如果某个节点的 `heap.percent` 或 `ram.percent` 过高，可能会导致节点崩溃。你可以通过增加堆内存或优化查询来缓解这个问题。
+:::
+
+### 3. 分片未分配
+
+分片未分配是导致集群状态为 `yellow` 或 `red` 的常见原因。你可以通过以下命令查看未分配的分片：
+
+```bash
+GET /_cat/shards?v&h=index,shard,prirep,state,unassigned.reason
+```
+
+**输出示例：**
+
+```plaintext
+index    shard prirep state      unassigned.reason
+my_index 0     p      UNASSIGNED INDEX_CREATED
+my_index 0     r      UNASSIGNED NODE_LEFT
+```
+
+:::tip
+如果分片未分配的原因是 `NODE_LEFT`，你可以尝试重新启动节点或手动重新分配分片。
+:::
+
+### 4. 磁盘空间不足
+
+磁盘空间不足会导致 Elasticsearch 无法写入新数据或创建新索引。你可以通过以下命令查看磁盘使用情况：
+
+```bash
+GET /_cat/allocation?v
+```
+
+**输出示例：**
+
+```plaintext
+shards disk.indices disk.used disk.avail disk.total disk.percent host       ip         node
+     5        10gb      50gb       40gb       90gb           55 192.168.1.1 192.168.1.1 node-1
+     5        15gb      60gb       30gb       90gb           66 192.168.1.2 192.168.1.2 node-2
+     5        20gb      70gb       20gb       90gb           77 192.168.1.3 192.168.1.3 node-3
+```
+
+:::warning
+如果 `disk.percent` 接近 100%，你需要尽快清理磁盘空间或增加磁盘容量。
+:::
+
+### 5. 慢查询
+
+慢查询可能会导致集群性能下降。你可以通过以下命令查看慢查询日志：
+
+```bash
+GET /_search?q=slow_query_log
+```
+
+**输出示例：**
+
+```json
+{
+  "took": 1200,
+  "timed_out": false,
+  "_shards": {
+    "total": 5,
+    "successful": 5,
+    "skipped": 0,
+    "failed": 0
+  },
+  "hits": {
+    "total": {
+      "value": 10000,
+      "relation": "eq"
+    },
+    "max_score": 1.0,
+    "hits": [
+      {
+        "_index": "my_index",
+        "_type": "_doc",
+        "_id": "1",
+        "_score": 1.0,
+        "_source": {
+          "message": "This is a slow query"
+        }
+      }
+    ]
+  }
+}
+```
+
+:::tip
+你可以通过优化查询、增加索引或调整集群配置来减少慢查询的影响。
+:::
+
+## 实际案例
+
+### 案例 1: 集群状态为 `yellow`
+
+**问题描述**: 集群状态为 `yellow`，部分副本分片未分配。
+
+**排查步骤**:
+1. 使用 `GET /_cluster/health` 查看集群状态。
+2. 使用 `GET /_cat/shards?v&h=index,shard,prirep,state,unassigned.reason` 查看未分配的分片。
+3. 发现原因是 `NODE_LEFT`，重新启动节点后问题解决。
+
+### 案例 2: 磁盘空间不足
+
+**问题描述**: 集群无法写入新数据，磁盘空间接近 100%。
+
+**排查步骤**:
+1. 使用 `GET /_cat/allocation?v` 查看磁盘使用情况。
+2. 删除旧索引或增加磁盘容量后问题解决。
+
+## 总结
+
+Elasticsearch 故障排查是确保集群稳定运行的关键技能。通过掌握集群健康状态、节点故障、分片未分配、磁盘空间不足和慢查询等常见问题的排查方法，你可以快速定位和解决问题。
+
+## 附加资源
+
+- [Elasticsearch 官方文档](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
+- [Elasticsearch 故障排查指南](https://www.elastic.co/guide/en/elasticsearch/reference/current/troubleshooting.html)
+
+## 练习
+
+1. 使用 `GET /_cluster/health` 查看你的 Elasticsearch 集群状态。
+2. 使用 `GET /_cat/nodes?v` 查看节点的状态，并检查是否有节点的 `heap.percent` 或 `ram.percent` 过高。
+3. 使用 `GET /_cat/shards?v&h=index,shard,prirep,state,unassigned.reason` 查看是否有未分配的分片，并尝试解决问题。

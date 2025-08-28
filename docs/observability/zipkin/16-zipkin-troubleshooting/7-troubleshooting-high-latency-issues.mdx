@@ -1,0 +1,112 @@
+---
+title: 高延迟问题排查
+description: 学习如何识别和解决Zipkin分布式追踪系统中的高延迟问题，包含常见原因分析、排查工具和优化策略。
+---
+
+# 高延迟问题排查
+
+## 介绍
+
+在分布式系统中，Zipkin作为链路追踪工具，能够帮助开发者可视化服务间的调用关系。**高延迟问题**是常见的性能瓶颈之一，可能由网络延迟、服务资源不足或代码效率低下等因素引起。本章将指导你逐步排查Zipkin中的高延迟问题，并提供实际优化案例。
+
+:::note 关键概念
+- **Span延迟**：单个操作从开始到结束的时间差。
+- **Trace延迟**：完整请求链路的累计时间。
+:::
+
+---
+
+## 第一步：定位高延迟的Span
+
+通过Zipkin UI筛选延迟异常的Trace：
+1. 在Zipkin界面中，按 `Duration` 降序排序。
+2. 点击高延迟的Trace，查看各Span的耗时分布。
+
+```json
+// 示例：高延迟Span的JSON片段
+{
+  "traceId": "abc123",
+  "name": "slow-service-call",
+  "duration": 4500, // 单位：微秒
+  "annotations": [...]
+}
+```
+
+:::tip
+使用 `curl` 直接查询Zipkin API获取原始数据：
+```bash
+curl "http://localhost:9411/api/v2/trace/abc123"
+```
+:::
+
+---
+
+## 第二步：常见原因分析
+
+### 1. 网络延迟
+```mermaid
+graph LR
+  A[服务A] -->|高延迟| B[服务B]
+  B -->|正常| C[数据库]
+```
+- **排查工具**：`traceroute` 或 `ping`。
+- **解决方案**：优化网络路由或启用压缩（如gzip）。
+
+### 2. 资源瓶颈
+- **CPU/Memory不足**：通过 `docker stats` 或 `kubectl top pods` 监控容器资源。
+- **数据库慢查询**：检查Zipkin中 `db.query` 类型的Span。
+
+### 3. 代码效率问题
+```java
+// 示例：低效的循环逻辑（Java）
+@GetMapping("/slow")
+public List<Data> getSlowData() {
+  List<Data> result = new ArrayList<>();
+  for (int i = 0; i < 100000; i++) { // 高耗时循环
+    result.add(processItem(i));
+  }
+  return result;
+}
+```
+
+---
+
+## 第三步：优化策略
+
+### 案例：异步化处理
+**问题场景**：同步调用外部服务导致链路延迟增加。
+**优化方案**：改用异步非阻塞调用（如Spring WebFlux）。
+
+```java
+// 优化后代码（Reactive风格）
+@GetMapping("/fast")
+public Mono<List<Data>> getFastData() {
+  return Flux.range(0, 100000)
+    .parallel()
+    .runOn(Schedulers.parallel())
+    .map(i -> processItem(i))
+    .sequential()
+    .collectList();
+}
+```
+
+:::warning 注意
+异步化可能增加系统复杂性，需权衡利弊。
+:::
+
+---
+
+## 总结与练习
+
+### 关键步骤回顾
+1. **定位**：通过Zipkin UI找到高延迟Trace。
+2. **分析**：检查网络、资源或代码问题。
+3. **验证**：使用工具（如JProfiler）确认优化效果。
+
+### 练习
+1. 在本地部署Zipkin，模拟一个高延迟服务并捕获Trace。
+2. 尝试使用 `@Timed` 注解（Spring Boot）标记可疑方法。
+
+### 扩展资源
+- [Zipkin官方文档](https://zipkin.io/)
+- 《分布式系统观测：可观测性工具实战》

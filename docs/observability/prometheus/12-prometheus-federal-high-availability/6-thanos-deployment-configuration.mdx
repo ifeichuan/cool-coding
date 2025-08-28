@@ -1,0 +1,198 @@
+---
+title: Thanos部署配置
+description: 学习如何配置和部署Thanos，以实现Prometheus的高可用性和长期存储。
+---
+
+# Thanos部署配置
+
+Thanos 是一个开源的、高度可扩展的监控系统，旨在为 Prometheus 提供高可用性和长期存储能力。通过 Thanos，你可以将多个 Prometheus 实例的数据进行全局查询，并将数据存储在对象存储中，从而实现数据的长期保留和跨集群的查询。
+
+## 什么是Thanos？
+
+Thanos 是一个与 Prometheus 兼容的系统，它通过以下几个组件扩展了 Prometheus 的功能：
+
+- **Thanos Sidecar**：与 Prometheus 实例一起运行，负责将数据上传到对象存储。
+- **Thanos Query**：提供全局查询接口，允许你跨多个 Prometheus 实例查询数据。
+- **Thanos Store Gateway**：从对象存储中读取数据，供查询使用。
+- **Thanos Compactor**：压缩和降采样历史数据，以减少存储空间和查询时间。
+
+## 部署Thanos
+
+### 1. 安装Thanos Sidecar
+
+首先，你需要在每个 Prometheus 实例旁边部署 Thanos Sidecar。Sidecar 会与 Prometheus 实例一起运行，并将数据上传到对象存储。
+
+```yaml
+# thanos-sidecar.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-sidecar
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thanos-sidecar
+  template:
+    metadata:
+      labels:
+        app: thanos-sidecar
+    spec:
+      containers:
+      - name: thanos-sidecar
+        image: thanosio/thanos:v0.24.0
+        args:
+        - "sidecar"
+        - "--prometheus.url=http://localhost:9090"
+        - "--objstore.config-file=/etc/thanos/objstore.yml"
+        ports:
+        - containerPort: 10902
+        volumeMounts:
+        - name: objstore-config
+          mountPath: /etc/thanos
+      volumes:
+      - name: objstore-config
+        configMap:
+          name: thanos-objstore-config
+```
+
+### 2. 配置对象存储
+
+Thanos 使用对象存储（如 S3、GCS 等）来存储 Prometheus 的数据。你需要创建一个配置文件来指定对象存储的详细信息。
+
+```yaml
+# objstore.yml
+type: S3
+config:
+  bucket: "thanos-data"
+  endpoint: "s3.amazonaws.com"
+  access_key: "YOUR_ACCESS_KEY"
+  secret_key: "YOUR_SECRET_KEY"
+```
+
+### 3. 部署Thanos Query
+
+Thanos Query 是全局查询的入口点。它可以从多个 Prometheus 实例和对象存储中查询数据。
+
+```yaml
+# thanos-query.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-query
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thanos-query
+  template:
+    metadata:
+      labels:
+        app: thanos-query
+    spec:
+      containers:
+      - name: thanos-query
+        image: thanosio/thanos:v0.24.0
+        args:
+        - "query"
+        - "--http-address=0.0.0.0:10902"
+        - "--store=thanos-sidecar:10901"
+        ports:
+        - containerPort: 10902
+```
+
+### 4. 部署Thanos Store Gateway
+
+Thanos Store Gateway 允许你从对象存储中查询历史数据。
+
+```yaml
+# thanos-store.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thanos-store
+  template:
+    metadata:
+      labels:
+        app: thanos-store
+    spec:
+      containers:
+      - name: thanos-store
+        image: thanosio/thanos:v0.24.0
+        args:
+        - "store"
+        - "--data-dir=/var/thanos/store"
+        - "--objstore.config-file=/etc/thanos/objstore.yml"
+        ports:
+        - containerPort: 10901
+        volumeMounts:
+        - name: objstore-config
+          mountPath: /etc/thanos
+      volumes:
+      - name: objstore-config
+        configMap:
+          name: thanos-objstore-config
+```
+
+### 5. 部署Thanos Compactor
+
+Thanos Compactor 负责压缩和降采样历史数据，以减少存储空间和查询时间。
+
+```yaml
+# thanos-compactor.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thanos-compactor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: thanos-compactor
+  template:
+    metadata:
+      labels:
+        app: thanos-compactor
+    spec:
+      containers:
+      - name: thanos-compactor
+        image: thanosio/thanos:v0.24.0
+        args:
+        - "compact"
+        - "--data-dir=/var/thanos/compact"
+        - "--objstore.config-file=/etc/thanos/objstore.yml"
+        ports:
+        - containerPort: 10905
+        volumeMounts:
+        - name: objstore-config
+          mountPath: /etc/thanos
+      volumes:
+      - name: objstore-config
+        configMap:
+          name: thanos-objstore-config
+```
+
+## 实际应用场景
+
+假设你有一个全球分布的应用程序，每个区域都有一个 Prometheus 实例来监控该区域的性能。通过 Thanos，你可以将所有区域的数据集中存储在一个对象存储中，并通过 Thanos Query 进行全局查询。这样，你可以轻松地比较不同区域的性能，并快速识别潜在的问题。
+
+## 总结
+
+Thanos 是一个强大的工具，可以帮助你实现 Prometheus 的高可用性和长期存储。通过部署 Thanos Sidecar、Query、Store Gateway 和 Compactor，你可以轻松地扩展 Prometheus 的功能，并确保你的监控数据始终可用。
+
+## 附加资源
+
+- [Thanos 官方文档](https://thanos.io/)
+- [Prometheus 官方文档](https://prometheus.io/docs/)
+- [Kubernetes 官方文档](https://kubernetes.io/docs/)
+
+## 练习
+
+1. 在你的 Kubernetes 集群中部署 Thanos Sidecar 和 Query。
+2. 配置一个对象存储（如 S3 或 GCS），并将 Prometheus 数据上传到该存储。
+3. 使用 Thanos Query 查询跨多个 Prometheus 实例的数据。

@@ -1,0 +1,197 @@
+---
+title: Elasticsearch 地理位置聚合
+description: 了解如何使用Elasticsearch的地理位置聚合功能，对地理空间数据进行分组和分析。本文适合初学者，包含代码示例和实际案例。
+---
+
+# Elasticsearch 地理位置聚合
+
+Elasticsearch 是一个强大的搜索引擎，支持对地理空间数据进行聚合分析。地理位置聚合（Geo Aggregations）允许你根据地理位置对数据进行分组和分析，适用于地图可视化、区域统计等场景。本文将详细介绍 Elasticsearch 的地理位置聚合功能，并通过代码示例和实际案例帮助你快速上手。
+
+## 什么是地理位置聚合？
+
+地理位置聚合是 Elasticsearch 提供的一种特殊聚合类型，用于对地理空间数据进行分组和计算。它可以帮助你回答以下问题：
+
+- 某个区域内的文档数量是多少？
+- 某个点附近有哪些文档？
+- 如何将数据按地理位置进行分组统计？
+
+Elasticsearch 支持多种地理位置聚合类型，包括 `geo_distance`、`geohash_grid` 和 `geo_bounds` 等。接下来，我们将逐一介绍这些聚合类型。
+
+## 地理位置聚合类型
+
+### 1. `geo_distance` 聚合
+
+`geo_distance` 聚合允许你根据文档与某个中心点之间的距离进行分组。你可以定义多个距离范围（例如 0-10km、10-20km 等），Elasticsearch 会将文档分配到相应的范围中。
+
+#### 示例代码
+
+假设我们有一个索引 `restaurants`，其中包含餐厅的地理位置信息。我们希望统计距离某个中心点 10km、20km 和 30km 范围内的餐厅数量。
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "restaurants_by_distance": {
+      "geo_distance": {
+        "field": "location",
+        "origin": "40.7128,-74.0060", // 纽约市的经纬度
+        "ranges": [
+          { "to": 10 },
+          { "from": 10, "to": 20 },
+          { "from": 20, "to": 30 }
+        ]
+      }
+    }
+  }
+}
+```
+
+#### 输出结果
+
+```json
+{
+  "aggregations": {
+    "restaurants_by_distance": {
+      "buckets": [
+        { "key": "*-10.0", "from": 0, "to": 10, "doc_count": 15 },
+        { "key": "10.0-20.0", "from": 10, "to": 20, "doc_count": 10 },
+        { "key": "20.0-30.0", "from": 20, "to": 30, "doc_count": 5 }
+      ]
+    }
+  }
+}
+```
+
+:::tip
+`geo_distance` 聚合的单位默认为公里（km），你也可以通过 `unit` 参数指定其他单位，如 `m`（米）、`mi`（英里）等。
+:::
+
+### 2. `geohash_grid` 聚合
+
+`geohash_grid` 聚合将地理空间数据划分为多个网格（grid），每个网格对应一个 geohash 值。你可以通过 `precision` 参数控制网格的大小，精度越高，网格越小。
+
+#### 示例代码
+
+假设我们想将餐厅数据按 geohash 网格进行分组，并统计每个网格中的餐厅数量。
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "restaurants_by_grid": {
+      "geohash_grid": {
+        "field": "location",
+        "precision": 5
+      }
+    }
+  }
+}
+```
+
+#### 输出结果
+
+```json
+{
+  "aggregations": {
+    "restaurants_by_grid": {
+      "buckets": [
+        { "key": "dr5ru", "doc_count": 8 },
+        { "key": "dr5rv", "doc_count": 5 },
+        { "key": "dr5rw", "doc_count": 3 }
+      ]
+    }
+  }
+}
+```
+
+:::note
+`geohash_grid` 聚合常用于地图可视化，例如热力图或点密度图。
+:::
+
+### 3. `geo_bounds` 聚合
+
+`geo_bounds` 聚合用于计算一组地理坐标的边界框（bounding box）。它返回一个矩形区域，包含所有文档的地理位置。
+
+#### 示例代码
+
+假设我们想计算所有餐厅的地理位置边界框。
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "restaurants_bounds": {
+      "geo_bounds": {
+        "field": "location"
+      }
+    }
+  }
+}
+```
+
+#### 输出结果
+
+```json
+{
+  "aggregations": {
+    "restaurants_bounds": {
+      "bounds": {
+        "top_left": { "lat": 40.8, "lon": -74.1 },
+        "bottom_right": { "lat": 40.6, "lon": -73.9 }
+      }
+    }
+  }
+}
+```
+
+:::caution
+`geo_bounds` 聚合只适用于包含地理位置字段的文档。如果文档中没有地理位置数据，结果将为空。
+:::
+
+## 实际案例：城市餐厅分布分析
+
+假设我们有一个餐厅数据集，包含餐厅的名称、位置和评分。我们希望分析某个城市内餐厅的分布情况，并统计不同区域的餐厅数量和平均评分。
+
+### 步骤 1：按 geohash 网格分组
+
+首先，我们使用 `geohash_grid` 聚合将餐厅按地理位置分组。
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "restaurants_by_grid": {
+      "geohash_grid": {
+        "field": "location",
+        "precision": 5
+      },
+      "aggs": {
+        "average_rating": {
+          "avg": { "field": "rating" }
+        }
+      }
+    }
+  }
+}
+```
+
+### 步骤 2：分析结果
+
+通过上述查询，我们可以得到每个网格中的餐厅数量和平均评分。这些数据可以用于生成热力图或区域统计报告。
+
+## 总结
+
+Elasticsearch 的地理位置聚合功能为地理空间数据分析提供了强大的工具。通过 `geo_distance`、`geohash_grid` 和 `geo_bounds` 等聚合类型，你可以轻松实现区域统计、地图可视化和边界计算等功能。
+
+## 附加资源
+
+- [Elasticsearch 官方文档：地理位置聚合](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-bucket-geohashgrid-aggregation.html)
+- [Geohash 编码详解](https://en.wikipedia.org/wiki/Geohash)
+
+## 练习
+
+1. 使用 `geo_distance` 聚合统计距离你所在城市中心 5km、10km 和 15km 范围内的餐厅数量。
+2. 尝试使用 `geohash_grid` 聚合生成一个餐厅分布热力图。
+3. 使用 `geo_bounds` 聚合计算某个区域内所有餐厅的地理边界框。
+
+通过以上练习，你将更好地掌握 Elasticsearch 的地理位置聚合功能。祝你学习愉快！

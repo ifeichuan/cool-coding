@@ -1,0 +1,183 @@
+---
+title: Promtail管道配置
+description: 学习如何使用Promtail的管道功能处理和转换日志数据，包括配置详解、常用阶段和实际案例。
+---
+
+# Promtail管道配置
+
+## 介绍
+
+Promtail是Loki日志系统的日志收集代理，负责从各种来源抓取日志并将其发送到Loki。**管道（Pipeline）**是Promtail的核心功能之一，允许你在日志被发送到Loki之前对其进行处理和转换。管道由一系列**阶段（Stages）**组成，每个阶段对日志条目执行特定的操作，例如解析、重命名字段或添加标签。
+
+通过管道配置，你可以：
+- 提取和解析日志中的特定信息
+- 过滤不需要的日志条目
+- 修改日志内容和结构
+- 添加或删除元数据标签
+
+## 基本配置结构
+
+Promtail的管道配置在`scrape_configs`部分的`pipeline_stages`中定义。以下是一个基本示例：
+
+```yaml
+scrape_configs:
+  - job_name: example
+    pipeline_stages:
+      - docker: {}
+      - regex:
+          expression: '.*level=(?P<level>\w+).*'
+      - labels:
+          level:
+```
+
+这个管道首先解析Docker日志格式，然后使用正则表达式提取日志级别，最后将级别添加为标签。
+
+## 常用管道阶段
+
+### 1. 解析阶段
+
+#### `docker`阶段
+解析Docker格式的日志文件，自动提取容器名称、镜像等信息。
+
+```yaml
+- docker: {}
+```
+
+#### `cri`阶段
+解析CRI（容器运行时接口）格式的日志，适用于Kubernetes环境。
+
+```yaml
+- cri: {}
+```
+
+#### `regex`阶段
+使用正则表达式提取信息。例如从日志中提取IP地址：
+
+```yaml
+- regex:
+    expression: '(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+```
+
+### 2. 转换阶段
+
+#### `json`阶段
+解析JSON格式的日志：
+
+```yaml
+- json:
+    expressions:
+      user: user
+      method: method
+```
+
+输入日志：
+```json
+{"user": "alice", "method": "GET", "path": "/api"}
+```
+
+处理后：
+- 提取字段：`user="alice"`, `method="GET"`
+
+#### `timestamp`阶段
+解析和设置日志时间戳：
+
+```yaml
+- timestamp:
+    source: time
+    format: RFC3339
+```
+
+### 3. 标签处理
+
+#### `labels`阶段
+将提取的字段转换为标签：
+
+```yaml
+- labels:
+    user:
+    method:
+```
+
+:::note
+Loki中的标签是索引的，应该保持有限的、有意义的值的集合。避免使用高基数字段（如用户ID）作为标签。
+:::
+
+### 4. 输出阶段
+
+#### `output`阶段
+决定最终发送到Loki的日志内容：
+
+```yaml
+- output:
+    source: message
+```
+
+## 完整示例：处理Nginx日志
+
+让我们看一个处理Nginx访问日志的实际案例：
+
+```yaml
+scrape_configs:
+  - job_name: nginx
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx
+          __path__: /var/log/nginx/access.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<ip>\S+) \S+ \S+ $$(?P<timestamp>[^$$]+)$$ "(?P<method>\S+) (?P<path>\S+) \S+" (?P<status>\d+) (?P<size>\d+) "(?P<referer>[^"]*)" "(?P<user_agent>[^"]*)"'
+      - labels:
+          method:
+          status:
+      - timestamp:
+          source: timestamp
+          format: "02/Jan/2006:15:04:05 -0700"
+      - output:
+          source: message
+```
+
+这个配置：
+1. 使用正则表达式解析Nginx日志格式
+2. 将HTTP方法和状态码提取为标签
+3. 解析时间戳
+4. 发送原始消息到Loki
+
+## 调试管道
+
+当管道不按预期工作时，可以通过以下方法调试：
+
+1. 使用`logging`阶段打印中间结果：
+
+```yaml
+- logging:
+    level: debug
+```
+
+2. 检查Promtail日志获取处理详情
+3. 使用[Loki的查询分析器](https://grafana.com/docs/loki/latest/query/)验证结果
+
+## 性能考虑
+
+管道处理会增加CPU使用率，特别是在使用复杂正则表达式时。优化建议：
+- 尽量使用简单的正则表达式
+- 避免不必要的阶段
+- 对于高吞吐量系统，考虑在日志源处预处理
+
+## 总结
+
+Promtail的管道功能提供了强大的日志处理能力，使你能够在日志进入Loki之前进行各种转换和增强。关键要点：
+- 管道由多个阶段组成，按顺序执行
+- 常用阶段包括解析、转换、标签处理和输出
+- 合理使用标签可以提高查询效率
+- 复杂的处理可能影响性能，需要平衡功能和资源使用
+
+## 延伸学习
+
+1. 尝试为你的应用日志创建自定义管道
+2. 比较不同正则表达式对CPU使用率的影响
+3. 探索`template`阶段，实现更灵活的日志格式转换
+
+官方资源：
+- [Promtail管道文档](https://grafana.com/docs/loki/latest/clients/promtail/pipelines/)
+- [阶段配置参考](https://grafana.com/docs/loki/latest/clients/promtail/stages/)

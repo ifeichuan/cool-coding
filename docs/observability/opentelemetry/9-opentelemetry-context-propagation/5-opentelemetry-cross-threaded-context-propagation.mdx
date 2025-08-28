@@ -1,0 +1,129 @@
+---
+title: OpenTelemetry 跨线程上下文传播
+description: 学习如何在多线程环境中使用OpenTelemetry实现上下文传播，确保分布式追踪的连续性。
+---
+
+# OpenTelemetry 跨线程上下文传播
+
+## 介绍
+
+在分布式系统中，**上下文传播**是确保请求在不同服务或组件间流动时，追踪信息（如TraceID、SpanID）能够正确传递的关键机制。当应用涉及多线程时，线程间的上下文传递需要特殊处理，因为线程本地存储（ThreadLocal）通常无法跨线程共享。OpenTelemetry提供了专门的API来解决这一问题。
+
+:::note 关键概念
+- **上下文（Context）**：包含当前Span、Baggage（自定义键值对）等信息的容器。
+- **跨线程传播**：将上下文从一个线程传递到另一个线程，保持追踪链路的完整性。
+:::
+
+---
+
+## 基础原理
+
+OpenTelemetry通过`Context`对象管理跨线程的传播。核心类包括：
+- `Context`：保存当前线程的上下文。
+- `ContextStorage`：底层存储机制（默认使用`ThreadLocal`）。
+- `Context.withCurrent()`：捕获当前上下文并绑定到新线程。
+
+```mermaid
+flowchart LR
+    A[主线程: 创建Span] --> B[捕获Context]
+    B --> C[传递给子线程]
+    C --> D[子线程: 恢复Context]
+```
+
+---
+
+## 代码示例
+
+### 场景：主线程创建任务并传递给线程池
+
+```java
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.context.Context;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class ThreadPropagationExample {
+    private static final ExecutorService executor = Executors.newFixedThreadPool(2);
+
+    public static void main(String[] args) {
+        // 主线程创建Span
+        Span parentSpan = Span.current();
+        Context parentContext = Context.current().with(parentSpan);
+
+        // 将任务提交到线程池，并传递上下文
+        executor.submit(
+            Context.taskWrapper(parentContext, () -> {
+                // 子线程中恢复上下文
+                Span childSpan = Span.current();
+                System.out.println("子线程Span TraceID: " + childSpan.getSpanContext().getTraceId());
+            })
+        );
+    }
+}
+```
+
+**输出示例**：
+```
+子线程Span TraceID: 4bf92f3577b34da6a3ce929d0e0e4736
+```
+
+:::tip 注意事项
+- 使用`Context.taskWrapper()`包装Runnable/Callable。
+- 确保线程池任务完成后清理上下文（避免内存泄漏）。
+:::
+
+---
+
+## 实际应用场景
+
+### 案例：异步微服务调用
+假设一个订单处理服务需要：
+1. 在主线程接收HTTP请求并创建Span。
+2. 异步调用库存服务和支付服务。
+
+```java
+// 使用CompletableFuture的异步处理
+CompletableFuture.runAsync(
+    Context.taskWrapper(Context.current(), () -> {
+        // 异步调用库存服务
+        inventoryService.checkStock();
+    }),
+    executor
+);
+```
+
+---
+
+## 高级主题：自定义上下文存储
+
+如果默认的`ThreadLocal`存储不满足需求（例如在协程库中），可以实现`ContextStorage`接口：
+
+```java
+public class CustomContextStorage implements ContextStorage {
+    @Override
+    public Scope attach(Context context) {
+        // 实现自定义绑定逻辑
+    }
+}
+
+// 注册自定义存储
+ContextStorage.setGlobalContextStorage(new CustomContextStorage());
+```
+
+---
+
+## 总结
+
+1. **为什么需要跨线程传播**：保持追踪链路的完整性。
+2. **核心方法**：`Context.current()` + `Context.taskWrapper()`。
+3. **最佳实践**：始终清理上下文，避免污染线程池。
+
+---
+
+## 延伸练习
+1. 尝试在Spring Boot的`@Async`方法中实现上下文传播。
+2. 模拟一个线程泄漏场景，观察未清理上下文的影响。
+
+## 附加资源
+- [OpenTelemetry官方文档：上下文管理](https://opentelemetry.io/docs/instrumentation/java/manual/#context-propagation)
+- [GitHub示例：Kotlin协程支持](https://github.com/open-telemetry/opentelemetry-java-instrumentation/tree/main/examples/kotlin)

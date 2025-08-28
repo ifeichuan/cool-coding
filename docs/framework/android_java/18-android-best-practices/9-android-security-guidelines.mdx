@@ -1,0 +1,212 @@
+---
+title: Android安全指南
+description: 了解Android应用开发中的安全最佳实践，保护用户数据和隐私。
+---
+
+## 介绍
+
+在Android应用开发中，安全性是一个至关重要的方面。无论你是开发一个简单的工具应用，还是一个复杂的商业应用，保护用户数据和隐私都是你的责任。本指南将带你了解Android开发中的一些关键安全实践，帮助你构建更安全的应用程序。
+
+## 1. 数据存储安全
+
+### 1.1 使用SharedPreferences
+
+SharedPreferences是Android中用于存储简单键值对的一种方式。然而，直接存储敏感信息（如密码）是不安全的。为了增强安全性，可以使用`EncryptedSharedPreferences`。
+
+```kotlin
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKeys
+
+val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+val sharedPreferences = EncryptedSharedPreferences.create(
+    "secret_shared_prefs",
+    masterKeyAlias,
+    context,
+    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+)
+
+sharedPreferences.edit().putString("password", "my_password").apply()
+```
+
+:::tip
+使用`EncryptedSharedPreferences`可以确保存储在SharedPreferences中的数据是加密的，从而防止未经授权的访问。
+:::
+
+### 1.2 使用SQLite数据库
+
+对于更复杂的数据存储需求，SQLite是一个常见的选择。然而，直接存储敏感数据在SQLite中也是不安全的。你可以使用`SQLCipher`来加密SQLite数据库。
+
+```kotlin
+import net.sqlcipher.database.SQLiteDatabase
+
+SQLiteDatabase.loadLibs(context)
+val database = SQLiteDatabase.openOrCreateDatabase(
+    context.getDatabasePath("my_database.db"),
+    "my_password",
+    null
+)
+```
+
+:::caution
+确保数据库密码足够复杂，并且不要硬编码在代码中。可以考虑使用密钥管理系统来动态获取密码。
+:::
+
+## 2. 网络安全
+
+### 2.1 使用HTTPS
+
+在应用与服务器通信时，始终使用HTTPS而不是HTTP。HTTPS通过TLS/SSL加密通信，防止数据在传输过程中被窃取或篡改。
+
+```kotlin
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
+val client = OkHttpClient()
+val request = Request.Builder()
+    .url("https://example.com/api/data")
+    .build()
+
+val response = client.newCall(request).execute()
+```
+
+:::note
+确保服务器证书是有效的，并且客户端配置了正确的证书验证机制。
+:::
+
+### 2.2 证书固定
+
+为了防止中间人攻击，可以使用证书固定（Certificate Pinning）来确保客户端只与特定的服务器通信。
+
+```kotlin
+val certificatePinner = CertificatePinner.Builder()
+    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    .build()
+
+val client = OkHttpClient.Builder()
+    .certificatePinner(certificatePinner)
+    .build()
+```
+
+:::warning
+证书固定需要谨慎使用，因为如果服务器证书更新，客户端可能无法连接。确保你有适当的机制来处理证书更新。
+:::
+
+## 3. 用户认证与授权
+
+### 3.1 使用Biometric API
+
+对于需要高安全性的应用，可以使用Android的Biometric API来支持指纹、面部识别等生物认证方式。
+
+```kotlin
+import androidx.biometric.BiometricPrompt
+import androidx.fragment.app.FragmentActivity
+
+val biometricPrompt = BiometricPrompt(activity as FragmentActivity, executor,
+    object : BiometricPrompt.AuthenticationCallback() {
+        override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+            super.onAuthenticationSucceeded(result)
+            // 认证成功
+        }
+    })
+
+val promptInfo = BiometricPrompt.PromptInfo.Builder()
+    .setTitle("Biometric login")
+    .setSubtitle("Log in using your biometric credential")
+    .setNegativeButtonText("Use account password")
+    .build()
+
+biometricPrompt.authenticate(promptInfo)
+```
+
+:::tip
+生物认证提供了更高的安全性，并且用户体验更好。确保在应用中提供备用的认证方式，以防生物认证失败。
+:::
+
+### 3.2 OAuth2.0 授权
+
+对于需要访问第三方资源的应用，OAuth2.0是一个广泛使用的授权框架。你可以使用`AppAuth`库来实现OAuth2.0授权。
+
+```kotlin
+import net.openid.appauth.AuthorizationService
+import net.openid.appauth.AuthorizationRequest
+
+val service = AuthorizationService(context)
+val authRequest = AuthorizationRequest.Builder(
+    config,
+    "client_id",
+    ResponseTypeValues.CODE,
+    Uri.parse("com.example.app:/oauth2redirect")
+).build()
+
+service.performAuthorizationRequest(authRequest, pendingIntent)
+```
+
+:::note
+OAuth2.0授权流程较为复杂，建议仔细阅读相关文档，并确保正确实现授权流程。
+:::
+
+## 4. 代码混淆与反编译防护
+
+### 4.1 使用ProGuard
+
+ProGuard是一个代码优化和混淆工具，可以防止反编译和逆向工程。
+
+```gradle
+buildTypes {
+    release {
+        minifyEnabled true
+        proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+}
+```
+
+:::caution
+混淆可能会影响应用的性能，特别是在调试时。确保在发布版本中启用混淆，并在测试时关闭。
+:::
+
+### 4.2 使用DexGuard
+
+DexGuard是ProGuard的增强版，提供了更高级的保护措施，如字符串加密、资源加密等。
+
+```gradle
+buildTypes {
+    release {
+        minifyEnabled true
+        useProguard false
+        dexguardFile 'dexguard-project.txt'
+    }
+}
+```
+
+:::warning
+DexGuard是商业软件，需要购买许可证。确保在项目预算中考虑这一点。
+:::
+
+## 5. 实际案例
+
+### 5.1 银行应用
+
+在一个银行应用中，安全性是至关重要的。通过使用`EncryptedSharedPreferences`存储用户凭证，使用HTTPS进行通信，并启用生物认证，可以大大增强应用的安全性。
+
+### 5.2 社交媒体应用
+
+在一个社交媒体应用中，用户数据隐私是首要考虑。通过使用OAuth2.0授权访问第三方资源，并使用ProGuard进行代码混淆，可以有效保护用户数据。
+
+## 总结
+
+Android应用开发中的安全性是一个复杂但至关重要的主题。通过遵循本指南中的最佳实践，你可以构建更安全的应用，保护用户数据和隐私。始终记住，安全性是一个持续的过程，需要不断更新和改进。
+
+## 附加资源
+
+- [Android官方安全指南](https://developer.android.com/topic/security/best-practices)
+- [ProGuard官方文档](https://www.guardsquare.com/proguard)
+- [OAuth2.0 RFC](https://tools.ietf.org/html/rfc6749)
+
+## 练习
+
+1. 在你的应用中实现`EncryptedSharedPreferences`，并测试其安全性。
+2. 配置一个使用HTTPS的API请求，并验证证书的有效性。
+3. 使用Biometric API实现生物认证，并处理认证失败的情况。
+
+通过完成这些练习，你将更好地理解Android应用开发中的安全实践。

@@ -1,0 +1,191 @@
+---
+title: RabbitMQ 运维脚本
+description: 了解如何使用脚本自动化 RabbitMQ 的监控与运维任务，提升运维效率并确保消息队列的稳定性。
+---
+
+## 介绍
+
+RabbitMQ 是一个广泛使用的消息队列系统，用于在分布式系统中传递消息。随着系统规模的扩大，手动管理 RabbitMQ 的运维任务变得复杂且容易出错。通过编写运维脚本，可以自动化常见的监控、管理和故障排查任务，从而提升效率并减少人为错误。
+
+本文将介绍如何编写 RabbitMQ 运维脚本，涵盖从基础到高级的脚本编写技巧，并通过实际案例展示其应用场景。
+
+## 准备工作
+
+在编写 RabbitMQ 运维脚本之前，需要确保以下工具和环境已准备就绪：
+
+1. **RabbitMQ 管理插件**：确保 RabbitMQ 管理插件已启用，以便通过 HTTP API 进行管理。
+   ```bash
+   rabbitmq-plugins enable rabbitmq_management
+   ```
+2. **Python 环境**：本文的示例脚本使用 Python 编写，因此需要安装 Python 和 `pika` 库。
+   ```bash
+   pip install pika requests
+   ```
+3. **RabbitMQ 访问权限**：确保脚本能够访问 RabbitMQ 的管理 API 或 AMQP 协议。
+
+## 基础运维脚本
+
+### 1. 检查 RabbitMQ 节点状态
+
+以下脚本通过 RabbitMQ 的 HTTP API 检查节点的运行状态：
+
+```python
+import requests
+
+def check_node_status(host, port, username, password):
+    url = f"http://{host}:{port}/api/nodes"
+    response = requests.get(url, auth=(username, password))
+    if response.status_code == 200:
+        nodes = response.json()
+        for node in nodes:
+            print(f"Node: {node['name']}, Status: {node['running']}")
+    else:
+        print(f"Failed to fetch node status: {response.status_code}")
+
+# 示例调用
+check_node_status("localhost", 15672, "guest", "guest")
+```
+
+**输出示例**：
+```
+Node: rabbit@localhost, Status: True
+```
+
+:::tip
+确保 RabbitMQ 管理插件的端口（默认 15672）已开放，并且脚本具有访问权限。
+:::
+
+### 2. 监控队列消息积压
+
+以下脚本监控指定队列的消息积压情况：
+
+```python
+import requests
+
+def monitor_queue_backlog(host, port, username, password, queue_name):
+    url = f"http://{host}:{port}/api/queues/%2F/{queue_name}"
+    response = requests.get(url, auth=(username, password))
+    if response.status_code == 200:
+        queue_info = response.json()
+        print(f"Queue: {queue_name}, Messages: {queue_info['messages']}")
+    else:
+        print(f"Failed to fetch queue info: {response.status_code}")
+
+# 示例调用
+monitor_queue_backlog("localhost", 15672, "guest", "guest", "my_queue")
+```
+
+**输出示例**：
+```
+Queue: my_queue, Messages: 10
+```
+
+## 高级运维脚本
+
+### 1. 自动清理积压队列
+
+当队列中的消息积压过多时，可能需要清理队列以释放资源。以下脚本自动清理指定队列的消息：
+
+```python
+import pika
+
+def purge_queue(host, queue_name):
+    connection = pika.BlockingConnection(pika.ConnectionParameters(host))
+    channel = connection.channel()
+    channel.queue_purge(queue_name)
+    print(f"Queue {queue_name} purged successfully.")
+    connection.close()
+
+# 示例调用
+purge_queue("localhost", "my_queue")
+```
+
+**输出示例**：
+```
+Queue my_queue purged successfully.
+```
+
+:::caution
+清理队列会永久删除所有未处理的消息，请谨慎使用。
+:::
+
+### 2. 动态调整队列 TTL
+
+以下脚本动态调整队列的消息生存时间（TTL）：
+
+```python
+import requests
+
+def set_queue_ttl(host, port, username, password, queue_name, ttl_ms):
+    url = f"http://{host}:{port}/api/queues/%2F/{queue_name}"
+    data = {"arguments": {"x-message-ttl": ttl_ms}}
+    response = requests.put(url, json=data, auth=(username, password))
+    if response.status_code == 204:
+        print(f"Queue {queue_name} TTL set to {ttl_ms} ms.")
+    else:
+        print(f"Failed to set TTL: {response.status_code}")
+
+# 示例调用
+set_queue_ttl("localhost", 15672, "guest", "guest", "my_queue", 60000)
+```
+
+**输出示例**：
+```
+Queue my_queue TTL set to 60000 ms.
+```
+
+## 实际案例
+
+### 案例：自动化监控与告警
+
+假设我们需要监控多个 RabbitMQ 队列的消息积压情况，并在积压超过阈值时发送告警。以下脚本结合了监控和告警功能：
+
+```python
+import requests
+import smtplib
+from email.mime.text import MIMEText
+
+def send_alert(email, message):
+    msg = MIMEText(message)
+    msg["Subject"] = "RabbitMQ Queue Alert"
+    msg["From"] = "noreply@example.com"
+    msg["To"] = email
+
+    with smtplib.SMTP("smtp.example.com") as server:
+        server.sendmail("noreply@example.com", [email], msg.as_string())
+
+def monitor_and_alert(host, port, username, password, queue_name, threshold, email):
+    url = f"http://{host}:{port}/api/queues/%2F/{queue_name}"
+    response = requests.get(url, auth=(username, password))
+    if response.status_code == 200:
+        queue_info = response.json()
+        messages = queue_info["messages"]
+        if messages > threshold:
+            send_alert(email, f"Queue {queue_name} has {messages} messages (threshold: {threshold}).")
+    else:
+        print(f"Failed to fetch queue info: {response.status_code}")
+
+# 示例调用
+monitor_and_alert("localhost", 15672, "guest", "guest", "my_queue", 100, "admin@example.com")
+```
+
+**输出示例**：
+```
+如果队列 `my_queue` 的消息超过 100 条，将发送告警邮件。
+```
+
+## 总结
+
+通过编写 RabbitMQ 运维脚本，可以自动化常见的监控、管理和故障排查任务，从而提升运维效率并确保消息队列的稳定性。本文介绍了从基础到高级的脚本编写技巧，并通过实际案例展示了其应用场景。
+
+## 附加资源
+
+- [RabbitMQ 官方文档](https://www.rabbitmq.com/documentation.html)
+- [Python `pika` 库文档](https://pika.readthedocs.io/)
+- [RabbitMQ HTTP API 参考](https://rawcdn.githack.com/rabbitmq/rabbitmq-server/v3.11.13/deps/rabbitmq_management/priv/www/api/index.html)
+
+## 练习
+
+1. 编写一个脚本，监控 RabbitMQ 的所有队列，并在任意队列的消息积压超过 1000 条时发送告警。
+2. 扩展脚本，使其能够动态调整队列的 TTL 并记录调整日志。
+3. 尝试使用其他编程语言（如 Bash 或 Go）实现类似的运维脚本。

@@ -1,0 +1,133 @@
+---
+title: Zipkin 连接问题分析
+description: "学习如何诊断和解决 Zipkin 分布式追踪系统中的常见连接问题，包括服务端配置、网络检查和客户端集成。"
+---
+
+# Zipkin 连接问题分析
+
+## 介绍
+
+连接问题是 Zipkin 使用过程中最常见的故障之一，尤其是在分布式系统中部署和集成时。当服务无法将追踪数据发送到 Zipkin 服务器，或 Zipkin UI 无法访问时，通常需要检查网络配置、服务端状态和客户端设置。本指南将帮助你逐步排查这些问题。
+
+---
+
+## 1. 基础检查
+
+### 1.1 验证 Zipkin 服务器状态
+确保 Zipkin 服务器正在运行并监听正确的端口。使用以下命令检查服务状态：
+
+```bash
+# 检查 Zipkin 容器（如果使用 Docker）
+docker ps | grep zipkin
+
+# 检查进程（如果直接运行）
+ps aux | grep zipkin
+```
+
+如果服务未运行，启动 Zipkin 服务器：
+```bash
+docker run -d -p 9411:9411 openzipkin/zipkin
+```
+
+### 1.2 测试网络连通性
+从客户端机器向 Zipkin 服务器发起连接测试：
+```bash
+# 替换为你的 Zipkin 服务器地址
+curl -v http://zipkin-server:9411/health
+```
+预期输出应包含 HTTP 200 状态码。
+
+---
+
+## 2. 常见连接问题场景
+
+### 2.1 客户端无法发送追踪数据
+**症状**：应用日志显示 `Unable to send spans to Zipkin`。
+
+**可能原因**：
+1. 客户端配置的 Zipkin 地址错误
+2. 防火墙/安全组阻止了请求
+3. Zipkin 服务器资源不足（如磁盘已满）
+
+**解决方案**：
+检查客户端配置（以 Spring Boot 为例）：
+```yaml
+# application.yml
+spring:
+  zipkin:
+    base-url: http://zipkin-server:9411  # 确认地址和端口
+    sender.type: web                     # 检查发送方式（web/kafka/rabbitmq）
+```
+
+:::caution 注意
+如果使用 Kafka/RabbitMQ 传输数据，还需验证中间件服务是否可达。
+:::
+
+---
+
+### 2.2 Zipkin UI 无法访问
+**症状**：浏览器访问 `http://localhost:9411` 超时或报错。
+
+**排查步骤**：
+1. 确认服务器已绑定正确接口：
+   ```bash
+   netstat -tuln | grep 9411
+   ```
+2. 检查端口暴露（Docker 场景）：
+   ```bash
+   docker inspect zipkin-container | grep HostPort
+   ```
+
+---
+
+## 3. 高级诊断工具
+
+### 3.1 使用 Zipkin API 验证
+直接调用 Zipkin API 检查数据接收：
+```bash
+# 查询最近追踪记录
+curl http://zipkin-server:9411/api/v2/traces
+```
+
+### 3.2 网络拓扑分析
+```mermaid
+graph LR
+  A[客户端应用] -->|HTTP/Kafka| B(Zipkin Collector)
+  B --> C[Storage]
+  C --> D[Zipkin UI]
+```
+如果链路中断，需逐步检查各环节连通性。
+
+---
+
+## 4. 真实案例
+
+**案例**：某微服务无法在 Kubernetes 集群中上报数据。<br />
+**根本原因**：Zipkin Service 的 Kubernetes DNS 名称未正确解析。<br />
+**修复方案**：
+```yaml
+# 客户端配置修正
+spring:
+  zipkin:
+    base-url: http://zipkin.prod.svc.cluster.local:9411
+```
+
+---
+
+## 总结与练习
+
+### 总结
+- 始终从基础检查开始（服务状态、网络）
+- 区分客户端上报问题与 UI 访问问题
+- 利用 Zipkin API 进行快速验证
+
+### 练习
+1. 故意错误配置一个 Spring Boot 应用的 `base-url`，观察日志错误。
+2. 使用 `tcpdump` 捕获客户端与 Zipkin 服务器的通信：
+   ```bash
+   tcpdump -i any port 9411 -w zipkin.pcap
+   ```
+
+### 扩展阅读
+- [Zipkin 官方故障排除指南](https://zipkin.io/pages/troubleshooting.html)
+- 《分布式系统观测：从 Zipkin 到 OpenTelemetry》

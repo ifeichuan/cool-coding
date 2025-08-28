@@ -1,0 +1,114 @@
+---
+title: Airflow TaskFlow API
+description: "了解如何使用 Airflow 的 TaskFlow API 简化任务定义和任务之间的通信。本文适合初学者，包含代码示例和实际案例。"
+---
+
+## 介绍
+
+Apache Airflow 是一个强大的工作流编排工具，用于调度和监控复杂的数据管道。在 Airflow 中，任务（Task）是工作流的基本构建块。传统上，任务之间的通信依赖于 XComs（Cross-Communication），但这种方式在复杂场景下可能会显得繁琐。为了解决这个问题，Airflow 引入了 **TaskFlow API**，它提供了一种更简洁、更直观的方式来定义任务和任务之间的依赖关系。
+
+TaskFlow API 是 Airflow 2.0 引入的一个新特性，它允许用户使用 Python 装饰器来定义任务，并自动处理任务之间的依赖关系和 XComs 通信。通过 TaskFlow API，你可以更专注于业务逻辑，而不必过多关注底层的任务调度和通信细节。
+
+## TaskFlow API 的基本用法
+
+### 1. 使用 `@task` 装饰器定义任务
+
+TaskFlow API 的核心是 `@task` 装饰器。你可以使用它来将普通的 Python 函数转换为 Airflow 任务。以下是一个简单的示例：
+
+```python
+from airflow.decorators import task, dag
+from airflow.utils.dates import days_ago
+
+@dag(
+    schedule_interval=None,
+    start_date=days_ago(1),
+    catchup=False,
+)
+def my_dag():
+    @task
+    def extract():
+        return "Extracted Data"
+
+    @task
+    def transform(data):
+        return f"Transformed {data}"
+
+    @task
+    def load(data):
+        print(f"Loaded {data}")
+
+    data = extract()
+    transformed_data = transform(data)
+    load(transformed_data)
+
+my_dag_instance = my_dag()
+```
+
+在这个示例中，我们定义了三个任务：`extract`、`transform` 和 `load`。`extract` 任务返回一个字符串，`transform` 任务接收这个字符串并对其进行处理，最后 `load` 任务将处理后的数据打印出来。
+
+### 2. 任务之间的依赖关系
+
+TaskFlow API 会自动处理任务之间的依赖关系。在上面的示例中，`transform` 任务依赖于 `extract` 任务的输出，而 `load` 任务依赖于 `transform` 任务的输出。这种依赖关系是通过函数的返回值自动建立的。
+
+### 3. 使用 XComs 进行任务通信
+
+在 TaskFlow API 中，任务之间的通信仍然依赖于 XComs，但 TaskFlow API 会自动处理 XComs 的存储和检索。你不需要显式地调用 `xcom_push` 或 `xcom_pull`，只需像普通函数一样传递参数和返回值即可。
+
+## 实际案例：数据处理管道
+
+让我们通过一个实际案例来展示 TaskFlow API 的强大功能。假设我们有一个数据处理管道，需要从数据库中提取数据，进行转换，然后将结果加载到另一个数据库中。
+
+```python
+from airflow.decorators import task, dag
+from airflow.utils.dates import days_ago
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+@dag(
+    schedule_interval=None,
+    start_date=days_ago(1),
+    catchup=False,
+)
+def data_processing_pipeline():
+    @task
+    def extract():
+        hook = PostgresHook(postgres_conn_id="my_postgres_conn")
+        sql = "SELECT * FROM source_table"
+        df = hook.get_pandas_df(sql)
+        return df
+
+    @task
+    def transform(df):
+        # 假设我们只需要某些列
+        df = df[["column1", "column2"]]
+        return df
+
+    @task
+    def load(df):
+        hook = PostgresHook(postgres_conn_id="my_postgres_conn")
+        hook.insert_rows(
+            table="target_table",
+            rows=df.values.tolist(),
+            target_fields=["column1", "column2"],
+        )
+
+    data = extract()
+    transformed_data = transform(data)
+    load(transformed_data)
+
+data_processing_pipeline_instance = data_processing_pipeline()
+```
+
+在这个案例中，我们使用 `PostgresHook` 从 PostgreSQL 数据库中提取数据，然后对数据进行简单的转换，最后将结果加载到另一个表中。TaskFlow API 使得整个过程非常简洁和直观。
+
+## 总结
+
+TaskFlow API 是 Airflow 2.0 引入的一个强大工具，它简化了任务的定义和任务之间的通信。通过使用 `@task` 装饰器，你可以将普通的 Python 函数转换为 Airflow 任务，并自动处理任务之间的依赖关系和 XComs 通信。TaskFlow API 使得编写和维护复杂的数据管道变得更加容易。
+
+## 附加资源与练习
+
+- **官方文档**: 阅读 [Airflow TaskFlow API 官方文档](https://airflow.apache.org/docs/apache-airflow/stable/concepts/taskflow.html) 以了解更多高级用法和最佳实践。
+- **练习**: 尝试使用 TaskFlow API 构建一个包含多个任务的数据处理管道，并观察任务之间的依赖关系如何自动建立。
+
+:::tip
+如果你在使用 TaskFlow API 时遇到问题，可以查看 Airflow 的日志，了解任务之间的通信和依赖关系是否按预期工作。
+:::

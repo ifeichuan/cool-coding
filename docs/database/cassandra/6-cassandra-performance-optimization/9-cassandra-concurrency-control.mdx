@@ -1,0 +1,129 @@
+---
+title: Cassandra 并发控制
+description: "了解 Cassandra 中的并发控制机制，掌握如何在高并发场景下优化性能并确保数据一致性。"
+---
+
+## 介绍
+
+在分布式数据库系统中，并发控制是确保多个客户端同时访问和修改数据时，系统能够保持数据一致性和正确性的关键机制。Cassandra 作为一个高性能、分布式的 NoSQL 数据库，采用了多种并发控制策略来应对高并发场景。本文将详细介绍 Cassandra 的并发控制机制，并通过实际案例帮助你理解其工作原理。
+
+---
+
+## Cassandra 并发控制机制
+
+Cassandra 的并发控制主要通过以下两种机制实现：
+
+1. **轻量级事务（Lightweight Transactions, LWT）**
+2. **时间戳排序（Timestamp Ordering）**
+
+### 1. 轻量级事务（LWT）
+
+轻量级事务是 Cassandra 提供的一种基于 Paxos 协议的并发控制机制。它允许在分布式环境中实现“比较并设置”（Compare-and-Set, CAS）操作，确保在多个客户端同时修改同一数据时，只有一个操作能够成功。
+
+#### 代码示例
+
+以下是一个使用 LWT 插入数据的示例：
+
+```cql
+INSERT INTO users (user_id, username, email)
+VALUES (1, 'alice', 'alice@example.com')
+IF NOT EXISTS;
+```
+
+**输入：**
+- 表 `users` 中不存在 `user_id = 1` 的记录。
+
+**输出：**
+- 如果插入成功，返回 `[applied] => True`。
+- 如果记录已存在，返回 `[applied] => False`，并显示当前记录。
+
+#### 实际应用场景
+
+假设你正在开发一个用户注册系统，需要确保每个用户的 `user_id` 唯一。使用 LWT 可以避免多个客户端同时插入相同 `user_id` 的情况。
+
+---
+
+### 2. 时间戳排序
+
+Cassandra 使用时间戳（Timestamp）来协调并发写入操作。每个写入操作都会附带一个时间戳，Cassandra 会根据时间戳决定哪个写入操作是最新的，并覆盖旧的数据。
+
+#### 代码示例
+
+以下是一个写入数据的示例：
+
+```cql
+UPDATE users
+SET email = 'alice_new@example.com'
+WHERE user_id = 1
+USING TIMESTAMP 1672531200000000;
+```
+
+**输入：**
+- 表 `users` 中 `user_id = 1` 的记录已存在。
+
+**输出：**
+- 如果提供的时间戳大于当前记录的时间戳，数据将被更新。
+
+#### 实际应用场景
+
+假设你正在开发一个日志系统，多个客户端可能会同时写入同一日志记录。通过为每个写入操作分配唯一的时间戳，可以确保最新的日志记录覆盖旧的记录。
+
+---
+
+## 并发控制的挑战与解决方案
+
+在高并发场景下，Cassandra 可能会面临以下挑战：
+
+1. **写冲突（Write Conflicts）**
+   - 多个客户端同时写入同一数据时，可能会导致数据不一致。
+   - **解决方案**：使用 LWT 或时间戳排序机制。
+
+2. **读-修改-写竞争（Read-Modify-Write Race Conditions）**
+   - 多个客户端同时读取、修改并写入同一数据时，可能会导致数据丢失。
+   - **解决方案**：使用 LWT 确保操作的原子性。
+
+---
+
+## 实际案例：电商库存管理系统
+
+假设你正在开发一个电商平台的库存管理系统，需要确保在高并发场景下库存数量的准确性。
+
+### 场景描述
+- 多个用户同时购买同一商品。
+- 库存数量需要实时更新，且不能出现超卖现象。
+
+### 解决方案
+使用 LWT 实现库存扣减操作：
+
+```cql
+UPDATE inventory
+SET stock = stock - 1
+WHERE product_id = 101
+IF stock > 0;
+```
+
+**输入：**
+- 商品 `product_id = 101` 的库存为 10。
+
+**输出：**
+- 如果库存大于 0，扣减库存并返回 `[applied] => True`。
+- 如果库存为 0，返回 `[applied] => False`。
+
+---
+
+## 总结
+
+Cassandra 的并发控制机制通过轻量级事务和时间戳排序，确保了在高并发场景下的数据一致性和正确性。理解这些机制并合理使用它们，可以帮助你构建高性能、可靠的分布式应用。
+
+---
+
+## 附加资源与练习
+
+### 资源
+- [Cassandra 官方文档](https://cassandra.apache.org/doc/latest/)
+- [Cassandra 轻量级事务详解](https://www.datastax.com/blog/lightweight-transactions-cassandra)
+
+### 练习
+1. 尝试在本地 Cassandra 实例中创建一个表，并使用 LWT 实现插入和更新操作。
+2. 模拟高并发场景，测试时间戳排序机制的效果。
+3. 设计一个简单的库存管理系统，使用 LWT 确保库存数量的准确性。

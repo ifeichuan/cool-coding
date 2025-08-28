@@ -1,0 +1,451 @@
+---
+title: C++ 异步任务
+description: 学习C++中的异步编程概念，掌握std::async、std::future和std::promise的使用，以及异步任务在实际中的应用。
+---
+
+# C++ 异步任务
+
+在多线程编程中，我们经常需要执行一些耗时的操作，比如读写文件、网络请求或复杂计算。这些操作如果在主线程中执行，可能会导致程序界面卡顿，影响用户体验。C++11引入了异步任务的概念，使得我们可以更优雅地处理这些耗时操作。
+
+## 什么是异步任务？
+
+异步任务是指在后台执行的操作，主线程不需要等待其完成就可以继续执行其他工作。当异步任务完成后，主线程可以获取其结果。这种编程模式极大地提高了程序的响应性和性能。
+
+C++11提供了`<future>`头文件，其中包含了几个关键组件：
+
+- **std::async**：用于创建异步任务
+- **std::future**：用于获取异步任务的结果
+- **std::promise**：用于手动设置一个值，供将来获取
+
+## 使用std::async
+
+`std::async`是最简单也是最常用的创建异步任务的方式。它接受一个可调用对象（函数、函数对象、lambda表达式等）及其参数，然后在一个新的线程中执行该可调用对象，并返回一个`std::future`对象。
+
+### 基本用法
+
+```cpp
+#include <iostream>
+#include <future>
+#include <chrono>
+
+int compute_sum(int a, int b) {
+    // 模拟耗时操作
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    return a + b;
+}
+
+int main() {
+    std::cout << "启动异步任务..." << std::endl;
+    
+    // 创建异步任务，返回std::future
+    std::future<int> result = std::async(compute_sum, 5, 8);
+    
+    std::cout << "异步任务正在后台执行..." << std::endl;
+    std::cout << "主线程可以继续做其他事情..." << std::endl;
+    
+    // 获取结果，如果任务尚未完成，这里会阻塞等待
+    int sum = result.get();
+    
+    std::cout << "异步任务结果: " << sum << std::endl;
+    
+    return 0;
+}
+```
+
+输出：
+```
+启动异步任务...
+异步任务正在后台执行...
+主线程可以继续做其他事情...
+异步任务结果: 13
+```
+
+### Launch策略
+
+`std::async`支持不同的启动策略：
+
+- **std::launch::async**：保证在一个新线程上异步执行
+- **std::launch::deferred**：延迟执行，直到调用`future.get()`或`future.wait()`
+- **std::launch::async | std::launch::deferred**：默认策略，由系统决定是异步执行还是延迟执行
+
+```cpp
+// 强制异步执行
+auto f1 = std::async(std::launch::async, compute_sum, 2, 3);
+
+// 延迟执行，直到调用get()或wait()
+auto f2 = std::async(std::launch::deferred, compute_sum, 4, 5);
+
+// 由系统决定（默认行为）
+auto f3 = std::async(compute_sum, 6, 7);
+```
+
+:::tip 提示
+使用`std::launch::async`可以确保任务一定会在新线程中执行，而不是延迟到调用`get()`时才执行。
+:::
+
+## std::future详解
+
+`std::future`是一个模板类，表示一个未来会得到的值。它是异步操作与其结果之间的连接。
+
+### 主要方法
+
+- **get()**：获取结果，如果结果尚未就绪则会阻塞
+- **wait()**：等待结果就绪，但不获取结果
+- **wait_for()**：等待一段时间，如果结果就绪则返回
+- **wait_until()**：等待到指定时间点，如果结果就绪则返回
+- **valid()**：检查future是否有效（是否已经调用过get）
+
+### 示例：使用wait_for检查任务状态
+
+```cpp
+#include <iostream>
+#include <future>
+#include <chrono>
+
+int long_computation() {
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    return 42;
+}
+
+int main() {
+    auto future = std::async(std::launch::async, long_computation);
+    
+    std::cout << "等待结果..." << std::endl;
+    
+    while (true) {
+        // 检查是否已完成
+        auto status = future.wait_for(std::chrono::milliseconds(500));
+        
+        if (status == std::future_status::ready) {
+            std::cout << "任务完成！" << std::endl;
+            break;
+        } else if (status == std::future_status::timeout) {
+            std::cout << "任务仍在执行中..." << std::endl;
+        } else if (status == std::future_status::deferred) {
+            std::cout << "任务被延迟执行" << std::endl;
+            break;
+        }
+    }
+    
+    int result = future.get();
+    std::cout << "结果是: " << result << std::endl;
+    
+    return 0;
+}
+```
+
+输出：
+```
+等待结果...
+任务仍在执行中...
+任务仍在执行中...
+任务仍在执行中...
+任务仍在执行中...
+任务仍在执行中...
+任务完成！
+结果是: 42
+```
+
+## std::promise和std::future配对使用
+
+`std::promise`提供了一种手动设置future值的机制，这在你需要在不同线程间传递结果时非常有用。
+
+```cpp
+#include <iostream>
+#include <future>
+#include <thread>
+
+void produce_result(std::promise<int> promise) {
+    // 模拟复杂计算
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+    
+    // 设置promise的值
+    promise.set_value(42);
+}
+
+int main() {
+    // 创建promise
+    std::promise<int> promise;
+    
+    // 从promise获取future
+    std::future<int> future = promise.get_future();
+    
+    // 创建线程并传递promise
+    std::thread producer_thread(produce_result, std::move(promise));
+    
+    // 主线程等待结果
+    std::cout << "等待结果..." << std::endl;
+    int result = future.get();
+    std::cout << "结果是: " << result << std::endl;
+    
+    // 确保线程结束
+    producer_thread.join();
+    
+    return 0;
+}
+```
+
+输出：
+```
+等待结果...
+结果是: 42
+```
+
+:::caution 注意
+`std::promise`只能设置一次值，重复设置会抛出异常。如果你想多次传递值，可以考虑使用条件变量或消息队列。
+:::
+
+## 异常处理
+
+异步任务中抛出的异常会被捕获并存储在future中，当调用`get()`时会重新抛出：
+
+```cpp
+#include <iostream>
+#include <future>
+#include <exception>
+
+int div(int a, int b) {
+    if (b == 0) {
+        throw std::runtime_error("除数不能为零");
+    }
+    return a / b;
+}
+
+int main() {
+    auto future = std::async(div, 10, 0);
+    
+    try {
+        int result = future.get();
+        std::cout << "结果: " << result << std::endl;
+    } catch (const std::exception& e) {
+        std::cout << "捕获异常: " << e.what() << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+输出：
+```
+捕获异常: 除数不能为零
+```
+
+## 实际应用案例
+
+### 案例1：并行计算加速
+
+下面是一个使用异步任务计算大数组和的示例，通过将数组分成多个部分并行计算来提高性能：
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <future>
+#include <numeric>
+#include <chrono>
+
+// 计算部分和的函数
+long long partial_sum(const std::vector<int>& arr, size_t start, size_t end) {
+    return std::accumulate(arr.begin() + start, arr.begin() + end, 0LL);
+}
+
+// 单线程计算总和
+long long single_threaded_sum(const std::vector<int>& arr) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    long long result = std::accumulate(arr.begin(), arr.end(), 0LL);
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    std::cout << "单线程计算耗时: " << duration << " ms" << std::endl;
+    return result;
+}
+
+// 多线程计算总和
+long long multi_threaded_sum(const std::vector<int>& arr, int num_threads) {
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
+    std::vector<std::future<long long>> futures;
+    size_t chunk_size = arr.size() / num_threads;
+    
+    // 创建多个异步任务
+    for (int i = 0; i < num_threads; ++i) {
+        size_t start = i * chunk_size;
+        size_t end = (i == num_threads - 1) ? arr.size() : (i + 1) * chunk_size;
+        
+        futures.push_back(std::async(std::launch::async, partial_sum, std::ref(arr), start, end));
+    }
+    
+    // 收集结果
+    long long result = 0;
+    for (auto& future : futures) {
+        result += future.get();
+    }
+    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    std::cout << num_threads << "线程计算耗时: " << duration << " ms" << std::endl;
+    return result;
+}
+
+int main() {
+    // 创建一个大数组
+    std::vector<int> numbers(50000000, 1); // 5千万个1
+    
+    long long single_result = single_threaded_sum(numbers);
+    long long multi_result = multi_threaded_sum(numbers, 4);
+    
+    std::cout << "单线程结果: " << single_result << std::endl;
+    std::cout << "多线程结果: " << multi_result << std::endl;
+    
+    return 0;
+}
+```
+
+输出（结果可能会因硬件而异）：
+```
+单线程计算耗时: 87 ms
+4线程计算耗时: 23 ms
+单线程结果: 50000000
+多线程结果: 50000000
+```
+
+### 案例2：异步文件操作
+
+下面是一个使用异步任务进行文件读写的示例，可以避免主线程被I/O操作阻塞：
+
+```cpp
+#include <iostream>
+#include <fstream>
+#include <future>
+#include <string>
+#include <vector>
+
+// 异步读取文件函数
+std::future<std::string> read_file_async(const std::string& filename) {
+    return std::async(std::launch::async, [filename]() {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("无法打开文件: " + filename);
+        }
+        
+        std::string content;
+        std::string line;
+        while (std::getline(file, line)) {
+            content += line + "\n";
+        }
+        
+        std::cout << "文件读取完成: " << filename << std::endl;
+        return content;
+    });
+}
+
+// 异步写入文件函数
+std::future<void> write_file_async(const std::string& filename, const std::string& content) {
+    return std::async(std::launch::async, [filename, content]() {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            throw std::runtime_error("无法创建文件: " + filename);
+        }
+        
+        file << content;
+        std::cout << "文件写入完成: " << filename << std::endl;
+    });
+}
+
+int main() {
+    try {
+        // 异步读取文件
+        auto future_content = read_file_async("input.txt");
+        
+        std::cout << "文件读取已启动，主线程可以继续执行其他操作..." << std::endl;
+        
+        // 模拟主线程其他操作
+        for (int i = 0; i < 5; ++i) {
+            std::cout << "主线程执行中..." << std::endl;
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        
+        // 获取文件内容
+        std::string content;
+        try {
+            content = future_content.get();
+            std::cout << "文件内容读取成功，长度: " << content.length() << " 字节" << std::endl;
+        } catch (const std::exception& e) {
+            std::cout << "读取文件失败: " << e.what() << std::endl;
+            content = "这是默认内容，因为文件读取失败。";
+        }
+        
+        // 修改内容
+        content += "\n这一行是程序添加的。\n";
+        
+        // 异步写入文件
+        auto future_write = write_file_async("output.txt", content);
+        
+        std::cout << "文件写入已启动，主线程可以继续执行其他操作..." << std::endl;
+        
+        // 等待写入完成
+        future_write.wait();
+        
+        std::cout << "所有操作完成" << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cout << "发生异常: " << e.what() << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+:::note
+运行此示例前，请确保存在一个名为"input.txt"的文件，或者修改代码以处理文件不存在的情况。
+:::
+
+## 异步任务的流程图
+
+以下是异步任务的基本工作流程：
+
+```mermaid
+graph TD
+    A[主线程] --> B[创建异步任务]
+    B --> C[返回future对象]
+    B --> D[开始异步执行任务]
+    A --> E[继续执行主线程代码]
+    D --> F[异步任务完成]
+    F --> G[结果存储在future中]
+    E --> H[需要结果时调用future.get()]
+    G --> I[future提供结果]
+    H --> I
+    I --> J[主线程获取结果]
+```
+
+## 总结
+
+异步任务是C++多线程编程中的重要概念，它允许我们在不阻塞主线程的情况下执行耗时操作，从而提高程序的响应性和性能。
+
+在本教程中，我们学习了：
+
+1. 使用`std::async`创建异步任务
+2. 通过`std::future`获取异步任务的结果
+3. 设置不同的启动策略（async, deferred）
+4. 使用`std::promise`手动设置future值
+5. 处理异步任务中的异常
+6. 实际应用案例：并行计算和异步文件操作
+
+掌握这些概念和技术后，你将能够构建更高效、响应更快的C++程序。
+
+## 练习
+
+1. 创建一个异步任务，计算斐波那契数列的第n项。
+2. 使用多个异步任务并行处理一个向量，对每个元素进行复杂处理，然后合并结果。
+3. 实现一个异步文件拷贝程序，能够显示拷贝进度。
+4. 使用`std::promise`和`std::future`实现一个简单的生产者-消费者模式。
+
+## 进一步学习资源
+
+- C++参考文档：[http://en.cppreference.com/w/cpp/thread](http://en.cppreference.com/w/cpp/thread)
+- 《C++ Concurrency in Action》by Anthony Williams
+- 《Effective Modern C++》by Scott Meyers
+
+通过实践这些概念，你将能够编写更加高效和响应迅速的C++程序，充分利用现代计算机的多核优势。

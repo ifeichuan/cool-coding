@@ -1,0 +1,181 @@
+---
+title: RabbitMQ 常见陷阱
+description: 了解在使用RabbitMQ时可能遇到的常见陷阱，并学习如何避免它们。本文适合初学者，包含代码示例和实际案例。
+---
+
+## 介绍
+
+RabbitMQ 是一个功能强大的消息代理，广泛用于分布式系统中实现异步通信。然而，对于初学者来说，RabbitMQ 的使用可能会遇到一些陷阱，这些陷阱可能会导致系统性能下降、消息丢失或其他不可预见的错误。本文将详细介绍这些常见陷阱，并提供解决方案和最佳实践。
+
+## 1. 未正确处理消息确认
+
+### 问题描述
+
+在 RabbitMQ 中，消息确认（Message Acknowledgment）是确保消息被正确处理的关键机制。如果未正确处理消息确认，可能会导致消息丢失或重复处理。
+
+### 示例代码
+
+```python
+import pika
+
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+channel.queue_declare(queue='hello')
+
+def callback(ch, method, properties, body):
+    print(" [x] Received %r" % body)
+    # 忘记调用 ch.basic_ack(delivery_tag=method.delivery_tag)
+
+channel.basic_consume(queue='hello', on_message_callback=callback, auto_ack=False)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 解决方案
+
+确保在处理完消息后调用 `ch.basic_ack(delivery_tag=method.delivery_tag)`，以确认消息已被正确处理。
+
+```python
+def callback(ch, method, properties, body):
+    print(" [x] Received %r" % body)
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+```
+
+## 2. 未设置消息持久化
+
+### 问题描述
+
+默认情况下，RabbitMQ 的消息是非持久化的，这意味着如果 RabbitMQ 服务器崩溃或重启，未处理的消息将会丢失。
+
+### 示例代码
+
+```python
+channel.queue_declare(queue='hello', durable=False)
+channel.basic_publish(exchange='',
+                      routing_key='hello',
+                      body='Hello World!',
+                      properties=pika.BasicProperties(delivery_mode=1))  # 1 表示非持久化
+```
+
+### 解决方案
+
+将队列和消息设置为持久化，以确保消息在服务器重启后仍然存在。
+
+```python
+channel.queue_declare(queue='hello', durable=True)
+channel.basic_publish(exchange='',
+                      routing_key='hello',
+                      body='Hello World!',
+                      properties=pika.BasicProperties(delivery_mode=2))  # 2 表示持久化
+```
+
+## 3. 未正确处理连接和通道
+
+### 问题描述
+
+RabbitMQ 的连接和通道是有限的资源，未正确处理这些资源可能会导致资源耗尽或连接泄漏。
+
+### 示例代码
+
+```python
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 忘记关闭连接和通道
+```
+
+### 解决方案
+
+确保在使用完连接和通道后正确关闭它们。
+
+```python
+try:
+    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+    channel = connection.channel()
+    # 使用通道进行操作
+finally:
+    if connection and connection.is_open:
+        connection.close()
+```
+
+## 4. 未处理队列和交换机的声明
+
+### 问题描述
+
+在 RabbitMQ 中，队列和交换机的声明是幂等的，但如果未正确处理声明，可能会导致队列或交换机未正确创建。
+
+### 示例代码
+
+```python
+channel.queue_declare(queue='hello', durable=True)
+channel.exchange_declare(exchange='logs', exchange_type='fanout')
+```
+
+### 解决方案
+
+确保在每次启动应用程序时都声明队列和交换机，以避免未创建的情况。
+
+```python
+channel.queue_declare(queue='hello', durable=True)
+channel.exchange_declare(exchange='logs', exchange_type='fanout', durable=True)
+```
+
+## 5. 未处理消息的优先级
+
+### 问题描述
+
+RabbitMQ 支持消息优先级，但如果未正确设置优先级队列，可能会导致高优先级消息未被优先处理。
+
+### 示例代码
+
+```python
+channel.queue_declare(queue='priority_queue', arguments={'x-max-priority': 10})
+channel.basic_publish(exchange='',
+                      routing_key='priority_queue',
+                      body='High Priority Message',
+                      properties=pika.BasicProperties(priority=5))
+```
+
+### 解决方案
+
+确保在声明队列时设置 `x-max-priority` 参数，并在发布消息时设置 `priority` 属性。
+
+```python
+channel.queue_declare(queue='priority_queue', arguments={'x-max-priority': 10})
+channel.basic_publish(exchange='',
+                      routing_key='priority_queue',
+                      body='High Priority Message',
+                      properties=pika.BasicProperties(priority=5))
+```
+
+## 实际案例
+
+### 案例：电商订单处理系统
+
+在一个电商订单处理系统中，订单消息需要被优先处理。通过设置消息优先级，可以确保高优先级订单（如 VIP 用户订单）被优先处理，从而提高用户体验。
+
+```python
+channel.queue_declare(queue='order_queue', arguments={'x-max-priority': 10})
+channel.basic_publish(exchange='',
+                      routing_key='order_queue',
+                      body='VIP Order',
+                      properties=pika.BasicProperties(priority=10))
+```
+
+## 总结
+
+在使用 RabbitMQ 时，避免常见陷阱是确保系统稳定性和可靠性的关键。通过正确处理消息确认、设置消息持久化、管理连接和通道、声明队列和交换机以及处理消息优先级，可以显著提高系统的健壮性。
+
+## 附加资源
+
+- [RabbitMQ 官方文档](https://www.rabbitmq.com/documentation.html)
+- [RabbitMQ 最佳实践](https://www.rabbitmq.com/best-practices.html)
+- [RabbitMQ 教程](https://www.rabbitmq.com/tutorials.html)
+
+## 练习
+
+1. 修改上述代码示例，确保所有消息都被正确确认。
+2. 创建一个持久化的队列，并发布一条持久化消息。
+3. 实现一个优先级队列，并测试高优先级消息是否被优先处理。

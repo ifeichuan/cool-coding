@@ -1,0 +1,273 @@
+---
+title: JavaScript 请求取消
+description: 学习如何取消正在进行的网络请求，避免不必要的网络消耗并提高应用性能。
+---
+
+# JavaScript 请求取消
+
+在构建现代 Web 应用程序时，管理网络请求是一项重要技能。有时候，我们需要取消已经发出但尚未完成的网络请求，比如当用户导航到其他页面或撤销了某个操作时。请求取消可以节省带宽、减少不必要的数据处理，并提高应用的响应速度。
+
+## 为什么需要取消请求？
+
+在以下情况中，取消请求特别有用：
+
+- 用户快速切换页面或视图
+- 搜索框实时搜索，用户输入新内容
+- 用户取消了文件上传
+- 请求超时，需要中止
+- 防止竞态条件（后发出的请求结果先返回）
+
+## XMLHttpRequest 取消请求
+
+对于传统的 `XMLHttpRequest`，取消请求是通过调用 `abort()` 方法实现的。
+
+```javascript
+const xhr = new XMLHttpRequest();
+xhr.open('GET', 'https://api.example.com/data');
+xhr.send();
+
+// 取消请求
+xhr.abort();
+```
+
+:::note
+调用 `abort()` 后，XHR 对象会触发 `abort` 事件，可以通过 `onabort` 处理程序或事件监听器来捕获。
+:::
+
+## Fetch API 请求取消
+
+现代的 Fetch API 使用 `AbortController` 接口来实现请求取消功能。这是一个更优雅的解决方案。
+
+### 基本用法
+
+```javascript
+// 创建 AbortController 实例
+const controller = new AbortController();
+const signal = controller.signal;
+
+// 发起请求，并传入 signal
+fetch('https://api.example.com/data', { signal })
+  .then(response => response.json())
+  .then(data => console.log(data))
+  .catch(err => {
+    if (err.name === 'AbortError') {
+      console.log('Fetch 请求被取消了');
+    } else {
+      console.error('发生其他错误:', err);
+    }
+  });
+
+// 某个时刻取消请求
+controller.abort();
+```
+
+当调用 `controller.abort()` 时，与 signal 关联的 fetch 请求会立即被取消，并且 promise 会以 `AbortError` 错误被拒绝。
+
+## 设置超时自动取消
+
+一个常见的需求是给请求设置超时时间。使用 `AbortController`，我们可以轻松实现这一功能：
+
+```javascript
+function fetchWithTimeout(url, options = {}, timeout = 5000) {
+  const controller = new AbortController();
+  const { signal } = controller;
+  
+  // 创建一个超时定时器
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  return fetch(url, { ...options, signal })
+    .then(response => {
+      clearTimeout(timeoutId);
+      return response;
+    })
+    .catch(err => {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error('请求超时');
+      }
+      throw err;
+    });
+}
+
+// 使用示例
+fetchWithTimeout('https://api.example.com/data', {}, 3000)
+  .then(response => response.json())
+  .then(data => console.log(data))
+  .catch(error => console.error(error.message));
+```
+
+## Axios 请求取消
+
+如果你使用 Axios 库来处理 HTTP 请求，它也提供了取消请求的功能。
+
+### 使用 CancelToken（旧方法）
+
+```javascript
+const axios = require('axios');
+const CancelToken = axios.CancelToken;
+const source = CancelToken.source();
+
+axios.get('https://api.example.com/data', {
+  cancelToken: source.token
+})
+  .then(response => console.log(response.data))
+  .catch(thrown => {
+    if (axios.isCancel(thrown)) {
+      console.log('请求被取消', thrown.message);
+    } else {
+      console.error('请求出错', thrown);
+    }
+  });
+
+// 取消请求
+source.cancel('用户取消了操作');
+```
+
+### 使用 AbortController（新方法）
+
+Axios v0.22.0 及更高版本支持使用 AbortController：
+
+```javascript
+const controller = new AbortController();
+
+axios.get('https://api.example.com/data', {
+  signal: controller.signal
+})
+  .then(response => console.log(response.data))
+  .catch(error => {
+    if (axios.isCancel(error)) {
+      console.log('请求被取消');
+    } else {
+      console.error('请求出错', error);
+    }
+  });
+
+// 取消请求
+controller.abort();
+```
+
+## 实际应用案例
+
+### 1. 自动完成搜索
+
+搜索框输入时，取消之前的请求，只保留最新的请求，防止竞争条件：
+
+```javascript
+let controller = null;
+
+function searchItems(query) {
+  // 如果已有请求正在进行，则取消它
+  if (controller) {
+    controller.abort();
+  }
+  
+  // 创建新的 AbortController
+  controller = new AbortController();
+  
+  // 执行搜索请求
+  fetch(`https://api.example.com/search?q=${query}`, {
+    signal: controller.signal
+  })
+    .then(response => response.json())
+    .then(results => {
+      displayResults(results);
+    })
+    .catch(err => {
+      if (err.name !== 'AbortError') {
+        console.error('搜索出错:', err);
+      }
+    });
+}
+
+// 在输入框事件监听中调用
+document.getElementById('search-input').addEventListener('input', function(e) {
+  searchItems(e.target.value);
+});
+```
+
+### 2. 页面导航时取消请求
+
+当用户从一个页面导航到另一个页面时，取消所有进行中的请求：
+
+```javascript
+// 存储页面所有请求的控制器
+const activeControllers = [];
+
+function createRequest(url) {
+  const controller = new AbortController();
+  activeControllers.push(controller);
+  
+  return fetch(url, { signal: controller.signal })
+    .finally(() => {
+      // 完成后从活动控制器列表中移除
+      const index = activeControllers.indexOf(controller);
+      if (index > -1) {
+        activeControllers.splice(index, 1);
+      }
+    });
+}
+
+// 页面卸载前取消所有请求
+window.addEventListener('beforeunload', () => {
+  activeControllers.forEach(controller => {
+    controller.abort();
+  });
+});
+```
+
+## 处理竞态条件
+
+在异步请求中，后发起的请求可能比先发起的请求更早返回结果，这会导致界面显示错误的数据。使用请求取消可以解决这个问题：
+
+```javascript
+let currentRequestId = 0;
+
+async function fetchData(params) {
+  const requestId = ++currentRequestId;
+  
+  try {
+    const data = await makeApiCall(params);
+    
+    // 如果这不是最新请求，丢弃结果
+    if (requestId !== currentRequestId) {
+      return;
+    }
+    
+    // 处理数据
+    processData(data);
+  } catch (error) {
+    console.error('请求出错:', error);
+  }
+}
+```
+
+:::tip
+处理竞态条件的另一种方法是使用请求标识符跟踪最新请求，而不是取消旧请求。这在某些情况下可能更简单。
+:::
+
+## 总结
+
+请求取消是现代前端应用程序中的重要功能，可以帮助你：
+
+- 避免不必要的网络流量
+- 减少服务器负载
+- 提高应用性能
+- 防止过时数据影响用户体验
+- 解决竞态条件问题
+
+在不同的场景下，选择合适的请求取消方法：
+- 对于简单的请求，使用 `AbortController` 和 Fetch API
+- 在使用 Axios 的项目中，利用其内置的取消功能
+- 对于 XMLHttpRequest，使用 `abort()` 方法
+
+## 练习
+
+1. 创建一个图片加载组件，当用户快速切换不同图片时，自动取消之前的加载请求。
+2. 实现一个带有取消功能的文件上传组件。
+3. 优化一个搜索框，使其在用户快速输入时能够取消之前的搜索请求。
+
+## 扩展阅读
+
+- [AbortController MDN 文档](https://developer.mozilla.org/zh-CN/docs/Web/API/AbortController)
+- [Fetch API MDN 文档](https://developer.mozilla.org/zh-CN/docs/Web/API/Fetch_API)
+- [Axios 官方文档关于请求取消的部分](https://axios-http.com/docs/cancellation)

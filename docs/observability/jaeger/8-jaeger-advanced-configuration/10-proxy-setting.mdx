@@ -1,0 +1,147 @@
+---
+title: Jaeger 高级配置：代理设置
+description: "学习如何为Jaeger配置代理设置，解决网络限制问题并优化追踪数据收集。"
+---
+
+## 介绍
+
+在分布式系统中，Jaeger作为一款流行的分布式追踪工具，通常需要通过网络与其他服务通信。当你的环境存在网络限制（如防火墙或代理服务器）时，配置代理（Proxy）成为关键步骤。本文将指导你如何为Jaeger配置代理设置，确保其在不同网络环境下可靠运行。
+
+:::note
+代理设置通常用于以下场景：
+- 公司内网需要通过代理访问外部服务。
+- Jaeger Agent或Collector需要将数据发送到外部Jaeger后端。
+:::
+
+---
+
+## 代理设置基础
+
+Jaeger组件（如Agent或Collector）通过HTTP或gRPC协议发送数据。若网络环境要求代理，需通过环境变量或配置文件指定代理地址。以下是常见代理类型：
+
+1. **HTTP/HTTPS代理**：用于HTTP请求（如Jaeger UI访问外部资源）。
+2. **gRPC代理**：用于gRPC通信（如Agent向Collector发送数据）。
+
+---
+
+## 配置HTTP代理
+
+### 通过环境变量设置
+Jaeger的客户端库（如`jaeger-client`）通常会遵循系统的HTTP代理环境变量。你可以在启动服务前设置以下变量：
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=https://proxy.example.com:8080
+```
+
+### 代码示例（Node.js）
+如果你的应用使用`jaeger-client`，代理会自动生效：
+
+```javascript
+const { initTracer } = require('jaeger-client');
+
+const config = {
+  serviceName: 'my-service',
+  sampler: { type: 'const', param: 1 },
+  reporter: {
+    agentHost: 'jaeger-agent',
+    agentPort: 6832,
+  },
+};
+const tracer = initTracer(config);
+```
+
+:::tip
+验证代理是否生效：在代码中发送一个HTTP请求（如`axios.get('https://example.com')`），检查请求是否通过代理。
+:::
+
+---
+
+## 配置gRPC代理
+
+Jaeger Agent与Collector之间默认使用gRPC通信。若需代理，需借助工具如`envoy`或`nginx`作为中间层。
+
+### 使用Envoy作为gRPC代理
+1. 编写Envoy配置文件（`envoy.yaml`）：
+```yaml
+static_resources:
+  listeners:
+    - name: grpc_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8080 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                codec_type: AUTO
+                stat_prefix: ingress_http
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    - name: local_service
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route: { cluster: jaeger_collector }
+                http_filters:
+                  - name: envoy.filters.http.router
+  clusters:
+    - name: jaeger_collector
+      type: LOGICAL_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: jaeger_collector
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: jaeger-collector.example.com
+                      port_value: 14250
+```
+
+2. 启动Envoy：
+```bash
+envoy -c envoy.yaml
+```
+
+3. 配置Jaeger Agent指向Envoy代理：
+```bash
+--reporter.grpc.host-port=localhost:8080
+```
+
+---
+
+## 实际案例
+
+### 场景：公司内网部署Jaeger
+- **问题**：Jaeger Agent无法直接访问云端的Jaeger Collector。
+- **解决方案**：
+  1. 在内网部署一个HTTP代理（如Squid）。
+  2. 设置`HTTP_PROXY`环境变量指向Squid。
+  3. 通过代理将数据转发到云端Collector。
+
+```mermaid
+flowchart LR
+    A[Jaeger Agent] --> B[Squid Proxy]
+    B --> C[Cloud Jaeger Collector]
+```
+
+---
+
+## 总结
+
+- **HTTP代理**：通过环境变量快速配置，适合HTTP请求。
+- **gRPC代理**：需借助中间件（如Envoy），适合高性能场景。
+- 始终测试代理连通性，确保数据可达。
+
+---
+
+## 扩展练习
+1. 尝试在本地Docker环境中部署一个Squid代理，并让Jaeger Agent通过它发送数据。
+2. 使用`curl -x http://proxy:port http://example.com`测试代理是否生效。
+
+:::caution
+确保代理服务器的认证信息（如用户名/密码）通过安全方式传递（如环境变量或密钥管理工具）。
+:::

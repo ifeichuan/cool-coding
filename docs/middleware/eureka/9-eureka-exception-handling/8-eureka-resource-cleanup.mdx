@@ -1,0 +1,101 @@
+---
+title: Eureka 资源清理
+description: 了解如何在Eureka中正确处理资源清理，确保微服务注册与注销的稳定性。
+---
+
+# Eureka 资源清理
+
+在微服务架构中，Eureka作为服务发现的核心组件，负责管理服务的注册与注销。然而，如果资源清理不当，可能会导致服务实例无法正确注销，进而引发资源泄漏或服务不可用等问题。本文将详细介绍Eureka资源清理的概念、实现方法以及实际应用场景。
+
+## 什么是Eureka资源清理？
+
+Eureka资源清理是指在服务实例关闭或注销时，确保Eureka Server能够正确地从注册表中移除该实例。这一过程对于维护微服务架构的稳定性和可靠性至关重要。如果资源清理不当，可能会导致以下问题：
+
+- **资源泄漏**：未注销的服务实例会继续占用资源。
+- **服务不可用**：客户端可能会尝试调用已关闭的服务实例，导致请求失败。
+- **注册表膨胀**：未清理的实例会导致Eureka注册表变得臃肿，影响性能。
+
+## 如何实现Eureka资源清理？
+
+### 1. 使用Spring Cloud的Shutdown Hook
+
+Spring Cloud提供了自动化的资源清理机制，通过注册Shutdown Hook，在服务关闭时自动向Eureka Server发送注销请求。
+
+```java
+@SpringBootApplication
+@EnableEurekaClient
+public class MyServiceApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(MyServiceApplication.class, args);
+    }
+}
+```
+
+:::note
+Spring Cloud默认会注册一个Shutdown Hook，确保在服务关闭时自动注销。
+:::
+
+### 2. 手动注销服务实例
+
+在某些情况下，可能需要手动注销服务实例。可以通过调用`EurekaClient`的`shutdown()`方法来实现。
+
+```java
+@Autowired
+private EurekaClient eurekaClient;
+
+public void shutdown() {
+    eurekaClient.shutdown();
+}
+```
+
+:::caution
+手动注销时，请确保在服务关闭前调用`shutdown()`方法，否则可能会导致资源泄漏。
+:::
+
+### 3. 配置Eureka Server的自我保护模式
+
+Eureka Server的自我保护模式可以防止因网络分区或服务实例异常而导致的服务实例被错误地注销。然而，这也可能导致资源清理不及时。可以通过调整以下配置来优化自我保护模式的行为：
+
+```yaml
+eureka:
+  server:
+    enable-self-preservation: false
+```
+
+:::warning
+关闭自我保护模式可能会导致服务实例在网络波动时被错误地注销，请谨慎使用。
+:::
+
+## 实际应用场景
+
+### 场景1：服务优雅关闭
+
+在Kubernetes环境中，Pod可能会被频繁地创建和销毁。为了确保服务实例能够正确注销，可以在Pod的`preStop`钩子中调用手动注销逻辑。
+
+```yaml
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "curl -X POST http://localhost:8080/shutdown"]
+```
+
+### 场景2：服务实例异常退出
+
+如果服务实例因异常退出而未能正确注销，Eureka Server会在一定时间后将其标记为不可用并清理。可以通过调整`eureka.instance.lease-expiration-duration-in-seconds`来控制清理时间。
+
+```yaml
+eureka:
+  instance:
+    lease-expiration-duration-in-seconds: 30
+```
+
+## 总结
+
+Eureka资源清理是微服务架构中不可忽视的一环。通过自动化或手动的方式，确保服务实例在关闭时能够正确注销，可以有效避免资源泄漏和服务不可用等问题。在实际应用中，结合具体场景调整Eureka的配置，可以进一步提升系统的稳定性和可靠性。
+
+## 附加资源与练习
+
+- **练习1**：尝试在本地环境中模拟服务实例的异常退出，观察Eureka Server的行为。
+- **练习2**：在Kubernetes中部署一个Spring Cloud应用，并配置`preStop`钩子，确保服务实例能够优雅关闭。
+
+通过以上内容的学习和实践，相信你已经掌握了Eureka资源清理的核心概念和实现方法。继续深入学习微服务架构的其他组件，将有助于你构建更加稳定和高效的分布式系统。

@@ -1,0 +1,244 @@
+---
+title: Nginx 模块开发环境
+description: 本文详细介绍了如何搭建Nginx模块开发环境，适合初学者快速上手Nginx模块开发。
+---
+
+# Nginx 模块开发环境
+
+Nginx是一个高性能的HTTP和反向代理服务器，广泛应用于Web服务、负载均衡和内容缓存等领域。Nginx的强大之处在于其模块化设计，开发者可以通过编写自定义模块来扩展Nginx的功能。本文将带你一步步搭建Nginx模块开发环境，为后续的模块开发打下基础。
+
+## 1. 环境准备
+
+在开始Nginx模块开发之前，我们需要准备以下工具和环境：
+
+- **操作系统**：推荐使用Linux（如Ubuntu、CentOS）或macOS。
+- **编译器**：GCC或Clang。
+- **Nginx源码**：从Nginx官网下载最新版本的源码。
+- **开发工具**：如`make`、`gdb`等。
+
+### 1.1 安装依赖
+
+首先，确保系统中安装了必要的开发工具和依赖库：
+
+```bash
+sudo apt-get update
+sudo apt-get install build-essential libpcre3 libpcre3-dev zlib1g zlib1g-dev libssl-dev
+```
+
+### 1.2 下载Nginx源码
+
+从Nginx官网下载最新版本的源码包：
+
+```bash
+wget http://nginx.org/download/nginx-1.23.0.tar.gz
+tar -zxvf nginx-1.23.0.tar.gz
+cd nginx-1.23.0
+```
+
+## 2. 编译Nginx
+
+Nginx的编译过程非常简单，我们可以通过以下步骤来编译Nginx：
+
+```bash
+./configure
+make
+sudo make install
+```
+
+默认情况下，Nginx会被安装到`/usr/local/nginx`目录下。你可以通过`--prefix`选项指定安装路径：
+
+```bash
+./configure --prefix=/path/to/nginx
+```
+
+## 3. 配置开发环境
+
+为了便于开发和调试，我们可以将Nginx源码目录设置为一个开发环境。以下是一些常用的配置选项：
+
+### 3.1 启用调试模式
+
+在编译Nginx时，启用调试模式可以方便我们进行调试：
+
+```bash
+./configure --with-debug
+```
+
+### 3.2 添加自定义模块
+
+在编译Nginx时，可以通过`--add-module`选项添加自定义模块：
+
+```bash
+./configure --add-module=/path/to/your/module
+```
+
+### 3.3 使用GDB调试
+
+GDB是一个强大的调试工具，可以帮助我们调试Nginx模块。首先，确保Nginx编译时启用了调试模式，然后使用以下命令启动GDB：
+
+```bash
+gdb /usr/local/nginx/sbin/nginx
+```
+
+在GDB中，你可以设置断点、查看变量值等。
+
+## 4. 编写第一个Nginx模块
+
+接下来，我们将编写一个简单的Nginx模块，该模块将在HTTP响应中添加一个自定义的HTTP头。
+
+### 4.1 创建模块目录
+
+首先，在Nginx源码目录下创建一个新的模块目录：
+
+```bash
+mkdir -p modules/ngx_http_hello_module
+cd modules/ngx_http_hello_module
+```
+
+### 4.2 编写模块代码
+
+在`ngx_http_hello_module`目录下创建一个`config`文件和一个C源文件`ngx_http_hello_module.c`。
+
+`config`文件内容如下：
+
+```bash
+ngx_addon_name=ngx_http_hello_module
+HTTP_MODULES="$HTTP_MODULES ngx_http_hello_module"
+NGX_ADDON_SRCS="$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_hello_module.c"
+```
+
+`ngx_http_hello_module.c`文件内容如下：
+
+```c
+#include <ngx_config.h>
+#include <ngx_core.h>
+#include <ngx_http.h>
+
+static ngx_int_t ngx_http_hello_handler(ngx_http_request_t *r);
+
+static ngx_int_t ngx_http_hello_init(ngx_conf_t *cf);
+
+static ngx_http_module_t ngx_http_hello_module_ctx = {
+    NULL,                          /* preconfiguration */
+    ngx_http_hello_init,           /* postconfiguration */
+    NULL,                          /* create main configuration */
+    NULL,                          /* init main configuration */
+    NULL,                          /* create server configuration */
+    NULL,                          /* merge server configuration */
+    NULL,                          /* create location configuration */
+    NULL                           /* merge location configuration */
+};
+
+ngx_module_t ngx_http_hello_module = {
+    NGX_MODULE_V1,
+    &ngx_http_hello_module_ctx,    /* module context */
+    NULL,                          /* module directives */
+    NGX_HTTP_MODULE,               /* module type */
+    NULL,                          /* init master */
+    NULL,                          /* init module */
+    NULL,                          /* init process */
+    NULL,                          /* init thread */
+    NULL,                          /* exit thread */
+    NULL,                          /* exit process */
+    NULL,                          /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+
+static ngx_int_t ngx_http_hello_handler(ngx_http_request_t *r) {
+    ngx_table_elt_t *h;
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 1;
+    ngx_str_set(&h->key, "X-Hello-Module");
+    ngx_str_set(&h->value, "Hello, Nginx!");
+    h->lowcase_key = (u_char *) "x-hello-module";
+
+    return NGX_DECLINED;
+}
+
+static ngx_int_t ngx_http_hello_init(ngx_conf_t *cf) {
+    ngx_http_handler_pt *h;
+    ngx_http_core_main_conf_t *cmcf;
+
+    cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
+
+    h = ngx_array_push(&cmcf->phases[NGX_HTTP_CONTENT_PHASE].handlers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    *h = ngx_http_hello_handler;
+
+    return NGX_OK;
+}
+```
+
+### 4.3 编译并加载模块
+
+在Nginx源码目录下，重新配置并编译Nginx：
+
+```bash
+./configure --add-module=modules/ngx_http_hello_module
+make
+sudo make install
+```
+
+### 4.4 配置Nginx
+
+在Nginx配置文件中添加以下内容，以启用我们的自定义模块：
+
+```nginx
+http {
+    server {
+        listen 80;
+        server_name localhost;
+
+        location / {
+            root /usr/local/nginx/html;
+            index index.html;
+        }
+    }
+}
+```
+
+### 4.5 测试模块
+
+启动Nginx并访问`http://localhost`，查看HTTP响应头中是否包含`X-Hello-Module: Hello, Nginx!`。
+
+```bash
+curl -I http://localhost
+```
+
+输出示例：
+
+```bash
+HTTP/1.1 200 OK
+Server: nginx/1.23.0
+Date: Mon, 01 Jan 2023 00:00:00 GMT
+Content-Type: text/html
+Content-Length: 612
+Connection: keep-alive
+X-Hello-Module: Hello, Nginx!
+```
+
+## 5. 总结
+
+通过本文，你已经成功搭建了Nginx模块开发环境，并编写了一个简单的Nginx模块。Nginx模块开发是一个强大的工具，可以帮助你扩展Nginx的功能，满足各种定制化需求。
+
+## 6. 附加资源
+
+- [Nginx官方文档](http://nginx.org/en/docs/)
+- [Nginx模块开发指南](https://www.nginx.com/resources/wiki/extending/)
+- [GDB调试指南](https://sourceware.org/gdb/current/onlinedocs/gdb/)
+
+## 7. 练习
+
+1. 尝试修改`ngx_http_hello_module`模块，使其在HTTP响应中添加多个自定义HTTP头。
+2. 编写一个新的Nginx模块，该模块可以根据请求的URL路径返回不同的响应内容。
+
+:::tip
+在开发过程中，建议使用版本控制系统（如Git）来管理你的代码，以便于跟踪更改和回滚。
+:::

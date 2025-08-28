@@ -1,0 +1,343 @@
+---
+title: JavaScript Proxy
+description: 详解 JavaScript Proxy 对象的创建、使用方法及常见应用场景。学习如何使用 Proxy 拦截和自定义对象的基本操作。
+---
+
+# JavaScript Proxy
+
+## 什么是 Proxy？
+
+在 JavaScript 中，Proxy（代理）是 ES6（ECMAScript 2015）引入的一个强大特性，它允许你创建一个对象的代理，从而可以拦截并自定义对象的基本操作，如属性查找、赋值、枚举、函数调用等。
+
+简单来说，Proxy 对象包装另一个对象，并拦截对这个对象的操作，让你可以在这些操作执行前后添加自定义行为。
+
+:::note
+Proxy 是一种元编程特性，允许你改变 JavaScript 对象的基本行为。
+:::
+
+## 基本语法
+
+创建一个 Proxy 对象非常简单：
+
+```javascript
+const proxy = new Proxy(target, handler);
+```
+
+其中：
+- `target` 是要代理的目标对象
+- `handler` 是一个包含"陷阱"（traps）的对象，这些陷阱定义了拦截操作的行为
+
+## 常用陷阱（Traps）
+
+Proxy 支持多种陷阱，以下是一些常用的：
+
+- `get`: 属性读取操作的陷阱
+- `set`: 属性设置操作的陷阱
+- `has`: `in` 操作符的陷阱
+- `deleteProperty`: `delete` 操作符的陷阱
+- `apply`: 函数调用操作的陷阱
+- `construct`: `new` 操作符的陷阱
+
+## 实例演示
+
+### 基础示例：属性访问监控
+
+这个例子展示了如何使用 `get` 和 `set` 陷阱监控对象属性的访问：
+
+```javascript
+const person = {
+  name: "张三",
+  age: 30
+};
+
+const personProxy = new Proxy(person, {
+  get(target, property) {
+    console.log(`有人正在获取 ${property} 属性的值`);
+    return target[property];
+  },
+  
+  set(target, property, value) {
+    console.log(`有人正在设置 ${property} 属性的值为 ${value}`);
+    target[property] = value;
+    return true; // 在严格模式下，set 操作需要返回 true 表示成功
+  }
+});
+
+// 使用代理对象
+console.log(personProxy.name); // 访问 name 属性
+personProxy.age = 31; // 修改 age 属性
+```
+
+输出：
+
+```
+有人正在获取 name 属性的值
+张三
+有人正在设置 age 属性的值为 31
+```
+
+### 数据验证
+
+使用 Proxy 可以轻松实现数据验证功能：
+
+```javascript
+const validator = {
+  set(target, property, value) {
+    if (property === 'age') {
+      if (typeof value !== 'number') {
+        throw new TypeError('年龄必须是一个数字');
+      }
+      if (value < 0 || value > 120) {
+        throw new RangeError('年龄必须在 0-120 之间');
+      }
+    }
+    
+    // 默认行为
+    target[property] = value;
+    return true;
+  }
+};
+
+const person = new Proxy({}, validator);
+
+// 正确设置
+person.age = 30;
+console.log(person.age); // 30
+
+try {
+  // 不正确的类型
+  person.age = "三十";
+} catch (e) {
+  console.error(e.message); // 年龄必须是一个数字
+}
+
+try {
+  // 超出范围
+  person.age = 150;
+} catch (e) {
+  console.error(e.message); // 年龄必须在 0-120 之间
+}
+```
+
+## 实际应用场景
+
+### 1. 表单验证
+
+```javascript
+const formValidator = {
+  required(value) {
+    return value !== null && value !== '';
+  },
+  
+  minLength(value, length) {
+    return value.length >= length;
+  },
+  
+  isEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+};
+
+const formData = new Proxy({}, {
+  set(target, property, value) {
+    // 特定字段的验证规则
+    if (property === 'email' && !formValidator.isEmail(value)) {
+      throw new Error('请输入有效的电子邮箱');
+    }
+    
+    if (property === 'password' && !formValidator.minLength(value, 8)) {
+      throw new Error('密码长度至少为8个字符');
+    }
+    
+    target[property] = value;
+    return true;
+  }
+});
+
+// 使用表单验证
+try {
+  formData.email = "invalid-email";
+} catch (e) {
+  console.error(e.message); // 请输入有效的电子邮箱
+}
+
+try {
+  formData.password = "1234";
+} catch (e) {
+  console.error(e.message); // 密码长度至少为8个字符
+}
+```
+
+### 2. 数据绑定（类似 Vue 的响应式系统）
+
+一个简单的响应式系统演示：
+
+```javascript
+function makeReactive(obj) {
+  const observers = new Map();
+
+  return new Proxy(obj, {
+    set(target, property, value) {
+      const oldValue = target[property];
+      target[property] = value;
+      
+      // 通知所有观察者
+      if (observers.has(property)) {
+        observers.get(property).forEach(callback => 
+          callback(value, oldValue)
+        );
+      }
+      return true;
+    },
+    
+    // 添加观察者方法
+    deleteProperty(target, property) {
+      if (property === 'observe') return false;
+      delete target[property];
+      return true;
+    }
+  });
+}
+
+const data = makeReactive({
+  message: "Hello",
+  count: 0
+});
+
+// 添加观察者
+function observe(obj, property, callback) {
+  if (!obj.__observers) {
+    obj.__observers = new Map();
+  }
+  
+  if (!obj.__observers.has(property)) {
+    obj.__observers.set(property, []);
+  }
+  
+  obj.__observers.get(property).push(callback);
+}
+
+// 监听数据变化
+observe(data, 'message', (newValue, oldValue) => {
+  console.log(`message 从 ${oldValue} 变为 ${newValue}`);
+});
+
+data.message = "Hello World"; // 触发观察者回调
+```
+
+输出：
+```
+message 从 Hello 变为 Hello World
+```
+
+### 3. 缓存代理
+
+使用 Proxy 实现函数结果缓存：
+
+```javascript
+function createCacheProxy(fn) {
+  const cache = new Map();
+  
+  return new Proxy(fn, {
+    apply(target, thisArg, args) {
+      // 将参数数组转换为字符串作为缓存键
+      const key = JSON.stringify(args);
+      
+      if (cache.has(key)) {
+        console.log('从缓存中获取结果');
+        return cache.get(key);
+      }
+      
+      const result = target.apply(thisArg, args);
+      cache.set(key, result);
+      console.log('计算新结果并缓存');
+      return result;
+    }
+  });
+}
+
+// 一个耗时的计算函数
+function fibonacci(n) {
+  if (n <= 1) return n;
+  return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+// 创建带缓存的代理函数
+const cachedFib = createCacheProxy(fibonacci);
+
+console.time('first call');
+console.log(cachedFib(30)); // 第一次调用，计算结果
+console.timeEnd('first call');
+
+console.time('second call');
+console.log(cachedFib(30)); // 第二次调用，从缓存获取
+console.timeEnd('second call');
+```
+
+## Proxy 与 Reflect
+
+ES6 同时引入了 `Reflect` 对象，它提供了与 Proxy 处理程序相对应的方法，使用 `Reflect` 可以更优雅地在 Proxy 处理程序中调用默认行为：
+
+```javascript
+const person = {
+  name: "李四",
+  age: 25
+};
+
+const personProxy = new Proxy(person, {
+  get(target, property, receiver) {
+    console.log(`获取 ${property} 属性`);
+    // 使用 Reflect.get 而不是 target[property]
+    return Reflect.get(target, property, receiver);
+  },
+  
+  set(target, property, value, receiver) {
+    console.log(`设置 ${property} 属性为 ${value}`);
+    // 使用 Reflect.set 而不是 target[property] = value
+    return Reflect.set(target, property, value, receiver);
+  }
+});
+
+personProxy.name = "王五";
+console.log(personProxy.name);
+```
+
+:::tip
+使用 `Reflect` 可以让代码更加清晰且不必担心处理 `this` 等上下文问题。
+:::
+
+## Proxy 的局限性
+
+虽然 Proxy 很强大，但也有一些限制：
+
+1. **性能影响** - 比直接操作对象会有轻微的性能开销
+2. **不能代理所有类型** - 某些原始类型（如字符串、数字）不能直接被代理
+3. **无法代理私有字段** - ES2022 引入的私有字段（#field）无法通过 Proxy 拦截
+4. **兼容性问题** - IE 11 及以下版本不支持 Proxy，且 Proxy 无法被 polyfill
+
+## 总结
+
+JavaScript Proxy 是一个强大的特性，它让我们可以：
+
+- 拦截并自定义对象的基本操作
+- 实现数据验证和格式化
+- 创建响应式系统
+- 实现缓存、日志记录等功能
+- 构建更安全的对象访问机制
+
+掌握 Proxy 可以帮助你编写更灵活、更强大的 JavaScript 代码，特别是在构建框架或库时。
+
+## 练习题
+
+1. 使用 Proxy 创建一个只读对象，任何设置属性的尝试都会被拒绝。
+2. 实现一个自动记录所有属性访问的日志系统。
+3. 创建一个数组代理，当访问超出范围的索引时返回一个默认值而不是 `undefined`。
+4. 使用 Proxy 实现一个简单的表单验证系统，验证不同类型的输入（邮箱、手机号、必填字段等）。
+
+## 进一步学习资源
+
+- [MDN Web Docs: Proxy](https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy)
+- [ES6 标准入门：Proxy](http://es6.ruanyifeng.com/#docs/proxy)
+- [JavaScript.info: Proxy and Reflect](https://javascript.info/proxy)
+
+通过学习和使用 Proxy，你将能够创建更智能、更灵活的 JavaScript 应用程序！

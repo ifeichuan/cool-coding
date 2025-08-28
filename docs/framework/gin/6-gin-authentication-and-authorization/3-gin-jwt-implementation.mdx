@@ -1,0 +1,166 @@
+---
+title: Gin JWT 实现
+description: 学习如何在 Gin 框架中使用 JWT（JSON Web Token）实现身份验证与授权。本文将从基础概念讲起，逐步引导你完成 JWT 的集成与使用。
+---
+
+## 介绍
+
+在现代 Web 应用中，身份验证和授权是确保用户数据安全的关键部分。JWT（JSON Web Token）是一种流行的身份验证机制，它允许服务器在用户登录后生成一个加密的令牌，客户端在后续请求中携带该令牌以证明其身份。
+
+Gin 是一个高性能的 Go Web 框架，结合 JWT 可以轻松实现安全的身份验证与授权机制。本文将带你从零开始，逐步实现 Gin 中的 JWT 身份验证。
+
+## JWT 基础
+
+JWT 由三部分组成：Header（头部）、Payload（负载）和 Signature（签名）。它们通过 `.` 分隔，通常看起来像这样：
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+```
+
+- **Header**：包含令牌类型和签名算法。
+- **Payload**：包含用户信息和其他数据。
+- **Signature**：用于验证令牌的完整性和真实性。
+
+## 在 Gin 中实现 JWT
+
+### 1. 安装依赖
+
+首先，我们需要安装 Gin 和 JWT 相关的库：
+
+```bash
+go get -u github.com/gin-gonic/gin
+go get -u github.com/golang-jwt/jwt/v5
+```
+
+### 2. 创建 JWT 中间件
+
+我们将创建一个中间件来验证 JWT 令牌。以下是一个简单的实现：
+
+```go
+package main
+
+import (
+    "github.com/gin-gonic/gin"
+    "github.com/golang-jwt/jwt/v5"
+    "net/http"
+    "time"
+)
+
+var jwtKey = []byte("my_secret_key")
+
+func generateToken(username string) (string, error) {
+    expirationTime := time.Now().Add(24 * time.Hour)
+    claims := &jwt.RegisteredClaims{
+        Subject:   username,
+        ExpiresAt: jwt.NewNumericDate(expirationTime),
+    }
+
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString(jwtKey)
+}
+
+func authMiddleware() gin.HandlerFunc {
+    return func(c *gin.Context) {
+        tokenString := c.GetHeader("Authorization")
+        if tokenString == "" {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+            c.Abort()
+            return
+        }
+
+        token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+            return jwtKey, nil
+        })
+
+        if err != nil || !token.Valid {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+            c.Abort()
+            return
+        }
+
+        c.Next()
+    }
+}
+```
+
+### 3. 使用中间件保护路由
+
+现在，我们可以使用 `authMiddleware` 来保护需要身份验证的路由：
+
+```go
+func main() {
+    r := gin.Default()
+
+    r.POST("/login", func(c *gin.Context) {
+        username := c.PostForm("username")
+        password := c.PostForm("password")
+
+        // 这里应该验证用户名和密码
+        if username == "admin" && password == "password" {
+            token, err := generateToken(username)
+            if err != nil {
+                c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
+                return
+            }
+            c.JSON(http.StatusOK, gin.H{"token": token})
+        } else {
+            c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+        }
+    })
+
+    protected := r.Group("/protected")
+    protected.Use(authMiddleware())
+    protected.GET("/data", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"message": "You have access to protected data!"})
+    })
+
+    r.Run(":8080")
+}
+```
+
+### 4. 测试 JWT 实现
+
+启动服务器后，你可以通过以下步骤测试 JWT 实现：
+
+1. **登录并获取令牌**：
+   ```bash
+   curl -X POST http://localhost:8080/login -d "username=admin&password=password"
+   ```
+   输出：
+   ```json
+   {"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."}
+   ```
+
+2. **访问受保护的路由**：
+   ```bash
+   curl -H "Authorization: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." http://localhost:8080/protected/data
+   ```
+   输出：
+   ```json
+   {"message":"You have access to protected data!"}
+   ```
+
+## 实际应用场景
+
+JWT 常用于以下场景：
+
+- **单点登录（SSO）**：用户在一个系统中登录后，可以在多个系统中共享身份验证状态。
+- **API 身份验证**：客户端通过 JWT 令牌访问受保护的 API 资源。
+- **无状态身份验证**：服务器不需要存储会话信息，所有必要信息都包含在 JWT 中。
+
+## 总结
+
+通过本文，你已经学会了如何在 Gin 框架中使用 JWT 实现身份验证与授权。我们从 JWT 的基础概念讲起，逐步实现了生成令牌、验证令牌以及保护路由的功能。
+
+:::tip
+在实际项目中，建议使用更复杂的密钥管理策略，并定期轮换密钥以提高安全性。
+:::
+
+## 附加资源与练习
+
+- **练习**：尝试扩展 JWT 的 Payload，添加更多用户信息（如角色、权限等），并在中间件中验证这些信息。
+- **资源**：
+  - [JWT 官方文档](https://jwt.io/)
+  - [Gin 框架文档](https://gin-gonic.com/docs/)
+
+通过不断实践和探索，你将能够更深入地理解 JWT 在 Web 应用中的应用。

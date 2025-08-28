@@ -1,0 +1,142 @@
+---
+title: Zipkin 安全性 - 敏感数据处理
+description: "学习如何在 Zipkin 分布式追踪系统中安全处理敏感数据，包括配置方法和最佳实践。"
+---
+
+# 敏感数据处理
+
+## 介绍
+
+在分布式系统中，Zipkin 用于收集和展示请求链路追踪数据。这些数据可能包含敏感信息（如 HTTP 头部、URL 参数、数据库查询等）。如果未正确处理，可能导致数据泄露风险。本文将介绍如何在 Zipkin 中配置敏感数据的脱敏和过滤。
+
+:::note
+**敏感数据示例**：  
+- 认证令牌（如 `Authorization: Bearer xxx`）  
+- 信用卡号、密码等请求参数  
+- 数据库查询中的 PII（个人身份信息）
+:::
+
+---
+
+## 核心配置方法
+
+### 1. 使用 `SpanAdjuster` 过滤数据
+
+Zipkin 支持通过 `SpanAdjuster` 接口动态修改或删除 Span 中的敏感字段。以下是一个 Java 示例：
+
+```java
+import zipkin2.Span;
+import zipkin2.collector.Adjuster;
+
+public class SensitiveDataAdjuster implements Adjuster {
+  @Override
+  public Span adjust(Span span) {
+    // 移除 HTTP 头部的 Authorization 字段
+    if (span.tags().containsKey("http.request.headers.authorization")) {
+      return span.toBuilder()
+          .putTag("http.request.headers.authorization", "[REDACTED]")
+          .build();
+    }
+    return span;
+  }
+}
+```
+
+**注册方式**（以 Spring Boot 为例）：
+```java
+@Bean
+Adjuster sensitiveDataAdjuster() {
+  return new SensitiveDataAdjuster();
+}
+```
+
+---
+
+### 2. 配置 `STORAGE_STRICT_TRACING` 模式
+
+在 Zipkin 服务端启用严格模式，自动过滤已知敏感字段：
+
+```yaml
+# zipkin-server 的 application.yml
+zipkin:
+  storage:
+    strict-trace-id: true
+```
+
+:::warning
+此模式会拒绝包含非十六进制 Trace ID 的请求，可能影响某些非标准客户端。
+:::
+
+---
+
+## 实际案例
+
+### 案例：过滤 Spring Cloud Sleuth 的敏感头
+
+在 `application.properties` 中配置需要跳过的头信息：
+
+```properties
+# 不传播以下头信息到下游服务
+spring.sleuth.propagation.keys.ignore=authorization,password,cookie
+```
+
+### 输出对比
+
+**过滤前 Span**：
+```json
+{
+  "tags": {
+    "http.path": "/api/users",
+    "http.request.headers.authorization": "Bearer eyJhbGciOi..."
+  }
+}
+```
+
+**过滤后 Span**：
+```json
+{
+  "tags": {
+    "http.path": "/api/users",
+    "http.request.headers.authorization": "[REDACTED]"
+  }
+}
+```
+
+---
+
+## 高级场景：自定义采样策略
+
+通过 `SamplerFunction` 控制是否记录特定请求的追踪数据：
+
+```java
+@Bean
+SamplerFunction<HttpRequest> sensitivePathSampler() {
+  return request -> {
+    // 不记录 /admin 路径的追踪数据
+    return !request.path().startsWith("/admin");
+  };
+}
+```
+
+---
+
+## 总结
+
+| 方法                | 适用场景                  | 优点                     |
+|---------------------|-------------------------|--------------------------|
+| `SpanAdjuster`      | 动态修改已收集的 Span     | 灵活性高                 |
+| 严格模式            | 服务端全局过滤            | 无需客户端修改           |
+| Sleuth 配置         | Spring 生态集成           | 声明式配置               |
+
+---
+
+## 延伸练习
+
+1. 尝试在本地 Zipkin 中复现敏感数据过滤效果  
+2. 编写一个过滤数据库查询参数的 `Adjuster`  
+3. 对比 `STORAGE_STRICT_TRACING` 开启前后的差异  
+
+## 附加资源
+
+- [Zipkin 安全文档](https://zipkin.io/pages/security.html)  
+- [Spring Cloud Sleuth 采样配置](https://docs.spring.io/spring-cloud-sleuth/docs/current/reference/html/)

@@ -1,0 +1,111 @@
+---
+title: 与Prometheus集成
+description: 学习如何将Grafana Loki与Prometheus集成，实现日志和指标的联合分析。
+---
+
+# 与Prometheus集成
+
+## 介绍
+
+Grafana Loki是一个轻量级的日志聚合系统，而Prometheus是领先的开源监控和告警工具。两者的集成可以让你在同一个界面中同时查看日志和指标数据，从而更高效地进行故障排查和系统分析。本教程将介绍如何配置Loki与Prometheus的集成，并通过实际案例展示其优势。
+
+:::note
+**为什么需要集成？**  
+- **统一视图**：在Grafana中同时查看日志和指标，避免切换工具。  
+- **上下文关联**：通过指标异常快速定位相关日志，反之亦然。  
+- **简化运维**：减少工具链的复杂性，提升效率。
+:::
+
+---
+
+## 配置步骤
+
+### 1. 安装并运行Prometheus和Loki
+确保你已经安装了Prometheus和Loki，并确认两者都在运行状态。以下是一个简单的Loki配置示例（`loki-config.yaml`）：
+
+```yaml
+auth_enabled: false
+server:
+  http_listen_port: 3100
+ingester:
+  lifecycler:
+    address: 127.0.0.1
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  max_chunk_age: 1h
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+```
+
+### 2. 配置Prometheus抓取Loki的指标
+修改Prometheus的配置文件（`prometheus.yml`），添加Loki的指标端点：
+
+```yaml
+scrape_configs:
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['localhost:3100']  # Loki 的默认端口
+```
+
+重启Prometheus以加载配置。
+
+### 3. 在Grafana中添加数据源
+1. 打开Grafana，导航到 **Configuration > Data Sources**。  
+2. 添加 **Prometheus** 和 **Loki** 数据源，分别填写它们的访问地址（如 `http://localhost:9090` 和 `http://localhost:3100`）。  
+
+:::tip
+验证数据源是否正常工作：  
+- 在Grafana中创建一个Dashboard，尝试查询Prometheus的指标（如 `up`）和Loki的日志（如 `{job="varlogs"}`）。
+:::
+
+---
+
+## 实际案例：关联日志与指标
+
+### 场景描述
+假设你的应用出现高延迟问题，Prometheus显示请求延迟（`http_request_duration_seconds`）飙升，但原因未知。通过Loki日志可以快速定位到具体错误。
+
+### 操作步骤
+1. 在Grafana中创建一个Dashboard，添加一个Prometheus图表显示延迟指标：  
+   ```promql
+   rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])
+   ```
+2. 添加一个Loki日志面板，查询错误日志：  
+   ```logql
+   {app="myapp"} |= "error"
+   ```
+3. 使用Grafana的 **Split View** 或 **Annotations** 功能，将指标峰值与日志错误时间对齐。
+
+```mermaid
+flowchart LR
+    A[Prometheus指标异常] --> B[查询Loki日志]
+    B --> C[发现错误日志]
+    C --> D[定位代码或配置问题]
+```
+
+---
+
+## 总结
+
+通过将Loki与Prometheus集成，你可以：
+- 在单一平台中统一分析日志和指标。  
+- 快速关联异常事件的根本原因。  
+- 减少跨工具切换的时间成本。
+
+---
+
+## 附加资源
+1. [Loki官方文档](https://grafana.com/docs/loki/latest/)  
+2. [Prometheus查询语言（PromQL）指南](https://prometheus.io/docs/prometheus/latest/querying/basics/)  
+3. 练习：尝试在本地环境中部署Loki和Prometheus，并复现上述案例。

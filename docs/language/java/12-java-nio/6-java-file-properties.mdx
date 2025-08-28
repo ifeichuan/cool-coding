@@ -1,0 +1,426 @@
+---
+title: Java 文件属性
+description: 学习如何在Java中使用NIO包获取和修改文件属性，包括基本属性、所有权、权限、时间戳等。
+---
+
+# Java 文件属性
+
+在Java编程中，文件属性提供了关于文件系统中文件和目录的元数据信息。通过Java NIO (New I/O) API，我们可以轻松读取和修改这些属性，比如文件大小、创建时间、最后修改时间、所有权和访问权限等。
+
+## 文件属性基础
+
+Java NIO.2 (Java 7及更高版本)提供了强大的文件属性API，主要通过`Files`类和`Path`接口来操作。
+
+### 文件属性类型
+
+Java NIO支持多种文件属性视图：
+
+1. **基本属性** - 所有文件系统通用的属性（大小、时间戳等）
+2. **POSIX属性** - Unix/Linux系统特有的属性（权限、所有者等）
+3. **DOS属性** - Windows系统特有的属性（只读、隐藏等）
+4. **用户定义属性** - 文件系统支持的自定义元数据
+
+## 基本文件属性
+
+通过`Files.readAttributes()`和`Files.getAttribute()`方法可以访问基本文件属性。
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+
+public class BasicFileAttributesExample {
+    public static void main(String[] args) {
+        try {
+            Path filePath = Paths.get("example.txt");
+            
+            // 读取基本文件属性
+            BasicFileAttributes attrs = Files.readAttributes(filePath, BasicFileAttributes.class);
+            
+            System.out.println("文件大小: " + attrs.size() + " bytes");
+            System.out.println("创建时间: " + attrs.creationTime());
+            System.out.println("最后访问时间: " + attrs.lastAccessTime());
+            System.out.println("最后修改时间: " + attrs.lastModifiedTime());
+            
+            System.out.println("是否为目录: " + attrs.isDirectory());
+            System.out.println("是否为普通文件: " + attrs.isRegularFile());
+            System.out.println("是否为符号链接: " + attrs.isSymbolicLink());
+            System.out.println("是否为其他类型: " + attrs.isOther());
+            
+        } catch (IOException e) {
+            System.err.println("无法读取文件属性: " + e.getMessage());
+        }
+    }
+}
+```
+
+**输出示例：**
+```
+文件大小: 1024 bytes
+创建时间: 2023-01-15T10:20:30Z
+最后访问时间: 2023-01-20T15:45:12Z
+最后修改时间: 2023-01-18T09:30:05Z
+是否为目录: false
+是否为普通文件: true
+是否为符号链接: false
+是否为其他类型: false
+```
+
+:::note
+`BasicFileAttributes`接口只提供只读操作。如果你需要修改属性，需要使用对应的`BasicFileAttributeView`。
+:::
+
+## 修改文件属性
+
+要修改文件属性，可以使用对应的`FileAttributeView`：
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+
+public class ModifyAttributesExample {
+    public static void main(String[] args) {
+        try {
+            Path filePath = Paths.get("example.txt");
+            
+            // 获取基本文件属性视图
+            BasicFileAttributeView view = 
+                Files.getFileAttributeView(filePath, BasicFileAttributeView.class);
+            
+            // 读取当前属性
+            BasicFileAttributes attrs = view.readAttributes();
+            
+            // 计算新的时间戳（当前时间）
+            FileTime now = FileTime.fromMillis(System.currentTimeMillis());
+            
+            // 计算前一天的时间
+            FileTime yesterday = FileTime.from(
+                Instant.now().minus(1, ChronoUnit.DAYS)
+            );
+            
+            // 更新文件的时间戳
+            view.setTimes(
+                now,       // 最后修改时间
+                now,       // 最后访问时间
+                attrs.creationTime()  // 保持创建时间不变
+            );
+            
+            System.out.println("文件时间戳已更新!");
+            
+        } catch (IOException e) {
+            System.err.println("无法修改文件属性: " + e.getMessage());
+        }
+    }
+}
+```
+
+## POSIX文件属性（Unix/Linux）
+
+POSIX文件属性包括文件所有者、组和权限信息。这些属性在Unix/Linux系统上非常有用。
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+import java.util.Set;
+
+public class PosixFileAttributesExample {
+    public static void main(String[] args) {
+        try {
+            // 确认文件系统支持POSIX
+            Path path = Paths.get("example.txt");
+            FileStore store = Files.getFileStore(path);
+            
+            if (!store.supportsFileAttributeView(PosixFileAttributeView.class)) {
+                System.out.println("此文件系统不支持POSIX文件属性");
+                return;
+            }
+            
+            // 读取POSIX文件属性
+            PosixFileAttributes attrs = 
+                Files.readAttributes(path, PosixFileAttributes.class);
+            
+            System.out.println("所有者: " + attrs.owner().getName());
+            System.out.println("组: " + attrs.group().getName());
+            System.out.println("权限: " + attrs.permissions());
+            
+            // 修改文件权限
+            Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rw-r--r--");
+            Files.setPosixFilePermissions(path, permissions);
+            System.out.println("权限已更新为: rw-r--r--");
+            
+        } catch (IOException e) {
+            System.err.println("无法访问POSIX属性: " + e.getMessage());
+        }
+    }
+}
+```
+
+:::caution
+POSIX文件属性仅在支持POSIX标准的操作系统（如Unix、Linux、macOS）上可用，Windows上不支持。如果你的代码需要跨平台运行，应该进行适当的检查和异常处理。
+:::
+
+## DOS文件属性（Windows）
+
+在Windows系统上，你可以访问DOS文件属性如只读、隐藏等：
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+
+public class DosFileAttributesExample {
+    public static void main(String[] args) {
+        try {
+            Path path = Paths.get("example.txt");
+            
+            // 检查系统是否支持DOS属性
+            FileStore store = Files.getFileStore(path);
+            
+            if (!store.supportsFileAttributeView(DosFileAttributeView.class)) {
+                System.out.println("此文件系统不支持DOS文件属性");
+                return;
+            }
+            
+            // 读取DOS属性
+            DosFileAttributes attrs = Files.readAttributes(path, DosFileAttributes.class);
+            
+            System.out.println("只读: " + attrs.isReadOnly());
+            System.out.println("隐藏: " + attrs.isHidden());
+            System.out.println("系统文件: " + attrs.isSystem());
+            System.out.println("存档: " + attrs.isArchive());
+            
+            // 修改DOS属性
+            DosFileAttributeView view = 
+                Files.getFileAttributeView(path, DosFileAttributeView.class);
+            
+            // 设置文件为只读
+            view.setReadOnly(true);
+            System.out.println("文件已设置为只读");
+            
+        } catch (IOException e) {
+            System.err.println("无法访问DOS属性: " + e.getMessage());
+        }
+    }
+}
+```
+
+## 用户自定义文件属性
+
+某些文件系统支持用户自定义属性（也称为扩展属性或元数据），这些属性允许你存储额外的信息：
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+public class UserDefinedAttributesExample {
+    public static void main(String[] args) {
+        try {
+            Path path = Paths.get("example.txt");
+            
+            // 检查是否支持用户自定义属性
+            FileStore store = Files.getFileStore(path);
+            if (!store.supportsFileAttributeView(UserDefinedFileAttributeView.class)) {
+                System.out.println("此文件系统不支持用户自定义属性");
+                return;
+            }
+            
+            UserDefinedFileAttributeView view = Files.getFileAttributeView(
+                path, UserDefinedFileAttributeView.class);
+            
+            // 设置自定义属性
+            String name = "author";
+            String value = "Java程序员";
+            view.write(name, StandardCharsets.UTF_8.encode(value));
+            
+            // 读取自定义属性
+            for (String attrName : view.list()) {
+                int size = view.size(attrName);
+                java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(size);
+                view.read(attrName, buffer);
+                buffer.flip();
+                String attrValue = StandardCharsets.UTF_8.decode(buffer).toString();
+                System.out.println(attrName + ": " + attrValue);
+            }
+            
+        } catch (IOException e) {
+            System.err.println("无法访问用户自定义属性: " + e.getMessage());
+        }
+    }
+}
+```
+
+:::tip
+用户自定义属性支持因文件系统而异。例如，ext4、NTFS支持这些属性，而FAT32不支持。在使用前最好检查文件系统的支持情况。
+:::
+
+## 实际应用案例
+
+### 文件监控系统
+
+以下是一个简单的文件监控系统，它可以检测指定目录中最近修改的文件：
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.*;
+
+public class FileMonitoringSystem {
+    public static void main(String[] args) {
+        Path directory = Paths.get("./监控目录");
+        
+        try {
+            // 确保目录存在
+            if (!Files.exists(directory)) {
+                Files.createDirectories(directory);
+            }
+            
+            // 获取24小时前的时间点
+            Instant oneDayAgo = Instant.now().minus(24, ChronoUnit.HOURS);
+            FileTime compareTime = FileTime.from(oneDayAgo);
+            
+            System.out.println("检查过去24小时内修改的文件...");
+            
+            // 遍历目录中的所有文件
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+                for (Path file : stream) {
+                    if (Files.isRegularFile(file)) {
+                        BasicFileAttributes attrs = 
+                            Files.readAttributes(file, BasicFileAttributes.class);
+                        
+                        if (attrs.lastModifiedTime().compareTo(compareTime) > 0) {
+                            System.out.println("发现最近修改的文件: " + file.getFileName());
+                            System.out.println("  修改时间: " + attrs.lastModifiedTime());
+                            System.out.println("  文件大小: " + attrs.size() + " bytes");
+                            
+                            // 获取所有者信息（如果系统支持）
+                            try {
+                                FileOwnerAttributeView ownerView = 
+                                    Files.getFileAttributeView(file, FileOwnerAttributeView.class);
+                                if (ownerView != null) {
+                                    System.out.println("  所有者: " + ownerView.getOwner().getName());
+                                }
+                            } catch (UnsupportedOperationException e) {
+                                System.out.println("  所有者: 不支持此操作");
+                            }
+                            
+                            System.out.println();
+                        }
+                    }
+                }
+            }
+            
+        } catch (IOException e) {
+            System.err.println("监控系统错误: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### 文件备份工具
+
+以下是一个简单的备份工具，它只会备份自上次备份以来修改过的文件：
+
+```java
+import java.nio.file.*;
+import java.nio.file.attribute.*;
+import java.io.IOException;
+import java.util.*;
+import java.time.*;
+
+public class BackupTool {
+    public static void main(String[] args) {
+        Path sourceDir = Paths.get("./源目录");
+        Path backupDir = Paths.get("./备份目录");
+        Path lastBackupFile = Paths.get("./last_backup_time.txt");
+        
+        try {
+            // 确保目录存在
+            if (!Files.exists(backupDir)) {
+                Files.createDirectories(backupDir);
+            }
+            
+            // 获取上次备份时间
+            FileTime lastBackupTime;
+            if (Files.exists(lastBackupFile)) {
+                String timeStr = Files.readString(lastBackupFile);
+                lastBackupTime = FileTime.from(Instant.parse(timeStr));
+                System.out.println("上次备份时间: " + lastBackupTime);
+            } else {
+                // 如果没有记录，设置为很久以前（备份所有文件）
+                lastBackupTime = FileTime.from(Instant.EPOCH);
+                System.out.println("首次备份，将复制所有文件");
+            }
+            
+            // 记录当前备份时间
+            FileTime currentBackupTime = FileTime.from(Instant.now());
+            
+            // 查找并复制修改过的文件
+            int count = 0;
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(sourceDir)) {
+                for (Path source : stream) {
+                    if (Files.isRegularFile(source)) {
+                        BasicFileAttributes attrs = 
+                            Files.readAttributes(source, BasicFileAttributes.class);
+                        
+                        // 检查文件是否在上次备份后修改过
+                        if (attrs.lastModifiedTime().compareTo(lastBackupTime) > 0) {
+                            Path target = backupDir.resolve(source.getFileName());
+                            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                            System.out.println("已备份: " + source.getFileName());
+                            count++;
+                        }
+                    }
+                }
+            }
+            
+            // 更新备份时间记录
+            Files.writeString(lastBackupFile, currentBackupTime.toInstant().toString());
+            
+            System.out.println("备份完成! 共备份 " + count + " 个文件");
+            
+        } catch (IOException e) {
+            System.err.println("备份失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+## 总结
+
+Java NIO的文件属性API提供了强大且灵活的方式来读取和修改文件系统中文件和目录的元数据：
+
+1. **基本属性**适用于所有文件系统，提供通用信息如大小和时间戳。
+2. **POSIX属性**在Unix/Linux系统上提供权限和所有权控制。
+3. **DOS属性**在Windows系统上提供特定标志如只读和隐藏。
+4. **用户自定义属性**允许存储自定义元数据。
+
+理解和利用这些文件属性，可以帮助你构建更强大的文件管理应用程序，如文件监控系统、备份工具、同步工具等。
+
+## 练习
+
+1. 编写一个程序，递归列出指定目录下所有文件的基本属性。
+2. 创建一个工具，找出指定目录中最大的5个文件。
+3. 如果你的系统支持POSIX，编写一个程序来设置目录中所有文件的权限为"所有者可读写，其他人只读"。
+4. 编写一个程序，使用用户自定义属性为图片文件添加"标签"，然后编写另一个程序来根据这些标签查找图片。
+5. 实现一个简单的文件同步工具，它可以检测两个目录之间的差异，并进行同步。
+
+## 额外资源
+
+- [Java NIO.2官方文档](https://docs.oracle.com/javase/8/docs/api/java/nio/file/package-summary.html)
+- [Files类文档](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html)
+- [Path接口文档](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Path.html)
+- 《Java NIO编程》 - Ron Hitchens著
+- 《Java核心技术》第10版 - Cay S. Horstmann著
+
+通过掌握Java文件属性API，你将能够创建更强大的文件系统应用程序，并更有效地管理和处理文件数据。

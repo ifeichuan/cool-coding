@@ -1,0 +1,122 @@
+---
+title: Seata TCC接口设计
+description: 了解Seata TCC模式中的接口设计，掌握如何通过Try-Confirm-Cancel机制实现分布式事务。
+---
+
+# Seata TCC接口设计
+
+## 介绍
+
+在分布式系统中，事务管理是一个复杂的问题。Seata 是一个开源的分布式事务解决方案，提供了多种模式来处理分布式事务，其中 TCC（Try-Confirm-Cancel）模式是一种常见的解决方案。TCC 模式通过将事务分为三个阶段（Try、Confirm、Cancel）来确保事务的最终一致性。
+
+本文将详细介绍如何在 Seata 中设计 TCC 接口，并通过代码示例和实际案例帮助你理解这一概念。
+
+## TCC 模式概述
+
+TCC 模式的核心思想是将一个分布式事务分解为三个步骤：
+
+1. **Try 阶段**：尝试执行业务逻辑，预留资源。
+2. **Confirm 阶段**：确认执行业务逻辑，提交资源。
+3. **Cancel 阶段**：取消执行业务逻辑，释放资源。
+
+通过这三个步骤，TCC 模式能够在分布式环境中实现事务的最终一致性。
+
+## TCC 接口设计
+
+在 Seata 中，TCC 接口的设计需要遵循一定的规范。每个 TCC 接口需要包含三个方法：`try`、`confirm` 和 `cancel`。这些方法分别对应 TCC 模式的三个阶段。
+
+### 1. Try 方法
+
+`try` 方法是 TCC 模式的第一步，用于尝试执行业务逻辑并预留资源。通常，`try` 方法会执行一些检查操作，并预留必要的资源。
+
+```java
+public interface TccService {
+    @TwoPhaseBusinessAction(name = "tccAction", commitMethod = "confirm", rollbackMethod = "cancel")
+    boolean try(BusinessActionContext actionContext, @BusinessActionContextParameter(paramName = "param") String param);
+}
+```
+
+### 2. Confirm 方法
+
+`confirm` 方法是 TCC 模式的第二步，用于确认执行业务逻辑并提交资源。只有在所有参与者的 `try` 方法都成功执行后，`confirm` 方法才会被调用。
+
+```java
+public interface TccService {
+    boolean confirm(BusinessActionContext actionContext);
+}
+```
+
+### 3. Cancel 方法
+
+`cancel` 方法是 TCC 模式的第三步，用于取消执行业务逻辑并释放资源。如果在 `try` 阶段出现任何问题，`cancel` 方法将被调用以回滚操作。
+
+```java
+public interface TccService {
+    boolean cancel(BusinessActionContext actionContext);
+}
+```
+
+## 实际案例
+
+假设我们有一个电商系统，用户在下单时需要扣减库存和扣减账户余额。我们可以使用 TCC 模式来实现这一分布式事务。
+
+### 1. 扣减库存服务
+
+```java
+public interface InventoryService {
+    @TwoPhaseBusinessAction(name = "deductInventory", commitMethod = "confirmDeduct", rollbackMethod = "cancelDeduct")
+    boolean tryDeduct(BusinessActionContext actionContext, @BusinessActionContextParameter(paramName = "productId") String productId, @BusinessActionContextParameter(paramName = "quantity") int quantity);
+
+    boolean confirmDeduct(BusinessActionContext actionContext);
+
+    boolean cancelDeduct(BusinessActionContext actionContext);
+}
+```
+
+### 2. 扣减账户余额服务
+
+```java
+public interface AccountService {
+    @TwoPhaseBusinessAction(name = "deductBalance", commitMethod = "confirmDeduct", rollbackMethod = "cancelDeduct")
+    boolean tryDeduct(BusinessActionContext actionContext, @BusinessActionContextParameter(paramName = "userId") String userId, @BusinessActionContextParameter(paramName = "amount") BigDecimal amount);
+
+    boolean confirmDeduct(BusinessActionContext actionContext);
+
+    boolean cancelDeduct(BusinessActionContext actionContext);
+}
+```
+
+### 3. 下单服务
+
+```java
+public class OrderService {
+    @GlobalTransactional
+    public void placeOrder(String userId, String productId, int quantity, BigDecimal amount) {
+        // 调用库存服务的 try 方法
+        inventoryService.tryDeduct(new BusinessActionContext(), productId, quantity);
+
+        // 调用账户服务的 try 方法
+        accountService.tryDeduct(new BusinessActionContext(), userId, amount);
+
+        // 如果所有 try 方法都成功，Seata 会自动调用 confirm 方法
+    }
+}
+```
+
+## 总结
+
+通过本文，我们了解了 Seata TCC 模式的接口设计。TCC 模式通过将事务分为 Try、Confirm 和 Cancel 三个阶段，能够在分布式环境中实现事务的最终一致性。我们通过一个电商系统的实际案例，展示了如何在 Seata 中设计和实现 TCC 接口。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务解决方案](https://dubbo.apache.org/zh/docs/advanced/distributed-transaction/)
+
+## 练习
+
+1. 尝试设计一个简单的 TCC 接口，模拟用户注册时的分布式事务。
+2. 在本地环境中部署 Seata，并运行本文中的电商系统案例。
+
+:::tip
+在设计和实现 TCC 接口时，务必确保 `try`、`confirm` 和 `cancel` 方法的幂等性，以避免重复操作导致的数据不一致问题。
+:::

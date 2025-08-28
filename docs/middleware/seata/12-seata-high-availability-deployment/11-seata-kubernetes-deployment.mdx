@@ -1,0 +1,193 @@
+---
+title: Seata Kubernetes部署
+description: "学习如何在 Kubernetes 上部署 Seata，实现分布式事务的高可用性。本文将从基础概念讲起，逐步指导您完成部署过程，并提供实际案例和代码示例。"
+---
+
+## 介绍
+
+Seata 是一款开源的分布式事务解决方案，旨在解决微服务架构中的事务一致性问题。Kubernetes 是一个强大的容器编排工具，能够自动化应用的部署、扩展和管理。将 Seata 部署在 Kubernetes 上，可以实现高可用性和弹性扩展，确保分布式事务的稳定运行。
+
+本文将详细介绍如何在 Kubernetes 上部署 Seata，包括必要的配置和实际案例。
+
+## 准备工作
+
+在开始之前，请确保您已经具备以下条件：
+
+1. 一个运行中的 Kubernetes 集群。
+2. `kubectl` 命令行工具已安装并配置好。
+3. Helm 包管理工具已安装。
+
+## 部署 Seata 到 Kubernetes
+
+### 1. 创建命名空间
+
+首先，我们需要为 Seata 创建一个独立的命名空间：
+
+```bash
+kubectl create namespace seata
+```
+
+### 2. 使用 Helm 部署 Seata
+
+Helm 是 Kubernetes 的包管理工具，可以简化应用的部署过程。我们可以使用 Helm Chart 来部署 Seata。
+
+首先，添加 Seata 的 Helm 仓库：
+
+```bash
+helm repo add seata https://seata.io/helm-charts
+helm repo update
+```
+
+然后，使用 Helm 安装 Seata：
+
+```bash
+helm install seata seata/seata --namespace seata
+```
+
+### 3. 配置 Seata
+
+Seata 的配置文件可以通过 ConfigMap 或环境变量进行配置。以下是一个简单的 ConfigMap 示例：
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seata-config
+  namespace: seata
+data:
+  registry.conf: |
+    registry {
+      type = "nacos"
+      nacos {
+        serverAddr = "nacos:8848"
+        namespace = ""
+        cluster = "default"
+      }
+    }
+    config {
+      type = "nacos"
+      nacos {
+        serverAddr = "nacos:8848"
+        namespace = ""
+        group = "SEATA_GROUP"
+      }
+    }
+```
+
+将上述 ConfigMap 应用到 Kubernetes 集群：
+
+```bash
+kubectl apply -f seata-config.yaml
+```
+
+### 4. 部署 Seata Server
+
+接下来，我们需要部署 Seata Server。以下是一个简单的 Deployment 示例：
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seata-server
+  namespace: seata
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: seata-server
+  template:
+    metadata:
+      labels:
+        app: seata-server
+    spec:
+      containers:
+      - name: seata-server
+        image: seataio/seata-server:latest
+        ports:
+        - containerPort: 8091
+        env:
+        - name: SEATA_CONFIG_NAME
+          value: "seata-config"
+```
+
+将上述 Deployment 应用到 Kubernetes 集群：
+
+```bash
+kubectl apply -f seata-server-deployment.yaml
+```
+
+### 5. 暴露 Seata 服务
+
+为了让其他服务能够访问 Seata Server，我们需要创建一个 Service：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: seata-service
+  namespace: seata
+spec:
+  selector:
+    app: seata-server
+  ports:
+  - protocol: TCP
+    port: 8091
+    targetPort: 8091
+```
+
+将上述 Service 应用到 Kubernetes 集群：
+
+```bash
+kubectl apply -f seata-service.yaml
+```
+
+## 实际案例
+
+假设我们有一个微服务架构的电商系统，其中订单服务和库存服务需要保证事务一致性。我们可以使用 Seata 来管理这两个服务之间的分布式事务。
+
+### 1. 配置微服务
+
+在每个微服务中，配置 Seata 的客户端：
+
+```yaml
+seata:
+  application-id: order-service
+  tx-service-group: my_tx_group
+  service:
+    vgroup-mapping:
+      my_tx_group: default
+    grouplist:
+      default: seata-service:8091
+```
+
+### 2. 使用 Seata 管理事务
+
+在订单服务中，使用 Seata 的 `@GlobalTransactional` 注解来管理事务：
+
+```java
+@GlobalTransactional
+public void createOrder(Order order) {
+    // 创建订单
+    orderService.create(order);
+    // 扣减库存
+    inventoryService.deduct(order.getProductId(), order.getQuantity());
+}
+```
+
+## 总结
+
+通过本文，您已经学会了如何在 Kubernetes 上部署 Seata，并了解了如何在实际应用中使用 Seata 管理分布式事务。Kubernetes 提供了强大的编排能力，结合 Seata 的分布式事务管理，可以确保微服务架构中的事务一致性。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [Kubernetes 官方文档](https://kubernetes.io/docs/home/)
+- [Helm 官方文档](https://helm.sh/docs/)
+
+## 练习
+
+1. 尝试在本地 Kubernetes 集群上部署 Seata，并配置一个简单的微服务应用。
+2. 修改 Seata 的配置文件，使用不同的注册中心（如 Zookeeper 或 Eureka）。
+3. 探索 Seata 的其他功能，如 AT 模式、TCC 模式等。
+
+希望本文对您的学习有所帮助，祝您在分布式事务管理的旅程中取得成功！

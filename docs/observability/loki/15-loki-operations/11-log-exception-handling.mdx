@@ -1,0 +1,121 @@
+---
+title: 日志异常处理
+description: 学习如何在Grafana Loki中识别、分析和处理日志异常，掌握运维关键技能。
+---
+
+# 日志异常处理
+
+## 介绍
+
+日志异常处理是运维工作中的关键环节，它帮助开发者快速发现系统问题并定位根本原因。在Grafana Loki中，通过高效的日志聚合和查询能力，我们可以更轻松地识别异常模式。本章将介绍常见的日志异常类型、Loki中的分析方法以及实际解决方案。
+
+---
+
+## 常见的日志异常类型
+
+1. **错误激增**：短时间内错误日志数量陡增<br />
+2. **模式突变**：日志格式或内容突然变化（如缺失字段）<br />
+3. **静默失败**：预期日志未出现<br />
+4. **性能指标异常**：日志时间戳间隔异常（如延迟增加）
+
+:::tip
+使用Loki的 `rate()` 或 `count_over_time()` 函数可快速检测错误激增现象：
+```logql
+sum(rate({job="myapp"} |= "error" [5m])) by (level)
+```
+:::
+
+---
+
+## 异常检测步骤
+
+### 第一步：建立基线
+通过历史日志确定正常模式：
+```mermaid
+graph LR
+    A[收集7天日志] --> B[分析时间分布]
+    B --> C[识别常见错误模式]
+```
+
+### 第二步：实时监控
+使用Loki告警规则（Alertmanager集成）：
+```yaml
+# loki-alert.yaml
+groups:
+- name: errors
+  rules:
+  - alert: HighErrorRate
+    expr: sum(rate({job="myapp"} |= "error" [5m])) by (level) > 10
+    for: 10m
+```
+
+### 第三步：根本原因分析
+通过日志标签钻取：
+```logql
+{cluster="prod"} |= "panic"
+| json
+| line_format "{{.trace_id}}"
+```
+
+---
+
+## 实际案例：数据库连接泄漏
+
+### 现象
+每20分钟出现`too many connections`错误，但无对应业务高峰。
+
+### 解决方案
+1. 使用LogQL定位时间模式：
+```logql
+sum by (pod) (rate({job="mysql"} |= "too many connections" [1m]))
+```
+
+2. 关联应用日志发现未关闭的连接：
+```logql
+{app="backend"} |= "opened connection"
+|~ "duration=(5m|10m)"
+```
+
+3. 最终定位到未调用`.Close()`的代码段。
+
+---
+
+## 处理静默失败
+
+当预期日志缺失时：
+1. 使用`absent()`函数检测：
+```logql
+absent({job="cronjob"} |= "task completed")
+```
+2. 检查最近部署记录
+3. 验证日志采集配置：
+```yaml
+# promtail配置示例
+scrape_configs:
+  - job_name: myapp
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: myapp
+          __path__: /var/log/myapp/*.log
+```
+
+---
+
+## 总结
+
+| 异常类型       | 检测工具          | 解决方向               |
+|----------------|-------------------|-----------------------|
+| 错误激增       | rate()/count()    | 流量控制/错误处理      |
+| 模式突变       | pattern analysis  | 日志规范/版本兼容      |
+| 静默失败       | absent()          | 流程验证/监控覆盖      |
+
+**推荐练习**：
+1. 在测试环境故意注入日志异常，尝试用Loki定位
+2. 为您的应用设计一个关键错误告警规则
+
+:::note
+延伸阅读：
+- [Loki告警最佳实践](https://grafana.com/docs/loki/latest/alerting/)
+- [LogQL模式匹配指南](https://grafana.com/docs/loki/latest/logql/)
+:::

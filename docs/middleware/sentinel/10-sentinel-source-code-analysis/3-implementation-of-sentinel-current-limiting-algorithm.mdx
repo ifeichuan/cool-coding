@@ -1,0 +1,157 @@
+---
+title: Sentinel 限流算法实现
+description: 了解Sentinel中的限流算法实现，掌握其核心原理、代码实现及实际应用场景。
+---
+
+# Sentinel 限流算法实现
+
+Sentinel 是阿里巴巴开源的一款轻量级流量控制组件，广泛应用于微服务架构中，用于保护系统的稳定性。限流算法是 Sentinel 的核心功能之一，它通过限制请求的速率，防止系统因流量过大而崩溃。本文将详细介绍 Sentinel 中的限流算法实现，帮助初学者理解其工作原理和实际应用。
+
+## 什么是限流算法？
+
+限流算法是一种用于控制请求速率的机制，目的是在系统资源有限的情况下，确保系统能够稳定运行。常见的限流算法包括计数器算法、滑动窗口算法、令牌桶算法和漏桶算法等。Sentinel 主要采用了**滑动窗口算法**和**令牌桶算法**来实现限流。
+
+## Sentinel 中的限流算法
+
+### 1. 滑动窗口算法
+
+滑动窗口算法是 Sentinel 中默认的限流算法。它将时间划分为多个小窗口，每个窗口记录一段时间内的请求数量。通过滑动窗口的方式，可以动态调整限流策略，避免固定时间窗口带来的突发流量问题。
+
+#### 实现原理
+
+1. **时间窗口划分**：将时间划分为多个小窗口，例如每秒划分为 10 个小窗口，每个小窗口的时间跨度为 100ms。
+2. **请求计数**：每个小窗口记录当前时间段的请求数量。
+3. **滑动窗口**：随着时间的推移，窗口会滑动，旧的窗口数据会被丢弃，新的窗口数据会被添加。
+4. **限流判断**：根据当前窗口内的请求总数，判断是否超过设定的阈值，如果超过则触发限流。
+
+#### 代码示例
+
+以下是一个简单的滑动窗口算法实现示例：
+
+```java
+public class SlidingWindow {
+    private final int[] window; // 窗口数组
+    private final int windowSize; // 窗口大小
+    private int currentIndex = 0; // 当前窗口索引
+    private long lastUpdateTime = System.currentTimeMillis(); // 上次更新时间
+
+    public SlidingWindow(int windowSize) {
+        this.windowSize = windowSize;
+        this.window = new int[windowSize];
+    }
+
+    public boolean allowRequest() {
+        long currentTime = System.currentTimeMillis();
+        long elapsedTime = currentTime - lastUpdateTime;
+
+        // 滑动窗口
+        if (elapsedTime >= windowSize * 1000) {
+            Arrays.fill(window, 0); // 重置窗口
+            currentIndex = 0;
+            lastUpdateTime = currentTime;
+        } else {
+            int steps = (int) (elapsedTime / 1000);
+            for (int i = 0; i < steps; i++) {
+                currentIndex = (currentIndex + 1) % windowSize;
+                window[currentIndex] = 0; // 清空旧窗口
+            }
+            lastUpdateTime = currentTime;
+        }
+
+        // 判断是否超过阈值
+        if (window[currentIndex] < 10) { // 假设阈值为 10
+            window[currentIndex]++;
+            return true;
+        } else {
+            return false;
+        }
+    }
+}
+```
+
+#### 输入与输出
+
+- **输入**：请求到达时调用 `allowRequest()` 方法。
+- **输出**：返回 `true` 表示允许请求，返回 `false` 表示触发限流。
+
+### 2. 令牌桶算法
+
+令牌桶算法是另一种常见的限流算法，它通过维护一个令牌桶来控制请求的速率。令牌桶以固定的速率生成令牌，请求需要消耗令牌才能被处理。如果令牌桶中没有足够的令牌，则触发限流。
+
+#### 实现原理
+
+1. **令牌生成**：令牌桶以固定的速率生成令牌，例如每秒生成 10 个令牌。
+2. **令牌消耗**：每个请求需要消耗一个令牌，如果令牌桶中有足够的令牌，则允许请求；否则触发限流。
+3. **桶容量限制**：令牌桶的容量是有限的，超过容量的令牌会被丢弃。
+
+#### 代码示例
+
+以下是一个简单的令牌桶算法实现示例：
+
+```java
+public class TokenBucket {
+    private final int capacity; // 令牌桶容量
+    private int tokens; // 当前令牌数量
+    private long lastRefillTime = System.currentTimeMillis(); // 上次补充令牌时间
+    private final int refillRate; // 令牌补充速率（每秒）
+
+    public TokenBucket(int capacity, int refillRate) {
+        this.capacity = capacity;
+        this.tokens = capacity;
+        this.refillRate = refillRate;
+    }
+
+    public synchronized boolean allowRequest() {
+        refillTokens();
+        if (tokens > 0) {
+            tokens--;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    private void refillTokens() {
+        long currentTime = System.currentTimeMillis();
+        long elapsedTime = currentTime - lastRefillTime;
+        int tokensToAdd = (int) (elapsedTime * refillRate / 1000);
+        if (tokensToAdd > 0) {
+            tokens = Math.min(capacity, tokens + tokensToAdd);
+            lastRefillTime = currentTime;
+        }
+    }
+}
+```
+
+#### 输入与输出
+
+- **输入**：请求到达时调用 `allowRequest()` 方法。
+- **输出**：返回 `true` 表示允许请求，返回 `false` 表示触发限流。
+
+## 实际应用场景
+
+### 1. API 限流
+
+在高并发的 API 服务中，为了防止某个接口被过度调用，可以使用 Sentinel 的限流功能。例如，限制某个接口每秒最多处理 100 个请求，超过该阈值的请求将被拒绝。
+
+### 2. 微服务保护
+
+在微服务架构中，某个服务的故障可能会引发雪崩效应。通过 Sentinel 的限流功能，可以保护关键服务，确保系统在高峰期仍能稳定运行。
+
+## 总结
+
+Sentinel 的限流算法通过滑动窗口和令牌桶两种方式，有效地控制了请求的速率，保护了系统的稳定性。滑动窗口算法适用于动态调整限流策略的场景，而令牌桶算法则更适合固定速率的限流需求。通过合理配置限流规则，可以避免系统因流量过大而崩溃。
+
+## 附加资源与练习
+
+- **资源**：
+  - [Sentinel 官方文档](https://sentinelguard.io/)
+  - [微服务限流与熔断机制](https://microservices.io/patterns/reliability/circuit-breaker.html)
+
+- **练习**：
+  1. 尝试实现一个基于滑动窗口的限流算法，并测试其在不同请求速率下的表现。
+  2. 修改令牌桶算法的代码，使其支持动态调整令牌生成速率。
+
+:::tip
+建议初学者在理解限流算法的基础上，进一步学习 Sentinel 的其他功能，如熔断、降级等，以全面掌握流量控制的技巧。
+:::

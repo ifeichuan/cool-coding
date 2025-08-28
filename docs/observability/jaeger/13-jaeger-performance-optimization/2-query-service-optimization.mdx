@@ -1,0 +1,142 @@
+---
+title: 查询服务优化
+description: 学习如何优化Jaeger中的查询服务性能，包括索引策略、缓存机制和查询优化技巧。
+---
+
+# 查询服务优化
+
+## 介绍
+
+在分布式追踪系统中，查询服务（Query Service）是用户与追踪数据交互的核心组件。Jaeger的查询服务负责从存储后端（如Cassandra、Elasticsearch）检索数据，并将其展示给用户。随着数据量增长，查询性能可能成为瓶颈。本文将介绍如何通过索引优化、缓存机制和查询策略提升Jaeger查询服务的效率。
+
+:::note 目标读者
+- 了解Jaeger基础架构的初学者
+- 希望优化分布式追踪查询性能的开发人员
+:::
+
+---
+
+## 1. 索引优化
+
+### 为什么需要索引？
+索引是加速查询的关键。Jaeger默认会为以下字段创建索引：
+- `traceID`
+- `serviceName`
+- `operationName`
+- `tags`
+- `duration`
+
+#### 示例：Elasticsearch索引映射
+```json
+{
+  "mappings": {
+    "properties": {
+      "traceID": { "type": "keyword" },
+      "serviceName": { "type": "keyword" },
+      "operationName": { "type": "keyword" },
+      "tags": { "type": "nested" },
+      "duration": { "type": "long" }
+    }
+  }
+}
+```
+
+:::tip 实践建议
+- 避免对高基数字段（如`userID`）建立索引
+- 对频繁查询的tag键使用`nested`类型
+:::
+
+---
+
+## 2. 缓存机制
+
+Jaeger查询服务支持多级缓存：
+
+```mermaid
+graph LR
+    A[客户端] --> B[HTTP缓存]
+    B --> C[内存缓存]
+    C --> D[存储后端]
+```
+
+### 配置示例
+在`jaeger-query`服务中启用缓存：
+```yaml
+query:
+  cache:
+    enabled: true
+    size: 1000  # 缓存条目数
+    ttl: "5m"   # 存活时间
+```
+
+---
+
+## 3. 查询优化技巧
+
+### 3.1 限制时间范围
+始终指定时间范围可以显著减少扫描的数据量：
+```bash
+# 不推荐（扫描全部数据）
+GET /api/traces?service=order-service
+
+# 推荐（限制时间范围）
+GET /api/traces?service=order-service&start=2023-01-01T00:00:00Z&end=2023-01-02T00:00:00Z
+```
+
+### 3.2 使用分页
+大数据集查询时启用分页：
+```bash
+GET /api/traces?limit=50&offset=100
+```
+
+### 3.3 避免复杂tag查询
+简单查询：
+```bash
+# 高效
+GET /api/traces?tags={"http.status_code":"200"}
+
+# 低效（模糊匹配）
+GET /api/traces?tags={"error.message":"*timeout*"}
+```
+
+---
+
+## 真实案例：电商平台优化
+
+**问题场景**：
+某电商平台在促销期间出现Jaeger查询超时，平均响应时间从200ms升至5s。
+
+**优化措施**：
+1. 为`order-service`和`payment-service`添加独立索引
+2. 配置Redis作为二级缓存
+3. 修改默认查询时间窗口从24h改为1h
+
+**结果**：
+| 指标 | 优化前 | 优化后 |
+|------|--------|--------|
+| P99延迟 | 4.8s   | 450ms  |
+| 错误率 | 12%    | 0.2%   |
+
+---
+
+## 总结
+
+关键优化策略：
+1. **合理设计索引**：针对高频查询字段
+2. **启用缓存**：减少存储后端压力
+3. **优化查询模式**：限制范围、使用分页
+4. **监控调整**：持续观察性能指标
+
+---
+
+## 延伸学习
+
+### 实践练习
+1. 在本地Jaeger实例中尝试不同查询参数
+2. 比较有无索引时的查询性能差异
+3. 模拟高负载场景测试缓存效果
+
+### 推荐资源
+- Jaeger官方文档：存储后端配置指南
+- 《分布式系统观测》第三章：查询优化模式
+- Elasticsearch性能调优白皮书

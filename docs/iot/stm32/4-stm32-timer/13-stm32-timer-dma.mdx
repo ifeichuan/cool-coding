@@ -1,0 +1,130 @@
+---
+title: STM32 定时器DMA
+description: 了解如何使用STM32定时器与DMA（直接内存访问）结合，实现高效的数据传输和定时器操作。
+---
+
+## 介绍
+
+在STM32微控制器中，定时器（Timer）是一个强大的外设，用于生成精确的时间延迟、PWM信号、捕获输入信号等。而DMA（Direct Memory Access，直接内存访问）则是一种无需CPU干预即可在内存和外设之间传输数据的技术。将定时器与DMA结合使用，可以显著提高系统的效率，尤其是在需要频繁传输数据的场景中。
+
+本文将详细介绍如何在STM32中使用定时器和DMA，并通过实际案例展示其应用。
+
+## 定时器与DMA的基本概念
+
+### 定时器
+
+STM32的定时器可以配置为多种模式，例如：
+- **基本定时器**：用于简单的计时任务。
+- **通用定时器**：支持PWM输出、输入捕获等功能。
+- **高级定时器**：支持更复杂的功能，如死区时间控制等。
+
+### DMA
+
+DMA允许外设直接与内存进行数据传输，而无需CPU的干预。这对于需要高速数据传输的应用（如音频处理、图像处理等）非常有用。
+
+### 定时器与DMA的结合
+
+通过将定时器与DMA结合，可以实现以下功能：
+- 自动更新定时器的计数器值。
+- 自动将定时器的捕获值传输到内存。
+- 自动将内存中的数据加载到定时器的比较寄存器中。
+
+## 配置STM32定时器与DMA
+
+### 1. 初始化定时器
+
+首先，我们需要配置定时器。以下是一个简单的定时器初始化代码示例：
+
+```c
+TIM_HandleTypeDef htim3;
+
+void TIM3_Init(void) {
+    TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+    TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 8399; // 84MHz / 8400 = 10kHz
+    htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim3.Init.Period = 9999; // 10kHz / 10000 = 1Hz
+    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+    if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
+        // 初始化错误处理
+    }
+
+    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+    if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
+        // 时钟源配置错误处理
+    }
+
+    sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+    sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK) {
+        // 主从模式配置错误处理
+    }
+}
+```
+
+### 2. 配置DMA
+
+接下来，我们需要配置DMA以与定时器配合使用。以下是一个DMA配置的示例：
+
+```c
+DMA_HandleTypeDef hdma_tim3_up;
+
+void DMA_Init(void) {
+    __HAL_RCC_DMA1_CLK_ENABLE();
+
+    hdma_tim3_up.Instance = DMA1_Stream1;
+    hdma_tim3_up.Init.Channel = DMA_CHANNEL_5;
+    hdma_tim3_up.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_tim3_up.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_tim3_up.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_tim3_up.Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+    hdma_tim3_up.Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+    hdma_tim3_up.Init.Mode = DMA_NORMAL;
+    hdma_tim3_up.Init.Priority = DMA_PRIORITY_HIGH;
+    hdma_tim3_up.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_tim3_up) != HAL_OK) {
+        // DMA初始化错误处理
+    }
+
+    __HAL_LINKDMA(&htim3, hdma[TIM_DMA_ID_UPDATE], hdma_tim3_up);
+}
+```
+
+### 3. 启动定时器和DMA
+
+配置完成后，我们可以启动定时器和DMA：
+
+```c
+HAL_TIM_Base_Start(&htim3);
+HAL_TIM_Base_Start_DMA(&htim3, (uint32_t*)&buffer, BUFFER_SIZE);
+```
+
+## 实际案例：使用DMA更新PWM占空比
+
+假设我们需要通过DMA自动更新PWM信号的占空比。以下是一个简单的实现：
+
+```c
+uint32_t pwm_values[] = {500, 1000, 1500, 2000, 2500}; // 占空比数组
+
+void PWM_DMA_Update(void) {
+    HAL_TIM_PWM_Start_DMA(&htim3, TIM_CHANNEL_1, (uint32_t*)pwm_values, 5);
+}
+```
+
+在这个例子中，DMA会自动将 `pwm_values` 数组中的值加载到定时器的比较寄存器中，从而自动更新PWM信号的占空比。
+
+## 总结
+
+通过将STM32的定时器与DMA结合使用，我们可以实现高效的数据传输和定时器操作，减少CPU的负担。这在需要频繁更新定时器参数或处理大量数据的应用中非常有用。
+
+## 附加资源与练习
+
+- **练习1**：尝试配置一个定时器，使用DMA自动更新PWM信号的频率。
+- **练习2**：使用DMA捕获定时器的输入信号，并将捕获值存储在内存中。
+
+:::tip
+在实际项目中，确保DMA传输完成后处理相关中断，以避免数据丢失或错误。
+:::

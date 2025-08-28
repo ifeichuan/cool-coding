@@ -1,0 +1,147 @@
+---
+title: OpenTelemetry 指标聚合
+description: 学习OpenTelemetry指标聚合的基础知识，了解如何通过聚合技术将原始指标数据转化为可观测的统计信息。
+---
+
+# OpenTelemetry 指标聚合
+
+## 介绍
+
+在分布式系统中，**指标（Metrics）**是监控和可观测性的核心组成部分。OpenTelemetry通过**指标聚合（Metric Aggregation）**将原始数据点（如计数器、测量值）转换为有意义的统计信息（如总和、平均值）。本指南将介绍聚合的基本原理、常见聚合类型及其实际应用。
+
+:::note 关键概念
+- **原始数据点**：单个测量值（如HTTP请求延迟为150ms）。
+- **聚合**：将多个数据点按规则合并（如计算1分钟内所有延迟的平均值）。
+- **临时聚合**：在内存中暂存未导出的数据。
+:::
+
+---
+
+## 为什么需要指标聚合？
+
+直接收集每个原始数据点会导致：
+1. **存储成本高**（例如每秒1000次请求 => 8640万数据点/天）。
+2. **查询效率低**（未聚合的数据难以快速分析趋势）。
+3. **网络开销大**（频繁传输原始数据）。
+
+通过聚合，我们得到**时间序列数据**，例如：
+- `请求计数`（总和）  
+- `CPU使用率`（平均值）  
+- `错误率`（比例）
+
+---
+
+## 常见聚合类型
+
+OpenTelemetry支持以下聚合方式：
+
+### 1. Sum（求和）
+将数据点的值累加，适用于计数器（如请求总数）。
+
+**输入示例**（原始数据点）：
+```python
+# 时间戳          值
+10:00:01.000 => 1
+10:00:02.000 => 1
+10:00:03.000 => 1
+```
+
+**输出聚合**（每10秒）：
+```python
+{
+  "sum": 3,
+  "start_time": "10:00:00",
+  "end_time": "10:00:10"
+}
+```
+
+### 2. Last Value（最后值）
+仅保留最新值，适用于瞬时状态（如当前内存使用量）。
+
+### 3. Histogram（直方图）
+将数据按区间分组，统计分布情况（如延迟的P90/P99）。
+
+```mermaid
+barChart
+    title HTTP请求延迟分布（ms）
+    xAxis 0-100, 100-200, 200-300
+    yAxis 数量
+    bar 50
+    bar 30
+    bar 20
+```
+
+---
+
+## 实际案例：Web服务器监控
+
+假设我们需要监控一个Web服务器的：
+1. **请求速率**（Sum聚合）
+2. **平均响应时间**（Average聚合）
+3. **错误率**（Sum聚合 + 比例计算）
+
+**代码示例**（使用OpenTelemetry SDK）：
+```go
+meter := provider.Meter("webserver")
+requestCounter, _ := meter.Int64Counter("http.requests")
+errorCounter, _ := meter.Int64Counter("http.errors")
+latencyRecorder, _ := meter.Float64Histogram("http.latency")
+
+// 处理请求时记录指标
+func handleRequest() {
+    start := time.Now()
+    requestCounter.Add(ctx, 1)
+    
+    defer func() {
+        latency := time.Since(start).Seconds()
+        latencyRecorder.Record(ctx, latency)
+        if err != nil {
+            errorCounter.Add(ctx, 1)
+        }
+    }()
+}
+```
+
+---
+
+## 配置聚合参数
+
+通过`View`API自定义聚合行为：
+```python
+from opentelemetry.sdk.metrics import View, HistogramAggregation
+
+view = View(
+    instrument_name="http.latency",
+    aggregation=HistogramAggregation(
+        boundaries=[0, 100, 200, 500]  # 自定义直方图桶
+    )
+)
+```
+
+:::tip 最佳实践
+- 对高基数指标（如带用户ID的标签）避免使用直方图。
+- 生产环境中建议设置明确的聚合间隔（如60秒）。
+:::
+
+---
+
+## 总结
+
+| 聚合类型       | 适用场景                  | 输出示例               |
+|----------------|---------------------------|------------------------|
+| Sum            | 计数器（请求数、错误数）  | `总次数=1523`          |
+| Average        | 资源使用率（CPU、内存）   | `均值=75%`             |
+| Histogram      | 延迟、响应大小分布        | `P99=210ms`            |
+
+---
+
+## 延伸学习
+
+1. **练习**：使用OpenTelemetry Collector配置一个将指标从Sum改为Last Value的`View`。
+2. **进一步阅读**：
+   - [OpenTelemetry指标规范](https://opentelemetry.io/docs/specs/otel/metrics/)
+   - [Prometheus与OpenTelemetry聚合对比](https://prometheus.io/docs/practices/histograms/)
+
+:::caution 注意
+不同后端（如Prometheus vs. Cloud Monitoring）可能对聚合的支持存在差异，导出前需测试兼容性。
+:::

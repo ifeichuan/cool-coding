@@ -1,0 +1,125 @@
+---
+title: SkyWalking 数据聚合优化
+description: 学习如何通过优化数据聚合策略提升SkyWalking性能，包括配置调整、采样策略和实际案例解析。
+---
+
+# SkyWalking 数据聚合优化
+
+## 引言
+
+在分布式系统的监控场景中，SkyWalking通过收集、聚合和分析海量遥测数据来提供可视化洞察。然而，未经优化的数据聚合可能导致存储压力大、查询延迟高的问题。本章将介绍如何通过**数据聚合优化**平衡监控精度与系统性能。
+
+---
+
+## 数据聚合基础概念
+
+SkyWalking的数据聚合分为两个层次：
+1. **服务端聚合**：OAP(Observability Analysis Platform)对接收到的原始指标/链路进行二次计算
+2. **客户端聚合**：Agent/Probe端在数据上报前的预处理
+
+:::tip 优化核心原则
+在保证监控有效性的前提下，减少不必要的数据传输和处理
+:::
+
+---
+
+## 关键优化策略
+
+### 1. 采样率配置
+
+通过调整采样率减少数据量（适用于高流量场景）：
+
+```yaml
+# agent.config
+agent.sample_n_per_3_secs=10  # 每3秒最多采集10条trace
+```
+
+**效果对比**：
+- 优化前：100%采样，1000TPS系统每天产生86M traces
+- 优化后：10%采样，存储量降至8.6M traces
+
+### 2. 指标聚合粒度
+
+修改OAP的聚合时间窗口（`config/application.yml`）：
+
+```yaml
+core:
+  default:
+    # 将分钟级聚合改为5分钟级
+    downsampling:
+      - Hour
+      - Day
+      - 5Minute  # 原为Minute
+```
+
+---
+
+## 实际案例解析
+
+### 电商大促场景优化
+
+**问题**：
+- 大促期间QPS增长20倍
+- OAP节点CPU使用率达90%
+- 仪表盘出现数据延迟
+
+**解决方案**：
+1. 动态调整采样率：
+   ```java
+   // 通过动态配置中心实现
+   System.setProperty("agent.sample_n_per_3_secs", 
+     qps > 5000 ? "5" : "20");
+   ```
+2. 启用指标降精度：
+   ```mermaid
+   graph LR
+   A[原始指标] -->|1分钟粒度| B[OAP]
+   A -->|5分钟粒度| C[长期存储]
+   ```
+
+**效果**：
+- CPU使用率下降至45%
+- 数据延迟从15s降至3s内
+
+---
+
+## 高级优化技巧
+
+### 自定义聚合规则
+
+创建自定义聚合函数（需要OAP集群模式）：
+
+```java
+// 示例：按业务重要性分级聚合
+@Stream(name = "biz_metrics", processor = BusinessAggregator.class)
+public class BizMetrics extends Metrics {
+    @Column(columnName = "priority") private int priority;
+    // 自定义字段...
+}
+```
+
+配置优先级规则：
+```sql
+-- persistence-sql.yaml
+metrics_biz_aggregation: |
+  INSERT INTO biz_metrics (...) 
+  SELECT ... FROM raw_metrics 
+  WHERE priority > 3  -- 仅聚合高优先级数据
+```
+
+---
+
+## 总结与练习
+
+### 核心要点
+- 采样率优化是快速见效的手段
+- 聚合粒度调整需平衡实时性与资源消耗
+- 动态策略适合流量波动场景
+
+### 动手练习
+1. 在测试环境中将采样率从100%调整为30%，观察存储变化
+2. 尝试创建一个自定义的Endpoint级聚合规则
+
+### 扩展阅读
+- SkyWalking官方文档：Data Aggregation Pipeline
+- 《分布式系统观测性优化实战》第5章

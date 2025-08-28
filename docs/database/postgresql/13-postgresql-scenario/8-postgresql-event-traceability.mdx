@@ -1,0 +1,129 @@
+---
+title: PostgreSQL 事件溯源
+description: 了解 PostgreSQL 中事件溯源的概念、实现方式及其在实际应用中的价值。
+---
+
+## 什么是事件溯源？
+
+事件溯源（Event Sourcing）是一种设计模式，它将应用程序的状态变化记录为一系列不可变的事件。与传统的直接更新数据库记录的方式不同，事件溯源通过存储事件来重建应用程序的状态。每个事件都代表了一个状态变化的事实，并且这些事件按顺序存储，以便在需要时重新构建当前状态。
+
+在 PostgreSQL 中，事件溯源可以通过表结构和触发器来实现，确保每次状态变化都被记录为事件。
+
+## 为什么使用事件溯源？
+
+事件溯源的主要优势包括：
+
+1. **审计与追溯**：所有状态变化都被记录为事件，因此可以轻松追溯历史记录。
+2. **状态重建**：通过重放事件，可以重建任何时间点的应用程序状态。
+3. **解耦与扩展性**：事件可以作为消息传递给其他系统，实现解耦和扩展。
+
+## PostgreSQL 中的事件溯源实现
+
+### 1. 创建事件表
+
+首先，我们需要创建一个表来存储事件。每个事件通常包含以下字段：
+
+- `id`：事件的唯一标识符。
+- `event_type`：事件的类型（例如 `user_created`、`order_placed`）。
+- `event_data`：事件的详细信息（通常以 JSON 格式存储）。
+- `timestamp`：事件发生的时间。
+
+```sql
+CREATE TABLE events (
+    id SERIAL PRIMARY KEY,
+    event_type VARCHAR(50) NOT NULL,
+    event_data JSONB NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 2. 创建状态表
+
+接下来，我们创建一个状态表来存储当前状态。例如，如果我们正在管理用户信息，可以创建一个 `users` 表：
+
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 3. 使用触发器记录事件
+
+为了确保每次状态变化都被记录为事件，我们可以使用触发器。例如，当插入新用户时，触发器会自动记录一个 `user_created` 事件：
+
+```sql
+CREATE OR REPLACE FUNCTION log_user_created_event()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO events (event_type, event_data)
+    VALUES ('user_created', jsonb_build_object('id', NEW.id, 'name', NEW.name, 'email', NEW.email));
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER user_created_trigger
+AFTER INSERT ON users
+FOR EACH ROW
+EXECUTE FUNCTION log_user_created_event();
+```
+
+### 4. 重建状态
+
+通过查询事件表，我们可以重建 `users` 表的状态。例如，以下查询会返回所有用户的最新状态：
+
+```sql
+SELECT DISTINCT ON (id) *
+FROM (
+    SELECT
+        (event_data->>'id')::INT AS id,
+        event_data->>'name' AS name,
+        event_data->>'email' AS email,
+        timestamp
+    FROM events
+    WHERE event_type = 'user_created'
+    ORDER BY id, timestamp DESC
+) AS latest_users;
+```
+
+## 实际应用场景
+
+### 电子商务订单系统
+
+在电子商务系统中，订单的状态变化（如 `order_placed`、`order_shipped`、`order_delivered`）可以被记录为事件。通过事件溯源，我们可以轻松追踪订单的完整历史记录，并在需要时重建订单的当前状态。
+
+```sql
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE order_events (
+    id SERIAL PRIMARY KEY,
+    order_id INT NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    event_data JSONB NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 用户行为分析
+
+在用户行为分析中，事件溯源可以记录用户的每个操作（如 `login`、`logout`、`purchase`）。这些事件可以用于分析用户行为模式或生成报告。
+
+## 总结
+
+事件溯源是一种强大的设计模式，特别适合需要审计、追溯和状态重建的场景。在 PostgreSQL 中，通过合理设计表结构和触发器，可以轻松实现事件溯源。
+
+:::tip
+**练习**：尝试为你的应用程序设计一个事件溯源系统，记录用户登录和注销的事件，并重建用户的登录历史。
+:::
+
+## 附加资源
+
+- [PostgreSQL 官方文档](https://www.postgresql.org/docs/)
+- [Event Sourcing 模式详解](https://martinfowler.com/eaaDev/EventSourcing.html)

@@ -1,0 +1,179 @@
+---
+title: Sentinel 上下文管理源码
+description: 本文深入探讨Sentinel中的上下文管理机制，帮助初学者理解其核心实现原理，并通过代码示例和实际案例展示其应用场景。
+---
+
+## 介绍
+
+在Sentinel中，**上下文管理**是一个核心概念，用于管理资源调用的上下文信息。上下文（Context）是Sentinel中资源调用的环境，它包含了调用链、入口节点、统计信息等关键数据。理解上下文管理机制对于掌握Sentinel的工作原理至关重要。
+
+本文将逐步解析Sentinel上下文管理的源码实现，并通过代码示例和实际案例帮助初学者更好地理解其应用场景。
+
+## 上下文管理的核心概念
+
+在Sentinel中，上下文管理主要涉及以下几个核心概念：
+
+1. **Context（上下文）**：表示资源调用的环境，包含了调用链、入口节点等信息。
+2. **ContextUtil**：用于创建和管理上下文的工具类。
+3. **NodeSelectorSlot**：负责选择当前上下文的入口节点。
+4. **StatisticSlot**：负责统计资源的调用信息。
+
+### Context的结构
+
+在Sentinel中，`Context`类的主要结构如下：
+
+```java
+public class Context {
+    private String name; // 上下文名称
+    private DefaultNode entranceNode; // 入口节点
+    private Entry curEntry; // 当前资源调用的入口
+    private String origin; // 调用来源
+    // 其他字段和方法...
+}
+```
+
+- `name`：上下文的名称，通常用于标识不同的调用链。
+- `entranceNode`：入口节点，表示当前上下文的入口资源。
+- `curEntry`：当前资源调用的入口，用于记录资源调用的上下文信息。
+- `origin`：调用来源，通常用于区分不同的调用方。
+
+### ContextUtil的使用
+
+`ContextUtil`是Sentinel中用于管理上下文的工具类。它提供了创建、进入和退出上下文的方法。以下是一个简单的示例：
+
+```java
+// 创建并进入上下文
+ContextUtil.enter("myContext", "myOrigin");
+
+// 执行业务逻辑
+try {
+    // 资源调用
+    Entry entry = SphU.entry("myResource");
+    // 业务逻辑...
+} finally {
+    // 退出上下文
+    ContextUtil.exit();
+}
+```
+
+在这个示例中，`ContextUtil.enter`方法用于创建并进入一个名为`myContext`的上下文，`ContextUtil.exit`方法用于退出当前上下文。
+
+## 源码解析
+
+### 上下文的创建与进入
+
+在Sentinel中，上下文的创建和进入是通过`ContextUtil.enter`方法实现的。以下是该方法的源码片段：
+
+```java
+public static void enter(String name, String origin) {
+    if (name == null) {
+        throw new IllegalArgumentException("Context name cannot be null");
+    }
+    Context context = new Context(name, origin);
+    context.setCurEntry(null);
+    context.setEntranceNode(new DefaultNode());
+    contextMap.set(context);
+}
+```
+
+- `name`：上下文的名称。
+- `origin`：调用来源。
+- `contextMap`：一个`ThreadLocal`变量，用于存储当前线程的上下文。
+
+### 上下文的退出
+
+上下文的退出是通过`ContextUtil.exit`方法实现的。以下是该方法的源码片段：
+
+```java
+public static void exit() {
+    Context context = contextMap.get();
+    if (context != null) {
+        contextMap.remove();
+    }
+}
+```
+
+- `contextMap.remove()`：从`ThreadLocal`中移除当前线程的上下文。
+
+### NodeSelectorSlot的作用
+
+`NodeSelectorSlot`是Sentinel中的一个插槽（Slot），负责选择当前上下文的入口节点。以下是`NodeSelectorSlot`的核心逻辑：
+
+```java
+@Override
+public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count, Object... args) {
+    DefaultNode selectedNode = node.getClusterNode();
+    if (selectedNode == null) {
+        selectedNode = new DefaultNode();
+        node.setClusterNode(selectedNode);
+    }
+    context.setCurEntry(new Entry(resourceWrapper, selectedNode, count));
+}
+```
+
+- `node.getClusterNode()`：获取当前资源的集群节点。
+- `context.setCurEntry`：设置当前上下文的入口节点。
+
+## 实际案例
+
+### 案例1：限流场景
+
+假设我们有一个Web服务，需要对某个API进行限流。我们可以使用Sentinel的上下文管理机制来实现这一功能。
+
+```java
+// 创建并进入上下文
+ContextUtil.enter("apiContext", "web");
+
+try {
+    // 资源调用
+    Entry entry = SphU.entry("getUserInfo");
+    // 执行业务逻辑
+    return getUserInfo();
+} catch (BlockException e) {
+    // 处理限流异常
+    return "请求被限流";
+} finally {
+    // 退出上下文
+    ContextUtil.exit();
+}
+```
+
+在这个案例中，我们创建了一个名为`apiContext`的上下文，并在其中调用了`getUserInfo`资源。如果该资源的调用超过了限流阈值，Sentinel会抛出`BlockException`，我们可以捕获并处理该异常。
+
+### 案例2：调用链追踪
+
+在微服务架构中，调用链追踪是一个常见的需求。我们可以利用Sentinel的上下文管理机制来实现调用链的追踪。
+
+```java
+// 创建并进入上下文
+ContextUtil.enter("serviceAContext", "serviceB");
+
+try {
+    // 调用服务A
+    Entry entryA = SphU.entry("serviceA");
+    // 调用服务B
+    Entry entryB = SphU.entry("serviceB");
+    // 执行业务逻辑
+    return serviceB.call();
+} finally {
+    // 退出上下文
+    ContextUtil.exit();
+}
+```
+
+在这个案例中，我们创建了一个名为`serviceAContext`的上下文，并在其中调用了`serviceA`和`serviceB`两个资源。通过这种方式，我们可以追踪服务A和服务B之间的调用关系。
+
+## 总结
+
+Sentinel的上下文管理机制是其核心功能之一，它通过`Context`、`ContextUtil`、`NodeSelectorSlot`等组件实现了资源调用的环境管理。理解上下文管理机制对于掌握Sentinel的工作原理至关重要。
+
+通过本文的讲解，你应该已经对Sentinel的上下文管理有了初步的了解。接下来，你可以尝试在实际项目中使用Sentinel，并深入探索其更多高级功能。
+
+## 附加资源与练习
+
+- **练习1**：尝试在一个Spring Boot项目中使用Sentinel，并实现一个简单的限流功能。
+- **练习2**：阅读Sentinel的源码，理解`StatisticSlot`的工作原理，并尝试实现一个自定义的插槽。
+
+:::tip
+如果你对Sentinel的其他功能感兴趣，可以继续阅读Sentinel的其他源码分析文章，深入了解其更多高级特性。
+:::

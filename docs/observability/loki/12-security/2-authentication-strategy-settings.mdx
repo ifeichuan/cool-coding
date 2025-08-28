@@ -1,0 +1,141 @@
+---
+title: 鉴权策略设置
+description: 学习如何在Grafana Loki中配置鉴权策略，控制用户和服务的访问权限。
+---
+
+# 鉴权策略设置
+
+## 介绍
+
+在Grafana Loki中，**鉴权策略（Authentication Policies）**是控制谁可以访问系统资源以及如何访问的核心机制。通过合理的鉴权设置，您可以确保只有经过验证的用户或服务能够读取日志数据、写入日志流或执行管理操作。本指南将带您了解Loki的鉴权模型、配置方法以及实际应用场景。
+
+---
+
+## 基础概念
+
+Loki支持多种鉴权方式，包括：
+1. **基于角色的访问控制（RBAC）**：通过角色分配权限。
+2. **令牌认证**：使用Bearer Token或API密钥。
+3. **多租户隔离**：为不同租户分配独立的数据访问权限。
+
+:::tip
+Loki的鉴权通常与Grafana或Prometheus的权限系统集成，建议先熟悉这些工具的基础配置。
+:::
+
+---
+
+## 配置RBAC策略
+
+### 1. 定义角色
+在Loki的配置文件（通常是`loki-config.yaml`）中，通过`auth_enabled: true`启用鉴权后，可以定义角色：
+
+```yaml
+auth_config:
+  enabled: true
+  rbac:
+    roles:
+      log_reader:
+        permissions: ["logs.read"]
+      log_writer:
+        permissions: ["logs.write"]
+      admin:
+        permissions: ["logs.read", "logs.write", "admin"]
+```
+
+### 2. 分配角色给用户
+通过`role_bindings`将角色与用户或组关联：
+
+```yaml
+auth_config:
+  role_bindings:
+    - name: dev-team
+      roles: ["log_reader"]
+      subjects:
+        - "user:alice@example.com"
+        - "group:dev@example.com"
+```
+
+---
+
+## 令牌认证示例
+
+### 生成Bearer Token
+使用OpenSSL生成一个随机令牌：
+```bash
+openssl rand -hex 32
+```
+输出示例：
+```
+4a8e3f7d1c2b9a6e5f4d3c2b1a8e7f6d
+```
+
+### 在请求中使用令牌
+在HTTP请求头中携带令牌：
+```bash
+curl -H "Authorization: Bearer 4a8e3f7d1c2b9a6e5f4d3c2b1a8e7f6d" \
+  http://loki:3100/loki/api/v1/query
+```
+
+---
+
+## 多租户配置
+
+Loki通过`X-Scope-OrgID`请求头实现多租户隔离。以下是一个租户策略示例：
+
+```yaml
+auth_config:
+  tenants:
+    - name: tenant-a
+      allowed_operations: ["read", "write"]
+    - name: tenant-b
+      allowed_operations: ["read"]
+```
+
+请求时需指定租户：
+```bash
+curl -H "X-Scope-OrgID: tenant-a" http://loki:3100/loki/api/v1/query
+```
+
+---
+
+## 实际案例：开发与生产环境隔离
+
+### 场景需求
+- 开发团队只能读取开发环境的日志。
+- 运维团队可以读写所有环境。
+
+### 配置实现
+```yaml
+auth_config:
+  roles:
+    dev_reader:
+      permissions: ["logs.read"]
+      resources: ["env:dev"]
+    ops_admin:
+      permissions: ["logs.read", "logs.write"]
+      resources: ["*"]
+  role_bindings:
+    - name: dev-team
+      roles: ["dev_reader"]
+      subjects: ["group:dev@company.com"]
+    - name: ops-team
+      roles: ["ops_admin"]
+      subjects: ["group:ops@company.com"]
+```
+
+---
+
+## 总结
+
+1. **鉴权策略**是保护Loki数据安全的关键。
+2. 通过RBAC可以精细控制用户权限。
+3. 令牌认证适合API访问场景。
+4. 多租户配置能有效隔离不同业务的数据。
+
+---
+
+## 延伸学习
+
+- 官方文档：[Loki Authentication](https://grafana.com/docs/loki/latest/operations/authentication/)
+- 练习：尝试为您的团队配置一个只读角色，并测试权限是否生效。
+- 进阶：结合Grafana的团队权限实现统一管理。

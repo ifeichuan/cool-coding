@@ -1,0 +1,255 @@
+---
+title: 数据预处理
+description: 了解 Spark MLlib 中数据预处理的基本概念、方法和实际应用场景，适合初学者学习。
+---
+
+# 数据预处理
+
+在机器学习的流程中，**数据预处理**是一个至关重要的步骤。它是指对原始数据进行清洗、转换和整理，以便更好地适应机器学习模型的需求。高质量的数据预处理能够显著提升模型的性能和准确性。本文将介绍 Spark MLlib 中常用的数据预处理技术，并通过代码示例和实际案例帮助你理解这些概念。
+
+## 什么是数据预处理？
+
+数据预处理是机器学习流程中的第一步，通常包括以下任务：
+
+1. **数据清洗**：处理缺失值、异常值和重复数据。
+2. **数据转换**：将数据转换为适合模型输入的格式，例如标准化、归一化、编码分类变量等。
+3. **特征工程**：从原始数据中提取有用的特征，例如创建新特征或选择重要特征。
+
+在 Spark MLlib 中，数据预处理是通过一系列**转换器（Transformers）**和**估计器（Estimators）**来实现的。接下来，我们将逐步介绍这些技术。
+
+---
+
+## 数据清洗
+
+### 处理缺失值
+
+在实际数据中，缺失值是一个常见问题。Spark MLlib 提供了 `Imputer` 工具来处理缺失值。它可以用均值、中位数或众数来填充缺失值。
+
+```scala
+import org.apache.spark.ml.feature.Imputer
+
+val df = spark.createDataFrame(Seq(
+  (1.0, Double.NaN),
+  (2.0, 3.0),
+  (Double.NaN, 4.0)
+)).toDF("feature1", "feature2")
+
+val imputer = new Imputer()
+  .setInputCols(Array("feature1", "feature2"))
+  .setOutputCols(Array("feature1_imputed", "feature2_imputed"))
+  .setStrategy("mean")
+
+val imputedDF = imputer.fit(df).transform(df)
+imputedDF.show()
+```
+
+**输出：**
+```
++--------+--------+---------------+---------------+
+|feature1|feature2|feature1_imputed|feature2_imputed|
++--------+--------+---------------+---------------+
+|     1.0|     NaN|            1.0|            3.5|
+|     2.0|     3.0|            2.0|            3.0|
+|     NaN|     4.0|            1.5|            4.0|
++--------+--------+---------------+---------------+
+```
+
+:::tip
+`Imputer` 的 `setStrategy` 方法支持 `"mean"`（均值）、`"median"`（中位数）和 `"mode"`（众数）三种策略。
+:::
+
+### 处理异常值
+
+异常值可能会对模型产生负面影响。我们可以通过统计方法（如 Z-Score 或 IQR）来检测和处理异常值。以下是一个简单的示例：
+
+```scala
+import org.apache.spark.sql.functions._
+
+val df = spark.createDataFrame(Seq(
+  (1, 100),
+  (2, 200),
+  (3, 1000),
+  (4, 300)
+)).toDF("id", "value")
+
+val meanValue = df.select(mean("value")).as[Double].first()
+val stdDevValue = df.select(stddev("value")).as[Double].first()
+
+val filteredDF = df.filter(abs(col("value") - meanValue) < 2 * stdDevValue)
+filteredDF.show()
+```
+
+**输出：**
+```
++---+-----+
+| id|value|
++---+-----+
+|  1|  100|
+|  2|  200|
+|  4|  300|
++---+-----+
+```
+
+---
+
+## 数据转换
+
+### 标准化与归一化
+
+标准化和归一化是将数据缩放到特定范围的技术。Spark MLlib 提供了 `StandardScaler` 和 `MinMaxScaler` 来实现这些功能。
+
+```scala
+import org.apache.spark.ml.feature.StandardScaler
+import org.apache.spark.ml.feature.VectorAssembler
+
+val df = spark.createDataFrame(Seq(
+  (1.0, 2.0),
+  (2.0, 3.0),
+  (3.0, 4.0)
+)).toDF("feature1", "feature2")
+
+val assembler = new VectorAssembler()
+  .setInputCols(Array("feature1", "feature2"))
+  .setOutputCol("features")
+
+val assembledDF = assembler.transform(df)
+
+val scaler = new StandardScaler()
+  .setInputCol("features")
+  .setOutputCol("scaledFeatures")
+  .setWithStd(true)
+  .setWithMean(true)
+
+val scaledDF = scaler.fit(assembledDF).transform(assembledDF)
+scaledDF.select("scaledFeatures").show(false)
+```
+
+**输出：**
+```
++-------------------------------------------+
+|scaledFeatures                             |
++-------------------------------------------+
+|[-1.224744871391589, -1.224744871391589]   |
+|[0.0, 0.0]                                 |
+|[1.224744871391589, 1.224744871391589]     |
++-------------------------------------------+
+```
+
+:::note
+`StandardScaler` 会将数据转换为均值为 0、标准差为 1 的分布，而 `MinMaxScaler` 会将数据缩放到 [0, 1] 的范围内。
+:::
+
+### 分类变量编码
+
+机器学习模型通常需要数值型输入，因此需要将分类变量转换为数值。Spark MLlib 提供了 `StringIndexer` 和 `OneHotEncoder` 来实现这一功能。
+
+```scala
+import org.apache.spark.ml.feature.{StringIndexer, OneHotEncoder}
+
+val df = spark.createDataFrame(Seq(
+  (1, "apple"),
+  (2, "banana"),
+  (3, "apple"),
+  (4, "orange")
+)).toDF("id", "category")
+
+val indexer = new StringIndexer()
+  .setInputCol("category")
+  .setOutputCol("categoryIndex")
+
+val indexedDF = indexer.fit(df).transform(df)
+
+val encoder = new OneHotEncoder()
+  .setInputCol("categoryIndex")
+  .setOutputCol("categoryVec")
+
+val encodedDF = encoder.fit(indexedDF).transform(indexedDF)
+encodedDF.show()
+```
+
+**输出：**
+```
++---+--------+-------------+-------------+
+| id| category|categoryIndex|  categoryVec|
++---+--------+-------------+-------------+
+|  1|   apple|          0.0|(2,[0],[1.0])|
+|  2|  banana|          1.0|(2,[1],[1.0])|
+|  3|   apple|          0.0|(2,[0],[1.0])|
+|  4|  orange|          2.0|    (2,[],[])|
++---+--------+-------------+-------------+
+```
+
+---
+
+## 实际案例：房价预测
+
+假设我们有一个房价数据集，包含以下字段：
+- `size`：房屋面积
+- `bedrooms`：卧室数量
+- `location`：地理位置（分类变量）
+- `price`：房价
+
+我们的目标是预测房价。以下是数据预处理的步骤：
+
+1. 处理缺失值：用均值填充 `size` 和 `bedrooms` 的缺失值。
+2. 编码分类变量：将 `location` 转换为数值。
+3. 标准化数值特征：对 `size` 和 `bedrooms` 进行标准化。
+
+```scala
+import org.apache.spark.ml.feature.{Imputer, StringIndexer, VectorAssembler, StandardScaler}
+
+val df = spark.createDataFrame(Seq(
+  (1200, 3, "A", 300000),
+  (1500, Double.NaN, "B", 400000),
+  (Double.NaN, 2, "A", 250000)
+)).toDF("size", "bedrooms", "location", "price")
+
+// 处理缺失值
+val imputer = new Imputer()
+  .setInputCols(Array("size", "bedrooms"))
+  .setOutputCols(Array("size_imputed", "bedrooms_imputed"))
+  .setStrategy("mean")
+
+val imputedDF = imputer.fit(df).transform(df)
+
+// 编码分类变量
+val indexer = new StringIndexer()
+  .setInputCol("location")
+  .setOutputCol("locationIndex")
+
+val indexedDF = indexer.fit(imputedDF).transform(imputedDF)
+
+// 标准化数值特征
+val assembler = new VectorAssembler()
+  .setInputCols(Array("size_imputed", "bedrooms_imputed"))
+  .setOutputCol("features")
+
+val assembledDF = assembler.transform(indexedDF)
+
+val scaler = new StandardScaler()
+  .setInputCol("features")
+  .setOutputCol("scaledFeatures")
+
+val scaledDF = scaler.fit(assembledDF).transform(assembledDF)
+scaledDF.show()
+```
+
+---
+
+## 总结
+
+数据预处理是机器学习中不可或缺的一步。通过清洗、转换和特征工程，我们可以将原始数据转化为适合模型输入的形式。Spark MLlib 提供了丰富的工具来简化这些任务，包括 `Imputer`、`StandardScaler`、`StringIndexer` 等。
+
+:::caution
+在实际项目中，数据预处理可能会占用大量时间，但它对模型性能的影响至关重要，因此不要忽视这一步骤。
+:::
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试在 Spark MLlib 中使用 `MinMaxScaler` 对数据进行归一化。
+2. **资源**：阅读 [Spark MLlib 官方文档](https://spark.apache.org/docs/latest/ml-guide.html) 以了解更多数据预处理工具。
+3. **挑战**：在一个真实数据集上完成完整的数据预处理流程，并尝试训练一个简单的回归模型。
+
+希望本文能帮助你掌握 Spark MLlib 中的数据预处理技术！继续加油，探索更多机器学习的奥秘！

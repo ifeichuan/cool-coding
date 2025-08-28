@@ -1,0 +1,406 @@
+---
+title: C++ 自定义删除器
+description: 了解如何为C++智能指针创建和使用自定义删除器，掌握资源管理的高级技巧
+---
+
+# C++ 自定义删除器
+
+在C++中使用智能指针是管理动态分配资源的最佳实践。不过，有时默认的删除行为无法满足特定需求。本文将介绍如何创建和使用自定义删除器，以便更灵活地控制资源的释放。
+
+## 什么是自定义删除器？
+
+自定义删除器是一个函数或函数对象，它定义了智能指针在销毁所管理的对象时应该执行的操作。当智能指针的引用计数降为零时，不再使用默认的`delete`操作，而是调用自定义删除器来释放资源。
+
+:::tip
+自定义删除器在处理非标准资源（如文件句柄、网络连接、数据库连接等）时特别有用，因为这些资源通常需要特殊的释放方式。
+:::
+
+## 为什么需要自定义删除器？
+
+默认情况下，`std::unique_ptr`和`std::shared_ptr`使用`delete`运算符释放所管理的对象。但在以下情况下，默认删除行为可能不足：
+
+1. 管理的资源不是通过`new`分配的（例如通过`malloc`分配的内存）
+2. 资源需要特殊的清理步骤（例如关闭文件、释放锁等）
+3. 对象是在数组中分配的，但使用的是单对象智能指针
+4. 资源来自C库或需要特定API来释放
+
+## 不同智能指针的自定义删除器
+
+### std::unique_ptr的自定义删除器
+
+对于`std::unique_ptr`，删除器是类型的一部分，必须在模板参数中指定。
+
+```cpp
+#include <iostream>
+#include <memory>
+
+// 自定义删除器函数
+void customDeleter(int* ptr) {
+    std::cout << "Custom deleter called for " << *ptr << std::endl;
+    delete ptr;
+}
+
+int main() {
+    // 创建带有自定义删除器的unique_ptr
+    std::unique_ptr<int, decltype(&customDeleter)> ptr(new int(42), customDeleter);
+    
+    std::cout << "Value: " << *ptr << std::endl;
+    
+    // ptr离开作用域时，会调用customDeleter
+    return 0;
+}
+```
+
+**输出**:
+```
+Value: 42
+Custom deleter called for 42
+```
+
+可以使用lambda表达式简化自定义删除器的声明：
+
+```cpp
+auto deleter = [](int* ptr) {
+    std::cout << "Lambda deleter called for " << *ptr << std::endl;
+    delete ptr;
+};
+
+std::unique_ptr<int, decltype(deleter)> ptr(new int(100), deleter);
+```
+
+### std::shared_ptr的自定义删除器
+
+对于`std::shared_ptr`，删除器不是类型的一部分，可以在构造函数中指定。这使得`std::shared_ptr`在使用自定义删除器时更为灵活。
+
+```cpp
+#include <iostream>
+#include <memory>
+
+void customDeleter(int* ptr) {
+    std::cout << "Custom deleter called for " << *ptr << std::endl;
+    delete ptr;
+}
+
+int main() {
+    // 创建带有自定义删除器的shared_ptr
+    std::shared_ptr<int> ptr(new int(42), customDeleter);
+    
+    std::cout << "Value: " << *ptr << std::endl;
+    
+    // ptr离开作用域时，会调用customDeleter
+    return 0;
+}
+```
+
+**输出**:
+```
+Value: 42
+Custom deleter called for 42
+```
+
+## 常见应用场景
+
+### 1. 管理C库资源
+
+C++程序常需要调用C库函数，这些函数通常返回需要手动释放的资源。自定义删除器可确保这些资源被正确释放。
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <cstdio>
+
+int main() {
+    // 使用自定义删除器管理FILE*
+    std::shared_ptr<FILE> filePtr(fopen("example.txt", "w"), [](FILE* fp) {
+        std::cout << "Closing file..." << std::endl;
+        if (fp) fclose(fp);
+    });
+    
+    if (filePtr) {
+        fprintf(filePtr.get(), "Hello, World!");
+        std::cout << "File opened successfully and data written" << std::endl;
+    } else {
+        std::cerr << "Failed to open file" << std::endl;
+    }
+    
+    // 文件会在filePtr销毁时自动关闭
+    return 0;
+}
+```
+
+**输出** (假设文件能够成功打开):
+```
+File opened successfully and data written
+Closing file...
+```
+
+### 2. 管理动态数组
+
+当使用`std::unique_ptr`管理通过`new[]`分配的数组时，需要使用自定义删除器或`std::unique_ptr<T[]>`：
+
+```cpp
+#include <iostream>
+#include <memory>
+
+int main() {
+    // 方法1：使用std::unique_ptr<T[]>
+    std::unique_ptr<int[]> array1(new int[5]{1, 2, 3, 4, 5});
+    
+    // 方法2：使用自定义删除器
+    auto arrayDeleter = [](int* ptr) { delete[] ptr; };
+    std::unique_ptr<int, decltype(arrayDeleter)> array2(new int[5]{6, 7, 8, 9, 10}, arrayDeleter);
+    
+    // 访问元素
+    std::cout << "array1[2] = " << array1[2] << std::endl;
+    
+    // 对于array2，需要使用get()来访问元素
+    std::cout << "array2[2] = " << array2.get()[2] << std::endl;
+    
+    return 0;
+}
+```
+
+**输出**:
+```
+array1[2] = 3
+array2[2] = 8
+```
+
+### 3. 自定义资源的管理
+
+假设我们有一个需要特殊清理步骤的资源类：
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+
+// 模拟一个需要特殊清理的资源类
+class Resource {
+private:
+    std::string name;
+    bool isAcquired;
+    
+public:
+    Resource(const std::string& n) : name(n), isAcquired(true) {
+        std::cout << "Resource '" << name << "' acquired" << std::endl;
+    }
+    
+    // 特殊的清理方法，不是普通的析构函数
+    void release() {
+        if (isAcquired) {
+            std::cout << "Resource '" << name << "' released" << std::endl;
+            isAcquired = false;
+        }
+    }
+    
+    // 析构函数不执行资源释放
+    ~Resource() {
+        if (isAcquired) {
+            std::cout << "WARNING: Resource '" << name << "' was not properly released!" << std::endl;
+        }
+    }
+    
+    void use() {
+        if (isAcquired) {
+            std::cout << "Using resource '" << name << "'" << std::endl;
+        } else {
+            std::cout << "Error: Attempting to use released resource" << std::endl;
+        }
+    }
+};
+
+int main() {
+    // 使用自定义删除器来管理Resource对象
+    std::shared_ptr<Resource> res(new Resource("Database Connection"), 
+        [](Resource* r) {
+            r->release();  // 调用特殊的清理方法
+            delete r;      // 然后删除对象
+        }
+    );
+    
+    res->use();  // 使用资源
+    
+    // res离开作用域时，自定义删除器会被调用
+    // 确保资源被正确释放
+    return 0;
+}
+```
+
+**输出**:
+```
+Resource 'Database Connection' acquired
+Using resource 'Database Connection'
+Resource 'Database Connection' released
+```
+
+## 自定义删除器的性能考虑
+
+使用自定义删除器时需要考虑以下性能因素：
+
+1. **对于 std::unique_ptr**：自定义删除器会影响对象的大小。函数指针删除器通常会使unique_ptr的大小增加一个指针的大小，而stateful lambda或函数对象可能会导致更大的开销。
+
+2. **对于 std::shared_ptr**：自定义删除器不会影响shared_ptr对象本身的大小，但会存储在控制块中，这可能会带来轻微的性能损失。
+
+:::caution
+当性能至关重要且删除操作简单时，可以考虑使用默认删除器或无状态删除器。
+:::
+
+## 最佳实践
+
+1. **对非标准资源使用自定义删除器**：文件句柄、互斥锁、系统资源等需要特殊清理的资源。
+
+2. **优先使用std::shared_ptr的自定义删除器**：如果不确定使用哪种智能指针，且需要自定义删除器，std::shared_ptr通常是更灵活的选择。
+
+3. **使用lambda表达式简化代码**：对于简单的删除器，lambda表达式通常比函数指针更清晰和便捷。
+
+4. **删除器要幂等**：好的自定义删除器应该能够安全地多次调用，而不会导致问题（类似于多次关闭同一个文件）。
+
+## 综合实例：多种资源的统一管理
+
+以下是一个更复杂的示例，展示如何使用自定义删除器管理多种不同类型的资源：
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
+#include <cstdio>
+
+// 用于演示的资源类型
+struct DatabaseConnection {
+    std::string connectionString;
+    
+    DatabaseConnection(const std::string& conn) : connectionString(conn) {
+        std::cout << "Opening database connection to " << connectionString << std::endl;
+    }
+    
+    void close() {
+        std::cout << "Closing database connection to " << connectionString << std::endl;
+    }
+    
+    ~DatabaseConnection() {
+        std::cout << "DatabaseConnection destructor called" << std::endl;
+    }
+};
+
+// 资源管理类
+class ResourceManager {
+private:
+    // 存储不同类型的资源
+    std::vector<std::shared_ptr<void>> resources;
+    
+public:
+    // 添加文件资源
+    void addFile(const char* filename, const char* mode) {
+        FILE* fp = fopen(filename, mode);
+        if (fp) {
+            auto deleter = [](void* ptr) {
+                FILE* fp = static_cast<FILE*>(ptr);
+                std::cout << "Closing file handle" << std::endl;
+                fclose(fp);
+            };
+            resources.push_back(std::shared_ptr<void>(fp, deleter));
+            std::cout << "File " << filename << " opened and added to resource manager" << std::endl;
+        }
+    }
+    
+    // 添加数据库连接
+    void addDatabaseConnection(const std::string& connectionString) {
+        auto conn = new DatabaseConnection(connectionString);
+        auto deleter = [](void* ptr) {
+            auto conn = static_cast<DatabaseConnection*>(ptr);
+            conn->close();
+            delete conn;
+        };
+        resources.push_back(std::shared_ptr<void>(conn, deleter));
+    }
+    
+    // 添加自定义资源
+    template<typename T, typename Deleter>
+    void addCustomResource(T* resource, Deleter deleter) {
+        resources.push_back(std::shared_ptr<void>(resource, [d = std::move(deleter)](void* ptr) {
+            d(static_cast<T*>(ptr));
+        }));
+    }
+    
+    // 清理所有资源
+    void releaseAll() {
+        std::cout << "Releasing all resources..." << std::endl;
+        resources.clear();
+    }
+    
+    // 析构函数会自动清理所有资源
+    ~ResourceManager() {
+        std::cout << "ResourceManager destructor: " << resources.size() << " resources to clean up" << std::endl;
+    }
+};
+
+int main() {
+    {
+        ResourceManager manager;
+        
+        // 添加文件资源
+        manager.addFile("example.txt", "w");
+        
+        // 添加数据库连接
+        manager.addDatabaseConnection("server=localhost;user=root;password=1234");
+        
+        // 添加自定义资源
+        int* data = new int[100];
+        manager.addCustomResource(data, [](int* p) {
+            std::cout << "Freeing custom memory block" << std::endl;
+            delete[] p;
+        });
+        
+        std::cout << "Resources are in use..." << std::endl;
+        
+        // 显式释放所有资源
+        manager.releaseAll();
+        
+        std::cout << "Continued execution after resource release" << std::endl;
+    } // ResourceManager析构函数将被调用
+    
+    return 0;
+}
+```
+
+**输出**:
+```
+File example.txt opened and added to resource manager
+Opening database connection to server=localhost;user=root;password=1234
+Resources are in use...
+Releasing all resources...
+Closing file handle
+Closing database connection to server=localhost;user=root;password=1234
+DatabaseConnection destructor called
+Freeing custom memory block
+Continued execution after resource release
+ResourceManager destructor: 0 resources to clean up
+```
+
+## 小结
+
+自定义删除器是C++智能指针的强大特性，它们让您可以：
+
+- 管理非标准资源（C库资源、系统句柄等）
+- 执行特殊的清理逻辑
+- 创建更安全的资源管理策略
+- 确保资源按预期顺序释放
+
+正确使用自定义删除器可以防止资源泄漏，简化复杂代码，并提高程序的稳定性。
+
+## 练习
+
+1. 创建一个使用自定义删除器的`unique_ptr`来管理通过`malloc`分配的内存。
+2. 实现一个使用自定义删除器的`shared_ptr`来管理`SDL_Window`（一个流行的图形库资源）。
+3. 编写一个`ResourcePool`类，使用自定义删除器回收资源而不是销毁它们。
+4. 设计一个场景，其中需要为同一类型的资源使用不同的删除器，并实现解决方案。
+
+## 进一步学习
+
+- 探索`std::function`作为删除器时的性能特性
+- 研究自定义删除器与异常安全的交互
+- 学习如何为类层次结构创建合适的删除器
+
+通过掌握自定义删除器，您将能够更有效地管理各种资源，编写更安全、更健壮的C++代码。

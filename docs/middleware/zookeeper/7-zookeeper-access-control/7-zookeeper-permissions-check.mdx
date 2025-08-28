@@ -1,0 +1,124 @@
+---
+title: Zookeeper 权限检查
+description: 了解 Zookeeper 的权限检查机制，掌握如何通过 ACL（访问控制列表）保护 Zookeeper 节点数据。
+---
+
+## 介绍
+
+Zookeeper 是一个分布式协调服务，广泛用于分布式系统中的配置管理、命名服务、分布式锁等场景。为了保护 Zookeeper 中的数据，Zookeeper 提供了访问控制列表（ACL）机制，允许管理员为每个节点设置权限，限制哪些用户或角色可以访问或修改节点数据。
+
+权限检查是 Zookeeper 安全机制的核心部分，它确保只有经过授权的客户端才能对节点执行特定操作。本文将详细介绍 Zookeeper 的权限检查机制，并通过代码示例和实际案例帮助你理解其工作原理。
+
+## Zookeeper 权限模型
+
+Zookeeper 的权限模型基于 ACL（Access Control List），每个节点可以关联一个或多个 ACL 条目。每个 ACL 条目包含以下信息：
+
+- **Scheme**：权限验证方案，例如 `world`、`auth`、`digest`、`ip` 等。
+- **ID**：与 Scheme 相关的标识符，例如用户名、IP 地址等。
+- **Permissions**：授予的权限，例如 `READ`、`WRITE`、`CREATE`、`DELETE`、`ADMIN` 等。
+
+### 权限类型
+
+Zookeeper 定义了以下权限类型：
+
+- `READ`：允许读取节点的数据和子节点列表。
+- `WRITE`：允许修改节点的数据。
+- `CREATE`：允许创建子节点。
+- `DELETE`：允许删除子节点。
+- `ADMIN`：允许设置节点的 ACL。
+
+:::note
+`ADMIN` 权限通常用于授予用户管理节点 ACL 的能力，即使他们没有其他权限。
+:::
+
+## 权限检查流程
+
+当客户端尝试对 Zookeeper 节点执行操作时，Zookeeper 会按照以下步骤进行权限检查：
+
+1. **获取节点的 ACL**：Zookeeper 首先获取目标节点的 ACL 列表。
+2. **验证客户端身份**：根据 ACL 中的 Scheme 和 ID，验证客户端的身份。
+3. **检查权限**：如果客户端身份验证通过，Zookeeper 会检查客户端是否具有执行操作所需的权限。
+4. **执行操作**：如果权限检查通过，操作将被执行；否则，操作将被拒绝并返回权限错误。
+
+### 示例：设置和检查 ACL
+
+以下是一个使用 Zookeeper Java API 设置和检查 ACL 的示例：
+
+```java
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.data.ACL;
+import org.apache.zookeeper.data.Id;
+import org.apache.zookeeper.server.auth.DigestAuthenticationProvider;
+
+import java.util.Collections;
+
+public class ZookeeperACLExample {
+    public static void main(String[] args) throws Exception {
+        ZooKeeper zk = new ZooKeeper("localhost:2181", 3000, null);
+
+        // 创建带有 ACL 的节点
+        String path = "/secureNode";
+        byte[] data = "secureData".getBytes();
+        ACL acl = new ACL(ZooDefs.Perms.ALL, new Id("digest", DigestAuthenticationProvider.generateDigest("user:password")));
+        zk.create(path, data, Collections.singletonList(acl), ZooDefs.Ids.CREATOR_ALL_ACL);
+
+        // 尝试读取节点数据
+        byte[] readData = zk.getData(path, false, null);
+        System.out.println("Data: " + new String(readData));
+    }
+}
+```
+
+**输出：**
+```
+Data: secureData
+```
+
+:::caution
+在实际生产环境中，请确保使用安全的认证机制（如 `digest` 或 `sasl`）来保护 Zookeeper 节点。
+:::
+
+## 实际应用场景
+
+### 场景 1：多租户环境中的权限隔离
+
+在多租户环境中，不同租户的数据需要严格隔离。通过为每个租户的节点设置不同的 ACL，可以确保只有特定租户的用户才能访问其数据。
+
+```java
+// 为租户 A 设置 ACL
+ACL tenantAAcl = new ACL(ZooDefs.Perms.ALL, new Id("digest", DigestAuthenticationProvider.generateDigest("tenantA:passwordA")));
+zk.create("/tenantA/data", "dataA".getBytes(), Collections.singletonList(tenantAAcl), ZooDefs.Ids.CREATOR_ALL_ACL);
+
+// 为租户 B 设置 ACL
+ACL tenantBAcl = new ACL(ZooDefs.Perms.ALL, new Id("digest", DigestAuthenticationProvider.generateDigest("tenantB:passwordB")));
+zk.create("/tenantB/data", "dataB".getBytes(), Collections.singletonList(tenantBAcl), ZooDefs.Ids.CREATOR_ALL_ACL);
+```
+
+### 场景 2：只读访问控制
+
+在某些场景中，你可能希望某些用户只能读取数据而不能修改数据。通过设置 `READ` 权限，可以实现这一需求。
+
+```java
+ACL readOnlyAcl = new ACL(ZooDefs.Perms.READ, new Id("digest", DigestAuthenticationProvider.generateDigest("readonlyuser:password")));
+zk.create("/readOnlyNode", "readOnlyData".getBytes(), Collections.singletonList(readOnlyAcl), ZooDefs.Ids.CREATOR_ALL_ACL);
+```
+
+## 总结
+
+Zookeeper 的权限检查机制通过 ACL 提供了强大的访问控制能力，能够有效保护节点数据的安全性。通过合理设置 ACL，可以实现多租户隔离、只读访问等复杂的安全需求。
+
+:::tip
+建议在实际项目中结合 Zookeeper 的日志和监控功能，定期审查和优化 ACL 设置，以确保系统的安全性。
+:::
+
+## 附加资源
+
+- [Zookeeper 官方文档](https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html#sc_ZooKeeperAccessControl)
+- [Zookeeper ACL 示例代码](https://github.com/apache/zookeeper/tree/master/src/recipes)
+- [Zookeeper 安全最佳实践](https://cwiki.apache.org/confluence/display/ZOOKEEPER/Secure+ZooKeeper)
+
+## 练习
+
+1. 创建一个 Zookeeper 节点，并为其设置只读权限。尝试使用不同的客户端访问该节点，验证权限是否生效。
+2. 在多租户环境中模拟两个租户的节点，分别为它们设置不同的 ACL，并验证权限隔离效果。

@@ -1,0 +1,232 @@
+---
+title: I/O 模型
+description: 了解 I/O 模型的基本概念，包括阻塞 I/O、非阻塞 I/O、I/O 多路复用和异步 I/O，并通过实际案例掌握其应用场景。
+---
+
+# I/O 模型
+
+在网络编程中，I/O（输入/输出）模型是处理数据输入和输出的核心机制。理解不同的 I/O 模型对于编写高效、可扩展的网络应用程序至关重要。本文将介绍常见的 I/O 模型，并通过代码示例和实际案例帮助你掌握这些概念。
+
+## 什么是 I/O 模型？
+
+I/O 模型描述了程序如何与外部设备（如磁盘、网络接口等）进行数据交换。在网络编程中，I/O 模型决定了程序如何处理网络请求和响应。常见的 I/O 模型包括：
+
+1. **阻塞 I/O（Blocking I/O）**
+2. **非阻塞 I/O（Non-blocking I/O）**
+3. **I/O 多路复用（I/O Multiplexing）**
+4. **异步 I/O（Asynchronous I/O）**
+
+接下来，我们将逐一介绍这些模型。
+
+---
+
+## 1. 阻塞 I/O
+
+阻塞 I/O 是最简单的 I/O 模型。在这种模型中，当程序发起一个 I/O 操作（如读取数据）时，程序会一直等待，直到操作完成。
+
+### 代码示例
+
+以下是一个使用阻塞 I/O 的简单示例：
+
+```python
+import socket
+
+# 创建一个 TCP 套接字
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(('127.0.0.1', 8080))
+server_socket.listen(5)
+
+print("等待客户端连接...")
+client_socket, addr = server_socket.accept()  # 阻塞，直到有客户端连接
+print(f"客户端 {addr} 已连接")
+
+data = client_socket.recv(1024)  # 阻塞，直到接收到数据
+print(f"接收到数据: {data.decode()}")
+
+client_socket.close()
+server_socket.close()
+```
+
+### 输出
+
+```
+等待客户端连接...
+客户端 ('127.0.0.1', 12345) 已连接
+接收到数据: Hello, Server!
+```
+
+:::note
+在阻塞 I/O 中，程序会一直等待 I/O 操作完成，这可能导致程序无法同时处理多个请求。
+:::
+
+---
+
+## 2. 非阻塞 I/O
+
+非阻塞 I/O 允许程序在等待 I/O 操作完成时继续执行其他任务。如果 I/O 操作没有立即完成，程序会立即返回一个错误或空值，而不是等待。
+
+### 代码示例
+
+以下是一个使用非阻塞 I/O 的示例：
+
+```python
+import socket
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(('127.0.0.1', 8080))
+server_socket.listen(5)
+server_socket.setblocking(False)  # 设置为非阻塞模式
+
+print("等待客户端连接...")
+while True:
+    try:
+        client_socket, addr = server_socket.accept()  # 非阻塞，如果没有连接会抛出异常
+        print(f"客户端 {addr} 已连接")
+        break
+    except BlockingIOError:
+        print("没有客户端连接，继续等待...")
+
+client_socket.setblocking(False)
+while True:
+    try:
+        data = client_socket.recv(1024)  # 非阻塞，如果没有数据会抛出异常
+        if data:
+            print(f"接收到数据: {data.decode()}")
+            break
+    except BlockingIOError:
+        print("没有数据，继续等待...")
+
+client_socket.close()
+server_socket.close()
+```
+
+### 输出
+
+```
+等待客户端连接...
+没有客户端连接，继续等待...
+没有客户端连接，继续等待...
+客户端 ('127.0.0.1', 12345) 已连接
+没有数据，继续等待...
+没有数据，继续等待...
+接收到数据: Hello, Server!
+```
+
+:::tip
+非阻塞 I/O 允许程序在等待 I/O 操作时执行其他任务，但需要频繁检查 I/O 操作的状态，这可能导致 CPU 使用率较高。
+:::
+
+---
+
+## 3. I/O 多路复用
+
+I/O 多路复用允许程序同时监控多个 I/O 操作，并在其中任何一个操作完成时进行处理。常见的 I/O 多路复用技术包括 `select`、`poll` 和 `epoll`。
+
+### 代码示例
+
+以下是一个使用 `select` 的示例：
+
+```python
+import socket
+import select
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(('127.0.0.1', 8080))
+server_socket.listen(5)
+
+inputs = [server_socket]
+print("等待客户端连接...")
+
+while True:
+    readable, _, _ = select.select(inputs, [], [])
+    for s in readable:
+        if s is server_socket:
+            client_socket, addr = server_socket.accept()
+            print(f"客户端 {addr} 已连接")
+            inputs.append(client_socket)
+        else:
+            data = s.recv(1024)
+            if data:
+                print(f"接收到数据: {data.decode()}")
+            else:
+                inputs.remove(s)
+                s.close()
+```
+
+### 输出
+
+```
+等待客户端连接...
+客户端 ('127.0.0.1', 12345) 已连接
+接收到数据: Hello, Server!
+```
+
+:::caution
+I/O 多路复用可以同时处理多个 I/O 操作，但在高并发场景下，`select` 的性能可能不如 `epoll`。
+:::
+
+---
+
+## 4. 异步 I/O
+
+异步 I/O 允许程序发起 I/O 操作后立即返回，并在操作完成后通过回调或事件通知程序。这种方式可以最大限度地提高程序的并发性能。
+
+### 代码示例
+
+以下是一个使用 `asyncio` 的异步 I/O 示例：
+
+```python
+import asyncio
+
+async def handle_client(reader, writer):
+    data = await reader.read(100)
+    message = data.decode()
+    print(f"接收到数据: {message}")
+    writer.close()
+
+async def main():
+    server = await asyncio.start_server(handle_client, '127.0.0.1', 8080)
+    print("服务器已启动，等待客户端连接...")
+    async with server:
+        await server.serve_forever()
+
+asyncio.run(main())
+```
+
+### 输出
+
+```
+服务器已启动，等待客户端连接...
+接收到数据: Hello, Server!
+```
+
+:::warning
+异步 I/O 提供了最高的并发性能，但需要更复杂的编程模型和调试技巧。
+:::
+
+---
+
+## 实际应用场景
+
+1. **阻塞 I/O**：适用于简单的单线程应用程序，如小型服务器或工具脚本。
+2. **非阻塞 I/O**：适用于需要高响应性的应用程序，如实时数据处理。
+3. **I/O 多路复用**：适用于需要同时处理多个连接的服务器，如 Web 服务器。
+4. **异步 I/O**：适用于高并发、高性能的应用程序，如实时聊天服务器或大规模数据处理系统。
+
+---
+
+## 总结
+
+I/O 模型是网络编程中的核心概念，不同的模型适用于不同的应用场景。通过理解阻塞 I/O、非阻塞 I/O、I/O 多路复用和异步 I/O，你可以选择最适合你应用程序需求的模型。
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试修改阻塞 I/O 的代码，使其支持多个客户端连接。
+2. **资源**：
+   - [Python `socket` 模块文档](https://docs.python.org/3/library/socket.html)
+   - [Python `asyncio` 模块文档](https://docs.python.org/3/library/asyncio.html)
+   - [I/O 多路复用详解](https://en.wikipedia.org/wiki/IO_multiplexing)
+
+通过实践和深入学习，你将能够更好地掌握 I/O 模型，并编写出高效、可扩展的网络应用程序。

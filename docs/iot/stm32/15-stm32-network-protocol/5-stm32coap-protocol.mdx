@@ -1,0 +1,273 @@
+---
+title: STM32 CoAP 协议
+description: 了解如何在 STM32 微控制器上实现 CoAP 协议，用于轻量级物联网通信。
+---
+
+# STM32 CoAP 协议
+
+## 介绍
+
+CoAP（Constrained Application Protocol，受限应用协议）是一种专为物联网（IoT）设备设计的轻量级通信协议。它基于 RESTful 架构，类似于 HTTP，但更适合资源受限的设备，如 STM32 微控制器。CoAP 使用 UDP 作为传输层协议，具有低开销、低功耗的特点，非常适合在低带宽、低功耗的物联网环境中使用。
+
+在本教程中，我们将学习如何在 STM32 上实现 CoAP 协议，并通过实际案例展示其应用。
+
+## CoAP 协议基础
+
+### CoAP 消息结构
+
+CoAP 消息由以下几个部分组成：
+
+1. **Header**：包含版本、消息类型、令牌长度、代码和消息 ID。
+2. **Token**：用于匹配请求和响应。
+3. **Options**：包含 URI、内容格式等信息。
+4. **Payload**：实际的数据内容。
+
+### CoAP 请求方法
+
+CoAP 支持以下请求方法：
+
+- **GET**：获取资源。
+- **POST**：创建或更新资源。
+- **PUT**：更新资源。
+- **DELETE**：删除资源。
+
+### CoAP 响应代码
+
+CoAP 响应代码类似于 HTTP 状态码，例如：
+
+- **2.xx**：成功响应。
+- **4.xx**：客户端错误。
+- **5.xx**：服务器错误。
+
+## 在 STM32 上实现 CoAP
+
+### 硬件要求
+
+- STM32 开发板（如 STM32F4 Discovery）
+- 以太网模块或 Wi-Fi 模块（如 ESP8266）
+
+### 软件要求
+
+- STM32CubeMX
+- STM32 HAL 库
+- CoAP 库（如 [libcoap](https://github.com/obgm/libcoap)）
+
+### 配置 STM32CubeMX
+
+1. 打开 STM32CubeMX 并创建一个新项目。
+2. 配置时钟和 GPIO。
+3. 配置以太网或 Wi-Fi 模块。
+4. 生成代码并打开项目。
+
+### 集成 CoAP 库
+
+1. 下载并解压 libcoap 库。
+2. 将库文件添加到 STM32 项目中。
+3. 在 `main.c` 中包含 CoAP 头文件：
+
+```c
+#include "coap.h"
+```
+
+### 编写 CoAP 客户端代码
+
+以下是一个简单的 CoAP 客户端代码示例，用于向服务器发送 GET 请求：
+
+```c
+void coap_client_example() {
+    coap_context_t *ctx = coap_new_context(NULL);
+    if (!ctx) {
+        printf("Failed to create CoAP context\n");
+        return;
+    }
+
+    coap_address_t dst;
+    coap_address_init(&dst);
+    dst.addr.sin.sin_family = AF_INET;
+    dst.addr.sin.sin_port = htons(5683);
+    inet_pton(AF_INET, "192.168.1.100", &dst.addr.sin.sin_addr);
+
+    coap_pdu_t *pdu = coap_new_pdu();
+    if (!pdu) {
+        printf("Failed to create CoAP PDU\n");
+        return;
+    }
+
+    pdu->type = COAP_MESSAGE_CON;
+    pdu->tid = coap_new_message_id(ctx);
+    pdu->code = COAP_REQUEST_GET;
+
+    coap_add_option(pdu, COAP_OPTION_URI_PATH, 5, (uint8_t *)"hello");
+
+    coap_send(ctx, &dst, pdu);
+
+    coap_free_context(ctx);
+}
+```
+
+### 编写 CoAP 服务器代码
+
+以下是一个简单的 CoAP 服务器代码示例，用于响应 GET 请求：
+
+```c
+void coap_server_example() {
+    coap_context_t *ctx = coap_new_context(NULL);
+    if (!ctx) {
+        printf("Failed to create CoAP context\n");
+        return;
+    }
+
+    coap_address_t addr;
+    coap_address_init(&addr);
+    addr.addr.sin.sin_family = AF_INET;
+    addr.addr.sin.sin_port = htons(5683);
+    addr.addr.sin.sin_addr.s_addr = INADDR_ANY;
+
+    coap_endpoint_t *endpoint = coap_new_endpoint(ctx, &addr, COAP_PROTO_UDP);
+    if (!endpoint) {
+        printf("Failed to create CoAP endpoint\n");
+        return;
+    }
+
+    coap_register_handler(ctx, COAP_REQUEST_GET, handle_get_request);
+
+    while (1) {
+        coap_run_once(ctx, 1000);
+    }
+
+    coap_free_context(ctx);
+}
+
+void handle_get_request(coap_context_t *ctx, coap_pdu_t *request, coap_address_t *src) {
+    coap_pdu_t *response = coap_new_pdu();
+    if (!response) {
+        printf("Failed to create CoAP response\n");
+        return;
+    }
+
+    response->type = COAP_MESSAGE_ACK;
+    response->tid = request->tid;
+    response->code = COAP_RESPONSE_CODE(205);
+
+    const char *payload = "Hello, CoAP!";
+    coap_add_data(response, strlen(payload), (uint8_t *)payload);
+
+    coap_send(ctx, src, response);
+}
+```
+
+## 实际案例：智能家居传感器
+
+假设我们有一个智能家居系统，其中包含多个传感器（如温度传感器、湿度传感器）。我们可以使用 CoAP 协议来实现传感器数据的采集和传输。
+
+1. **传感器节点**：每个传感器节点运行一个 CoAP 服务器，提供传感器数据。
+2. **网关节点**：网关节点运行一个 CoAP 客户端，定期从传感器节点获取数据，并将其发送到云端。
+
+### 传感器节点代码
+
+```c
+void sensor_node() {
+    coap_context_t *ctx = coap_new_context(NULL);
+    if (!ctx) {
+        printf("Failed to create CoAP context\n");
+        return;
+    }
+
+    coap_address_t addr;
+    coap_address_init(&addr);
+    addr.addr.sin.sin_family = AF_INET;
+    addr.addr.sin.sin_port = htons(5683);
+    addr.addr.sin.sin_addr.s_addr = INADDR_ANY;
+
+    coap_endpoint_t *endpoint = coap_new_endpoint(ctx, &addr, COAP_PROTO_UDP);
+    if (!endpoint) {
+        printf("Failed to create CoAP endpoint\n");
+        return;
+    }
+
+    coap_register_handler(ctx, COAP_REQUEST_GET, handle_sensor_request);
+
+    while (1) {
+        coap_run_once(ctx, 1000);
+    }
+
+    coap_free_context(ctx);
+}
+
+void handle_sensor_request(coap_context_t *ctx, coap_pdu_t *request, coap_address_t *src) {
+    coap_pdu_t *response = coap_new_pdu();
+    if (!response) {
+        printf("Failed to create CoAP response\n");
+        return;
+    }
+
+    response->type = COAP_MESSAGE_ACK;
+    response->tid = request->tid;
+    response->code = COAP_RESPONSE_CODE(205);
+
+    float temperature = read_temperature();
+    char payload[32];
+    snprintf(payload, sizeof(payload), "Temperature: %.2f C", temperature);
+    coap_add_data(response, strlen(payload), (uint8_t *)payload);
+
+    coap_send(ctx, src, response);
+}
+```
+
+### 网关节点代码
+
+```c
+void gateway_node() {
+    coap_context_t *ctx = coap_new_context(NULL);
+    if (!ctx) {
+        printf("Failed to create CoAP context\n");
+        return;
+    }
+
+    coap_address_t dst;
+    coap_address_init(&dst);
+    dst.addr.sin.sin_family = AF_INET;
+    dst.addr.sin.sin_port = htons(5683);
+    inet_pton(AF_INET, "192.168.1.101", &dst.addr.sin.sin_addr);
+
+    while (1) {
+        coap_pdu_t *pdu = coap_new_pdu();
+        if (!pdu) {
+            printf("Failed to create CoAP PDU\n");
+            return;
+        }
+
+        pdu->type = COAP_MESSAGE_CON;
+        pdu->tid = coap_new_message_id(ctx);
+        pdu->code = COAP_REQUEST_GET;
+
+        coap_add_option(pdu, COAP_OPTION_URI_PATH, 5, (uint8_t *)"temperature");
+
+        coap_send(ctx, &dst, pdu);
+
+        coap_run_once(ctx, 1000);
+    }
+
+    coap_free_context(ctx);
+}
+```
+
+## 总结
+
+在本教程中，我们学习了如何在 STM32 上实现 CoAP 协议，并通过实际案例展示了其在智能家居系统中的应用。CoAP 是一种轻量级的通信协议，非常适合资源受限的物联网设备。通过本教程，您应该能够在自己的 STM32 项目中实现 CoAP 协议，并将其应用于各种物联网场景。
+
+## 附加资源
+
+- [libcoap 官方文档](https://libcoap.net/doc/)
+- [CoAP RFC 7252](https://tools.ietf.org/html/rfc7252)
+- [STM32CubeMX 用户手册](https://www.st.com/resource/en/user_manual/dm00104712-stm32cubemx-for-stm32-configuration-and-initialization-c-code-generation-stmicroelectronics.pdf)
+
+## 练习
+
+1. 修改传感器节点代码，使其支持湿度传感器的数据采集。
+2. 在网关节点代码中，添加对多个传感器节点的支持，并定期从每个节点获取数据。
+3. 尝试使用 CoAP 的观察者模式，实现传感器数据的实时更新。
+
+:::tip
+在实现 CoAP 协议时，务必注意内存管理和网络稳定性，以确保系统的可靠性和性能。
+:::

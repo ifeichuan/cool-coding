@@ -1,0 +1,165 @@
+---
+title: OpenTelemetry 与日志分析工具集成
+description: "学习如何将OpenTelemetry日志与常见日志分析工具集成，实现统一的可观测性解决方案。"
+---
+
+## 介绍
+
+OpenTelemetry是一个开源的观测性框架，用于生成、收集和导出遥测数据（指标、日志和追踪）。日志是应用程序可观测性的关键部分，而将OpenTelemetry日志与专业日志分析工具集成，可以帮助开发者更高效地排查问题。
+
+本指南将介绍如何将OpenTelemetry日志导出到流行的日志分析工具（如ELK、Grafana Loki等），并提供实际配置示例。
+
+## 核心概念
+
+### 1. OpenTelemetry日志架构
+
+OpenTelemetry日志数据流通常包含以下组件：
+```mermaid
+graph LR
+    A[应用程序] -->|生成日志| B[OpenTelemetry Collector]
+    B -->|导出日志| C[日志分析工具]
+```
+
+### 2. 日志分析工具选择
+
+常见集成目标：
+- ELK Stack (Elasticsearch, Logstash, Kibana)
+- Grafana Loki
+- Datadog
+- Splunk
+
+## 集成实践
+
+### 示例1：导出到Grafana Loki
+
+#### 配置OpenTelemetry Collector
+
+编辑 `otel-collector-config.yaml`：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+
+exporters:
+  loki:
+    endpoint: "http://loki:3100/loki/api/v1/push"
+    labels:
+      resource:
+        - "service.name"
+        - "service.namespace"
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [loki]
+```
+
+#### 验证日志
+
+在Grafana中查询：
+```
+{service="your-service-name"}
+```
+
+:::tip
+确保Loki服务地址和标签配置与你的环境匹配
+:::
+
+### 示例2：导出到ELK Stack
+
+#### 配置Filebeat作为中转
+
+```yaml
+# filebeat.yml
+filebeat.inputs:
+- type: filestream
+  paths:
+    - "/var/log/otel-collector.log"
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+```
+
+然后在Collector中配置文件输出：
+```yaml
+exporters:
+  file:
+    path: "/var/log/otel-collector.log"
+```
+
+## 实际案例：电商应用日志分析
+
+**场景**：一个电商网站需要分析用户下单失败的日志
+
+1. 应用通过OpenTelemetry SDK记录结构化日志：
+```go
+logger := otel.GetLoggerProvider().Logger("order.service")
+logger.Error("订单创建失败",
+    zap.String("order_id", orderID),
+    zap.String("error", err.Error()))
+```
+
+2. Collector将日志导出到Loki，附加资源属性：
+```
+{
+  "timestamp": "2023-01-01T12:00:00Z",
+  "body": "订单创建失败",
+  "attributes": {
+    "order_id": "12345",
+    "error": "库存不足"
+  },
+  "resource": {
+    "service.name": "order-service",
+    "deployment.env": "production"
+  }
+}
+```
+
+3. 在Grafana中创建告警规则：
+```
+count_over_time(
+  {service="order-service"} 
+  |~ "订单创建失败"
+  [5m]
+) > 10
+```
+
+## 最佳实践
+
+1. **结构化日志**：始终使用键值对格式记录日志
+2. **合理采样**：对高频日志配置采样率
+3. **敏感信息**：使用处理器过滤或脱敏敏感数据
+```yaml
+processors:
+  redaction:
+    deny: ["credit_card", "password"]
+```
+
+## 总结
+
+通过OpenTelemetry与日志分析工具的集成，开发者可以：
+- 实现日志的集中存储和分析
+- 关联日志与追踪、指标数据
+- 构建统一的可观测性平台
+
+## 延伸学习
+
+1. 官方文档：
+   - [OpenTelemetry Logs](https://opentelemetry.io/docs/concepts/logs/)
+   - [Loki LogQL](https://grafana.com/docs/loki/latest/logql/)
+
+2. 实践建议：
+   - 尝试将你的开发环境日志导出到本地Loki实例
+   - 比较不同日志分析工具的查询性能
+
+3. 进阶话题：
+   - 日志与追踪的关联
+   - 基于日志的自动化告警

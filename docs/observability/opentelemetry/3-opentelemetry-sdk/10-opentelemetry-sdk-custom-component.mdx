@@ -1,0 +1,175 @@
+---
+title: OpenTelemetry SDK自定义组件
+description: 学习如何通过自定义组件扩展OpenTelemetry SDK的功能，包括创建自定义采样器、处理器和导出器。
+---
+
+# OpenTelemetry SDK自定义组件
+
+## 介绍
+
+OpenTelemetry SDK 是用于生成、收集和导出遥测数据（如追踪、指标和日志）的核心工具包。虽然 SDK 提供了默认实现，但在实际应用中，你可能需要根据业务需求**自定义组件**。本文将介绍如何创建自定义采样器（Sampler）、处理器（Processor）和导出器（Exporter），并通过实际案例展示其用途。
+
+:::note 关键概念
+- **采样器**：决定是否记录或丢弃一个跨度（Span）。
+- **处理器**：处理跨度数据（如批量处理、过滤）。
+- **导出器**：将数据发送到目标后端（如Jaeger、Prometheus）。
+:::
+
+---
+
+## 自定义采样器
+
+### 场景
+假设你需要实现一个基于业务规则的采样策略（例如：只采样高优先级的请求）。
+
+### 实现步骤
+1. 创建一个实现 `Sampler` 接口的类。
+2. 重写 `shouldSample` 方法，定义采样逻辑。
+
+```java
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
+
+public class PrioritySampler implements Sampler {
+    @Override
+    public SamplingResult shouldSample(
+        Context parentContext,
+        String traceId,
+        String name,
+        SpanKind spanKind,
+        Map<String, String> attributes,
+        List<SpanLink> links
+    ) {
+        if ("HIGH_PRIORITY".equals(attributes.get("priority"))) {
+            return SamplingResult.recordAndSample();
+        }
+        return SamplingResult.drop();
+    }
+}
+```
+
+### 使用示例
+```java
+SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+    .setSampler(new PrioritySampler())
+    .build();
+```
+
+---
+
+## 自定义处理器
+
+### 场景
+在数据导出前，需要过滤掉包含敏感信息的跨度。
+
+### 实现步骤
+1. 继承 `SpanProcessor` 接口。
+2. 实现 `onStart` 和 `onEnd` 方法。
+
+```java
+import io.opentelemetry.sdk.trace.SpanProcessor;
+
+public class SensitiveDataFilter implements SpanProcessor {
+    @Override
+    public void onStart(Context ctx, ReadWriteSpan span) {
+        if (span.getName().contains("password")) {
+            span.setAttribute("redacted", true);
+        }
+    }
+
+    @Override
+    public boolean isStartRequired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEndRequired() {
+        return false;
+    }
+}
+```
+
+### 添加到SDK
+```java
+SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+    .addSpanProcessor(new SensitiveDataFilter())
+    .build();
+```
+
+---
+
+## 自定义导出器
+
+### 场景
+将追踪数据导出到自定义的存储系统（如MySQL数据库）。
+
+### 实现步骤
+1. 实现 `SpanExporter` 接口。
+2. 重写 `export` 方法。
+
+```java
+import io.opentelemetry.sdk.common.CompletableResultCode;
+import io.opentelemetry.sdk.trace.data.SpanData;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
+
+public class MySQLExporter implements SpanExporter {
+    @Override
+    public CompletableResultCode export(Collection<SpanData> spans) {
+        spans.forEach(span -> {
+            // 插入到MySQL的逻辑
+            System.out.println("Exporting span: " + span.getName());
+        });
+        return CompletableResultCode.ofSuccess();
+    }
+}
+```
+
+### 使用示例
+```java
+SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+    .addSpanProcessor(BatchSpanProcessor.builder(new MySQLExporter()).build())
+    .build();
+```
+
+---
+
+## 实际案例：电商订单追踪
+
+### 需求
+- 采样所有支付相关的请求。
+- 过滤掉用户邮箱信息。
+- 导出到内部监控系统。
+
+### 配置代码
+```java
+SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+    .setSampler(new Sampler() {
+        @Override
+        public SamplingResult shouldSample(/* 参数省略 */) {
+            return name.contains("payment") ? 
+                SamplingResult.recordAndSample() : 
+                SamplingResult.drop();
+        }
+    })
+    .addSpanProcessor(new SensitiveDataFilter())
+    .addSpanProcessor(BatchSpanProcessor.builder(new InternalExporter()).build())
+    .build();
+```
+
+---
+
+## 总结
+
+通过自定义OpenTelemetry SDK组件，你可以灵活地适配业务需求。以下是关键点回顾：
+1. **采样器**控制数据采集量。
+2. **处理器**用于数据清洗和增强。
+3. **导出器**决定数据去向。
+
+:::tip 练习
+尝试实现一个自定义指标导出器（`MetricExporter`），将数据发送到CSV文件。
+:::
+
+### 扩展资源
+- [OpenTelemetry官方文档](https://opentelemetry.io/docs/)
+- [GitHub示例仓库](https://github.com/open-telemetry/opentelemetry-java)

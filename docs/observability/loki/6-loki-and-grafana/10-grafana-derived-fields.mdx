@@ -1,0 +1,133 @@
+---
+title: Grafana派生字段
+description: 学习如何在Grafana中使用派生字段增强日志可视化效果，包括基础配置、实际案例和最佳实践。
+---
+
+# Grafana派生字段
+
+派生字段（Derived Fields）是Grafana中一项强大的功能，允许您基于日志查询结果动态创建新的字段或链接。这些字段可以用于丰富可视化效果、快速跳转到相关系统或添加元数据。本文将带您逐步掌握派生字段的核心用法。
+
+## 什么是派生字段？
+
+派生字段是通过对日志字段应用正则表达式、JSON路径或其他提取方式生成的新字段。它们不会修改原始日志数据，仅在可视化层临时创建，常用于：
+
+- 从日志中提取结构化数据（如请求ID、错误码）
+- 创建可点击的链接（跳转到其他系统）
+- 添加计算字段（如日志长度、状态分类）
+
+:::tip 典型场景
+假设您的日志包含 `trace_id=abc123`，您可以通过派生字段将其转换为可点击的链接，直接跳转到分布式追踪系统。
+:::
+
+## 基础配置
+
+在Grafana Loki数据源中配置派生字段：
+
+1. 进入 **Configuration > Data Sources > Loki**
+2. 找到 **Derived Fields** 部分
+3. 点击 **Add derived field**
+
+主要配置项说明：
+
+| 字段 | 说明 | 示例值 |
+|------|------|--------|
+| Name | 派生字段名称 | `trace_id` |
+| Regex | 提取值的正则表达式 | `trace_id=(\\w+)` |
+| URL/Internal Link | 生成的链接地址 | `https://trace-system.example.com/?trace_id=${__value.raw}` |
+| 是否显示链接 | 控制是否显示为可点击链接 | 启用 |
+
+```json
+// 示例：派生字段配置JSON
+{
+  "matcherRegex": "trace_id=(\\w+)",
+  "name": "trace_id",
+  "url": "https://trace-system.example.com/?trace_id=${__value.raw}"
+}
+```
+
+## 实际案例
+
+### 案例1：从Nginx日志创建跳转链接
+
+假设Nginx日志格式为：
+```
+192.168.1.1 - - [01/Jan/2023:12:00:00 +0000] "GET /api/users?id=123 HTTP/1.1" 200 432
+```
+
+配置派生字段提取用户ID并生成管理后台链接：
+
+1. **Regex**: `id=(\\d+)`
+2. **Name**: `user_id`
+3. **URL**: `https://admin.example.com/users/${__value.raw}`
+
+```mermaid
+graph LR
+    A[原始日志] --> B(正则提取id=123)
+    B --> C[生成链接]
+    C --> D[点击跳转管理后台]
+```
+
+### 案例2：错误日志分类
+
+对错误日志添加严重程度标记：
+
+```python
+# 原始日志
+ERROR [2023-01-01] Database connection failed - 代码: DB_503
+
+# 派生字段配置
+Regex: 代码: (\\w+)_(\\d+)
+Name: error_type
+Internal link: /error-codes?type=${__match.1}&code=${__match.2}
+```
+
+## 高级技巧
+
+### 使用JSON路径提取
+
+对于结构化日志，可以使用JSON路径替代正则表达式：
+
+```json
+// 日志内容
+{
+  "http": {
+    "request": {
+      "id": "req-123"
+    }
+  }
+}
+
+// 派生字段配置
+"matcherType": "json",
+"matcherJsonPath": "$.http.request.id"
+```
+
+### 变量说明
+
+在URL中可以使用以下特殊变量：
+
+| 变量 | 说明 |
+|------|------|
+| `${__value.raw}` | 提取的原始值 |
+| `${__match.1}` | 正则表达式第一个捕获组 |
+| `${__time_range}` | 当前仪表板时间范围 |
+
+:::caution 注意事项
+1. 正则表达式性能影响查询速度，避免过于复杂的模式
+2. 派生字段仅在Grafana界面生效，不会影响存储的日志数据
+3. 需要Loki 2.3+版本支持完整功能
+:::
+
+## 总结
+
+派生字段通过三种方式提升日志分析效率：
+
+1. **数据丰富化**：从非结构化日志提取关键信息
+2. **上下文跳转**：创建到相关系统的快速链接
+3. **可视化增强**：添加计算字段优化图表展示
+
+## 延伸学习
+
+- 练习：为您的应用日志配置一个跳转到CI系统的派生字段
+- 官方文档：[Grafana Derived Fields](https://grafana.com/docs/grafana/latest/datasources/loki/#derived-fields)
+- 进阶主题：尝试将派生字段与Grafana变量结合使用

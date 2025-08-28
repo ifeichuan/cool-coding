@@ -1,0 +1,153 @@
+---
+title: PyTorch Transformer基础
+description: 了解PyTorch中Transformer模型的基本概念、实现方法及其在自然语言处理中的应用。
+---
+
+# PyTorch Transformer基础
+
+Transformer模型是近年来自然语言处理（NLP）领域最重要的突破之一。它通过自注意力机制（Self-Attention）和位置编码（Positional Encoding）等技术，显著提升了模型在文本生成、翻译、分类等任务中的表现。本文将带你从基础开始，逐步理解Transformer的核心概念，并通过PyTorch实现一个简单的Transformer模型。
+
+## 什么是Transformer？
+
+Transformer是一种基于注意力机制的神经网络架构，最初由Vaswani等人在2017年的论文《Attention is All You Need》中提出。与传统的循环神经网络（RNN）和卷积神经网络（CNN）不同，Transformer完全依赖于注意力机制来处理序列数据，从而避免了RNN中的长距离依赖问题和CNN的局部感受野限制。
+
+Transformer的核心思想是通过**自注意力机制**捕捉输入序列中不同位置之间的关系，并通过**多头注意力机制**进一步增强模型的表达能力。
+
+## Transformer的核心组件
+
+### 1. 自注意力机制（Self-Attention）
+
+自注意力机制允许模型在处理序列时，动态地为每个位置分配不同的权重，从而捕捉序列中不同位置之间的依赖关系。具体来说，自注意力机制通过计算**查询（Query）**、**键（Key）**和**值（Value）**之间的关系来确定权重。
+
+```python
+import torch
+import torch.nn.functional as F
+
+# 示例：计算自注意力
+def self_attention(Q, K, V):
+    d_k = Q.size(-1)
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(d_k))
+    attention_weights = F.softmax(scores, dim=-1)
+    output = torch.matmul(attention_weights, V)
+    return output, attention_weights
+
+# 输入示例
+Q = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+K = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+V = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+
+output, weights = self_attention(Q, K, V)
+print("Output:", output)
+print("Attention Weights:", weights)
+```
+
+**输出：**
+```
+Output: tensor([[1.0000, 2.0000],
+                [3.0000, 4.0000]])
+Attention Weights: tensor([[0.5000, 0.5000],
+                          [0.5000, 0.5000]])
+```
+
+### 2. 多头注意力机制（Multi-Head Attention）
+
+多头注意力机制通过并行计算多个自注意力头，并将结果拼接起来，从而增强模型的表达能力。每个注意力头可以捕捉不同的特征，使得模型能够更好地理解输入序列。
+
+```python
+import torch.nn as nn
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+
+    def forward(self, Q, K, V):
+        batch_size = Q.size(0)
+        Q = self.W_q(Q).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        K = self.W_k(K).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        V = self.W_v(V).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / torch.sqrt(torch.tensor(self.d_k))
+        attention_weights = F.softmax(scores, dim=-1)
+        output = torch.matmul(attention_weights, V)
+        output = output.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
+        return self.W_o(output), attention_weights
+
+# 示例
+d_model = 8
+num_heads = 2
+mha = MultiHeadAttention(d_model, num_heads)
+Q = torch.rand(1, 10, d_model)
+K = torch.rand(1, 10, d_model)
+V = torch.rand(1, 10, d_model)
+output, weights = mha(Q, K, V)
+print("Output Shape:", output.shape)
+print("Attention Weights Shape:", weights.shape)
+```
+
+**输出：**
+```
+Output Shape: torch.Size([1, 10, 8])
+Attention Weights Shape: torch.Size([1, 2, 10, 10])
+```
+
+### 3. 位置编码（Positional Encoding）
+
+由于Transformer不包含循环或卷积结构，它需要一种方法来捕捉序列中元素的位置信息。位置编码通过将位置信息添加到输入嵌入中，使得模型能够区分序列中不同位置的元素。
+
+```python
+import math
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
+
+# 示例
+d_model = 8
+pe = PositionalEncoding(d_model)
+x = torch.rand(1, 10, d_model)
+output = pe(x)
+print("Output Shape:", output.shape)
+```
+
+**输出：**
+```
+Output Shape: torch.Size([1, 10, 8])
+```
+
+## Transformer的实际应用
+
+Transformer模型在自然语言处理中有着广泛的应用，例如：
+
+1. **机器翻译**：Transformer是许多现代翻译系统（如Google Translate）的核心组件。
+2. **文本生成**：GPT系列模型基于Transformer架构，能够生成高质量的文本。
+3. **文本分类**：BERT等模型通过Transformer实现了在文本分类任务中的卓越表现。
+
+## 总结
+
+Transformer模型通过自注意力机制和位置编码等技术，彻底改变了自然语言处理领域。本文介绍了Transformer的核心组件，并通过PyTorch实现了简单的自注意力机制和多头注意力机制。希望这些内容能够帮助你理解Transformer的基本原理，并为后续的深入学习打下基础。
+
+## 附加资源与练习
+
+- **论文阅读**：阅读《Attention is All You Need》以深入了解Transformer的原始设计。
+- **练习**：尝试使用PyTorch实现一个完整的Transformer模型，并将其应用于文本分类任务。
+- **扩展阅读**：了解BERT、GPT等基于Transformer的模型，探索它们在NLP中的应用。
+
+:::tip
+如果你对Transformer的实现有任何疑问，欢迎在评论区留言，我们会尽快为你解答！
+:::

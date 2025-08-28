@@ -1,0 +1,153 @@
+---
+title: Swift 闭包捕获列表
+description: 了解Swift中的闭包捕获列表，掌握如何避免循环引用并优化内存管理。
+---
+
+# Swift 闭包捕获列表
+
+在Swift中，闭包是一种强大的工具，允许你将代码块作为变量传递和使用。然而，闭包在捕获外部变量时可能会导致内存管理问题，特别是循环引用。为了解决这个问题，Swift引入了**闭包捕获列表**的概念。本文将详细介绍闭包捕获列表的作用、语法以及如何在实际开发中使用它。
+
+## 什么是闭包捕获列表？
+
+闭包捕获列表是闭包定义的一部分，用于显式地指定闭包捕获的变量及其捕获方式。通过捕获列表，你可以控制闭包如何捕获外部变量，从而避免循环引用和内存泄漏。
+
+### 基本语法
+
+闭包捕获列表位于闭包的参数列表之前，用方括号 `[]` 包裹。语法如下：
+
+```swift
+{ [capture list] (parameters) -> returnType in
+    // 闭包体
+}
+```
+
+捕获列表中的每个条目可以是 `weak`、`unowned` 或普通的变量捕获。
+
+## 为什么需要闭包捕获列表？
+
+在Swift中，闭包默认会强引用（strong reference）捕获的外部变量。如果闭包和捕获的变量之间存在相互引用，就会导致循环引用，从而引发内存泄漏。例如：
+
+```swift
+class Person {
+    var name: String
+    var action: (() -> Void)?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+var person: Person? = Person(name: "Alice")
+person?.action = {
+    print("\(person?.name ?? "Unknown") is performing an action")
+}
+
+person = nil // 这里不会调用 deinit，因为闭包和 person 之间存在循环引用
+```
+
+在上面的例子中，`person` 和 `action` 闭包之间形成了循环引用，导致 `person` 无法被释放。为了解决这个问题，我们可以使用捕获列表。
+
+## 使用捕获列表避免循环引用
+
+### 使用 `weak` 捕获
+
+`weak` 捕获会创建一个弱引用，不会增加引用计数。当被捕获的对象被释放时，`weak` 引用会自动变为 `nil`。
+
+```swift
+var person: Person? = Person(name: "Alice")
+person?.action = { [weak person] in
+    print("\(person?.name ?? "Unknown") is performing an action")
+}
+
+person = nil // 这里会调用 deinit，因为闭包使用了 weak 捕获
+```
+
+### 使用 `unowned` 捕获
+
+`unowned` 捕获类似于 `weak`，但它不会将引用置为 `nil`。因此，使用 `unowned` 时需要确保被捕获的对象在闭包执行时仍然存在，否则会导致运行时崩溃。
+
+```swift
+var person: Person? = Person(name: "Alice")
+person?.action = { [unowned person] in
+    print("\(person.name) is performing an action")
+}
+
+person = nil // 这里会调用 deinit，但如果闭包在 person 被释放后执行，会导致崩溃
+```
+
+:::caution
+使用 `unowned` 时要非常小心，确保被捕获的对象在闭包执行时不会被释放。
+:::
+
+## 实际应用场景
+
+### 异步操作中的捕获列表
+
+在异步操作中，闭包可能会捕获外部的 `self`，导致循环引用。例如，在异步网络请求中：
+
+```swift
+class NetworkManager {
+    func fetchData(completion: @escaping (Data?) -> Void) {
+        // 模拟网络请求
+        DispatchQueue.global().async {
+            let data = Data() // 模拟获取的数据
+            DispatchQueue.main.async {
+                completion(data)
+            }
+        }
+    }
+}
+
+class ViewController {
+    var networkManager = NetworkManager()
+    var data: Data?
+
+    func loadData() {
+        networkManager.fetchData { [weak self] data in
+            self?.data = data
+            print("Data loaded")
+        }
+    }
+}
+```
+
+在这个例子中，`fetchData` 的闭包捕获了 `self`，如果不使用 `weak` 捕获，`ViewController` 和 `NetworkManager` 之间可能会形成循环引用。
+
+## 总结
+
+闭包捕获列表是Swift中管理内存的重要工具，特别是在避免循环引用方面。通过使用 `weak` 或 `unowned` 捕获，你可以确保闭包不会意外地持有外部对象的强引用，从而避免内存泄漏。
+
+### 附加资源
+
+- [Swift官方文档 - 闭包](https://docs.swift.org/swift-book/LanguageGuide/Closures.html)
+- [Swift内存管理指南](https://developer.apple.com/documentation/swift/memory_management)
+
+### 练习
+
+1. 修改以下代码，使用捕获列表避免循环引用：
+
+```swift
+class Counter {
+    var count = 0
+    var increment: (() -> Void)?
+
+    deinit {
+        print("Counter is being deinitialized")
+    }
+}
+
+var counter: Counter? = Counter()
+counter?.increment = {
+    counter?.count += 1
+}
+
+counter = nil
+```
+
+2. 在异步操作中，尝试使用 `unowned` 捕获 `self`，并解释为什么这可能是不安全的。
+
+通过掌握闭包捕获列表，你将能够编写更安全、更高效的Swift代码！

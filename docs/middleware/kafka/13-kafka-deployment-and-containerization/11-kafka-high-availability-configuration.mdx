@@ -1,0 +1,122 @@
+---
+title: Kafka 高可用配置
+description: 了解如何配置Kafka以实现高可用性，确保系统在故障时仍能正常运行。本文将从基础概念入手，逐步讲解配置方法，并提供实际案例和代码示例。
+---
+
+## 介绍
+
+Kafka 是一个分布式流处理平台，广泛用于构建实时数据管道和流应用。高可用性（High Availability, HA）是 Kafka 的一个重要特性，它确保即使在部分节点故障的情况下，系统仍能继续运行。本文将详细介绍如何配置 Kafka 以实现高可用性。
+
+## 高可用性的基本概念
+
+高可用性通常通过**复制（Replication）**和**分区（Partitioning）**来实现。Kafka 通过以下机制确保高可用性：
+
+1. **分区（Partitions）**：Kafka 将数据分成多个分区，每个分区可以在不同的服务器上存储。
+2. **副本（Replicas）**：每个分区可以有多个副本，其中一个副本是领导者（Leader），其他副本是追随者（Followers）。领导者处理所有读写请求，追随者则从领导者同步数据。
+
+:::note
+**注意**：Kafka 的高可用性依赖于 Zookeeper，Zookeeper 负责管理 Kafka 集群的元数据和选举领导者。
+:::
+
+## 配置 Kafka 高可用性
+
+### 1. 配置副本因子（Replication Factor）
+
+副本因子决定了每个分区有多少个副本。通常，副本因子设置为 3，这意味着每个分区有 3 个副本（1 个领导者和 2 个追随者）。
+
+```bash
+# 创建主题时指定副本因子
+kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 3 --partitions 1 --topic my_topic
+```
+
+### 2. 配置最小同步副本（Min.insync.replicas）
+
+`min.insync.replicas` 参数指定了在生产者确认写入成功之前，必须有多少个副本同步了数据。通常，这个值设置为 2，这意味着至少有两个副本（包括领导者）必须同步数据。
+
+```properties
+# server.properties 文件中配置
+min.insync.replicas=2
+```
+
+### 3. 配置 unclean.leader.election.enable
+
+`unclean.leader.election.enable` 参数控制是否允许非同步副本成为领导者。如果设置为 `false`，则只有在同步副本中选举领导者，这可以防止数据丢失。
+
+```properties
+# server.properties 文件中配置
+unclean.leader.election.enable=false
+```
+
+### 4. 配置 Zookeeper 集群
+
+Zookeeper 是 Kafka 高可用性的关键组件。确保 Zookeeper 集群至少有 3 个节点，并且配置正确。
+
+```properties
+# zookeeper.properties 文件中配置
+server.1=zookeeper1:2888:3888
+server.2=zookeeper2:2888:3888
+server.3=zookeeper3:2888:3888
+```
+
+## 实际案例
+
+假设我们有一个 Kafka 集群，包含 3 个 Broker 和 3 个 Zookeeper 节点。我们希望创建一个高可用的主题 `my_topic`，并确保在任何一个 Broker 或 Zookeeper 节点故障时，系统仍能正常运行。
+
+### 步骤 1: 创建主题
+
+```bash
+kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 3 --partitions 3 --topic my_topic
+```
+
+### 步骤 2: 配置生产者
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092,broker2:9092,broker3:9092");
+props.put("acks", "all"); // 确保所有副本都确认写入
+props.put("retries", 3); // 重试次数
+props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+
+Producer<String, String> producer = new KafkaProducer<>(props);
+producer.send(new ProducerRecord<>("my_topic", "key", "value"));
+producer.close();
+```
+
+### 步骤 3: 配置消费者
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "broker1:9092,broker2:9092,broker3:9092");
+props.put("group.id", "my_group");
+props.put("enable.auto.commit", "true");
+props.put("auto.commit.interval.ms", "1000");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+
+Consumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Arrays.asList("my_topic"));
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+    }
+}
+```
+
+## 总结
+
+通过合理配置 Kafka 的副本因子、最小同步副本、Zookeeper 集群等参数，可以显著提高 Kafka 的高可用性。在实际应用中，确保这些配置能够应对各种故障场景，从而保证系统的稳定运行。
+
+## 附加资源
+
+- [Kafka 官方文档](https://kafka.apache.org/documentation/)
+- [Kafka 高可用性配置指南](https://kafka.apache.org/documentation/#replication)
+- [Zookeeper 配置指南](https://zookeeper.apache.org/doc/current/zookeeperAdmin.html)
+
+## 练习
+
+1. 创建一个 Kafka 主题，设置副本因子为 3，并验证在其中一个 Broker 故障时，系统是否仍能正常运行。
+2. 修改 `min.insync.replicas` 参数，观察生产者行为的变化。
+3. 配置一个 Zookeeper 集群，并测试 Kafka 在 Zookeeper 节点故障时的表现。

@@ -1,0 +1,161 @@
+---
+title: Django ASGI 应用
+description: 了解 Django ASGI 应用的基本概念、工作原理以及如何在实际项目中部署和使用它。
+---
+
+## 介绍
+
+Django 是一个功能强大的 Python Web 框架，广泛用于构建 Web 应用程序。随着 Web 技术的发展，传统的 WSGI（Web Server Gateway Interface）已经无法满足现代 Web 应用的异步需求。ASGI（Asynchronous Server Gateway Interface）应运而生，它允许 Django 处理异步请求，从而支持 WebSocket、HTTP/2 等现代协议。
+
+本文将带你了解 Django ASGI 应用的基本概念、如何配置和部署它，并通过实际案例展示其应用场景。
+
+## 什么是 ASGI？
+
+ASGI 是 WSGI 的异步版本，它允许 Django 处理异步请求。与 WSGI 不同，ASGI 支持异步编程模型，这意味着它可以同时处理多个请求，而不会阻塞其他请求的执行。
+
+### WSGI 与 ASGI 的区别
+
+- **WSGI**：同步接口，一次只能处理一个请求，适合传统的同步 Web 应用。
+- **ASGI**：异步接口，可以同时处理多个请求，适合需要高并发和实时通信的应用。
+
+## 配置 Django ASGI 应用
+
+要将 Django 项目配置为使用 ASGI，你需要进行以下步骤：
+
+### 1. 安装依赖
+
+首先，确保你已经安装了 `daphne`，这是一个支持 ASGI 的服务器。
+
+```bash
+pip install daphne
+```
+
+### 2. 创建 ASGI 应用
+
+在 Django 项目的 `asgi.py` 文件中，你可以找到默认的 ASGI 配置。通常，它看起来像这样：
+
+```python
+import os
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
+application = get_asgi_application()
+```
+
+### 3. 运行 ASGI 服务器
+
+使用 `daphne` 运行你的 Django 项目：
+
+```bash
+daphne myproject.asgi:application
+```
+
+### 4. 配置 Web 服务器
+
+如果你使用的是 Nginx 或 Apache，你需要配置它们以将请求转发到 `daphne`。以下是一个简单的 Nginx 配置示例：
+
+```nginx
+server {
+    listen 80;
+    server_name myproject.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+## 实际案例：使用 ASGI 处理 WebSocket
+
+假设你正在构建一个实时聊天应用，你需要使用 WebSocket 来处理实时消息。以下是如何在 Django 中使用 ASGI 处理 WebSocket 的示例。
+
+### 1. 创建 WebSocket 消费者
+
+在 `consumers.py` 中创建一个 WebSocket 消费者：
+
+```python
+import json
+from channels.generic.websocket import AsyncWebsocketConsumer
+
+class ChatConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        pass
+
+    async def receive(self, text_data):
+        text_data_json = json.loads(text_data)
+        message = text_data_json['message']
+
+        await self.send(text_data=json.dumps({
+            'message': message
+        }))
+```
+
+### 2. 配置路由
+
+在 `routing.py` 中配置 WebSocket 路由：
+
+```python
+from django.urls import re_path
+from . import consumers
+
+websocket_urlpatterns = [
+    re_path(r'ws/chat/$', consumers.ChatConsumer.as_asgi()),
+]
+```
+
+### 3. 更新 ASGI 配置
+
+在 `asgi.py` 中更新 ASGI 配置以包含 WebSocket 路由：
+
+```python
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+from myapp import routing
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
+
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
+    "websocket": AuthMiddlewareStack(
+        URLRouter(
+            routing.websocket_urlpatterns
+        )
+    ),
+})
+```
+
+### 4. 运行服务器
+
+使用 `daphne` 运行服务器：
+
+```bash
+daphne myproject.asgi:application
+```
+
+现在，你的 Django 应用已经能够处理 WebSocket 请求了。
+
+## 总结
+
+通过本文，你已经了解了 Django ASGI 应用的基本概念、如何配置和部署它，并通过实际案例展示了其应用场景。ASGI 为 Django 提供了处理异步请求的能力，使得它能够更好地支持现代 Web 应用的需求。
+
+## 附加资源
+
+- [Django Channels 官方文档](https://channels.readthedocs.io/en/stable/)
+- [ASGI 官方文档](https://asgi.readthedocs.io/en/latest/)
+- [Daphne 官方文档](https://github.com/django/daphne)
+
+## 练习
+
+1. 尝试在你的 Django 项目中配置 ASGI 并运行它。
+2. 创建一个简单的 WebSocket 应用，使用 ASGI 处理实时消息。
+3. 探索 Django Channels 的其他功能，如后台任务和事件驱动编程。
+
+通过实践这些练习，你将更深入地理解 Django ASGI 应用的工作原理和应用场景。

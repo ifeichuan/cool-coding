@@ -1,0 +1,182 @@
+---
+title: PyTorch 文本分类项目
+description: 本教程将带你从零开始构建一个基于PyTorch的文本分类项目，适合初学者学习如何使用深度学习处理自然语言任务。
+---
+
+# PyTorch 文本分类项目
+
+文本分类是自然语言处理（NLP）中的一项基础任务，旨在将文本数据分配到预定义的类别中。例如，将电子邮件分类为“垃圾邮件”或“非垃圾邮件”，或者将新闻文章分类为“体育”、“科技”等类别。在本教程中，我们将使用PyTorch构建一个简单的文本分类模型，帮助你理解如何将深度学习应用于文本数据。
+
+## 1. 项目概述
+
+我们的目标是构建一个能够对文本进行分类的神经网络模型。具体来说，我们将使用一个简单的数据集（如IMDB电影评论数据集），将评论分类为“正面”或“负面”。以下是项目的关键步骤：
+
+1. **数据预处理**：将文本数据转换为模型可以理解的数值形式。
+2. **构建模型**：使用PyTorch定义一个神经网络模型。
+3. **训练模型**：使用训练数据训练模型。
+4. **评估模型**：在测试数据上评估模型的性能。
+
+## 2. 数据预处理
+
+文本数据不能直接输入到神经网络中，因此我们需要将其转换为数值形式。通常，我们会使用以下步骤：
+
+1. **分词**：将文本拆分为单词或子词。
+2. **构建词汇表**：为每个单词分配一个唯一的整数ID。
+3. **序列填充**：将文本序列填充或截断为固定长度。
+4. **转换为张量**：将文本数据转换为PyTorch张量。
+
+以下是一个简单的数据预处理示例：
+
+```python
+import torch
+from torchtext.legacy import data
+
+# 定义字段
+TEXT = data.Field(tokenize='spacy', tokenizer_language='en_core_web_sm', include_lengths=True)
+LABEL = data.LabelField(dtype=torch.float)
+
+# 加载IMDB数据集
+from torchtext.legacy import datasets
+train_data, test_data = datasets.IMDB.splits(TEXT, LABEL)
+
+# 构建词汇表
+TEXT.build_vocab(train_data, max_size=25000, vectors="glove.6B.100d", unk_init=torch.Tensor.normal_)
+LABEL.build_vocab(train_data)
+
+# 创建迭代器
+BATCH_SIZE = 64
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+train_iterator, test_iterator = data.BucketIterator.splits(
+    (train_data, test_data), 
+    batch_size=BATCH_SIZE, 
+    device=device
+)
+```
+
+:::note
+我们使用了`torchtext`库来简化数据加载和预处理过程。`Field`和`LabelField`用于定义文本和标签的处理方式，`BucketIterator`用于创建批量的数据迭代器。
+:::
+
+## 3. 构建模型
+
+我们将使用一个简单的LSTM模型来进行文本分类。LSTM（长短期记忆网络）是一种常用于处理序列数据的循环神经网络（RNN）变体。
+
+```python
+import torch.nn as nn
+
+class LSTMClassifier(nn.Module):
+    def __init__(self, vocab_size, embedding_dim, hidden_dim, output_dim, n_layers, bidirectional, dropout):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=n_layers, bidirectional=bidirectional, dropout=dropout)
+        self.fc = nn.Linear(hidden_dim * 2 if bidirectional else hidden_dim, output_dim)
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, text, text_lengths):
+        embedded = self.dropout(self.embedding(text))
+        packed_embedded = nn.utils.rnn.pack_padded_sequence(embedded, text_lengths.to('cpu'))
+        packed_output, (hidden, cell) = self.lstm(packed_embedded)
+        hidden = self.dropout(torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim=1))
+        return self.fc(hidden.squeeze(0))
+```
+
+:::tip
+在这个模型中，我们使用了嵌入层将单词索引转换为密集向量，然后通过LSTM层处理序列数据，最后通过全连接层输出分类结果。
+:::
+
+## 4. 训练模型
+
+接下来，我们定义损失函数和优化器，并编写训练循环。
+
+```python
+import torch.optim as optim
+
+# 初始化模型
+INPUT_DIM = len(TEXT.vocab)
+EMBEDDING_DIM = 100
+HIDDEN_DIM = 256
+OUTPUT_DIM = 1
+N_LAYERS = 2
+BIDIRECTIONAL = True
+DROPOUT = 0.5
+
+model = LSTMClassifier(INPUT_DIM, EMBEDDING_DIM, HIDDEN_DIM, OUTPUT_DIM, N_LAYERS, BIDIRECTIONAL, DROPOUT)
+
+# 加载预训练的词向量
+pretrained_embeddings = TEXT.vocab.vectors
+model.embedding.weight.data.copy_(pretrained_embeddings)
+
+# 定义优化器和损失函数
+optimizer = optim.Adam(model.parameters())
+criterion = nn.BCEWithLogitsLoss()
+
+# 训练循环
+def train(model, iterator, optimizer, criterion):
+    model.train()
+    for batch in iterator:
+        optimizer.zero_grad()
+        text, text_lengths = batch.text
+        predictions = model(text, text_lengths).squeeze(1)
+        loss = criterion(predictions, batch.label)
+        loss.backward()
+        optimizer.step()
+```
+
+:::caution
+在训练过程中，确保将模型设置为训练模式（`model.train()`），并在每个批次后清除梯度（`optimizer.zero_grad()`）。
+:::
+
+## 5. 评估模型
+
+训练完成后，我们需要在测试集上评估模型的性能。
+
+```python
+def evaluate(model, iterator, criterion):
+    model.eval()
+    with torch.no_grad():
+        for batch in iterator:
+            text, text_lengths = batch.text
+            predictions = model(text, text_lengths).squeeze(1)
+            loss = criterion(predictions, batch.label)
+    return loss
+```
+
+:::warning
+在评估模型时，确保将模型设置为评估模式（`model.eval()`），并使用`torch.no_grad()`来禁用梯度计算。
+:::
+
+## 6. 实际案例
+
+假设我们训练了一个模型，现在可以使用它来对新的电影评论进行分类：
+
+```python
+def predict_sentiment(model, sentence):
+    model.eval()
+    tokenized = [tok.text for tok in nlp.tokenizer(sentence)]
+    indexed = [TEXT.vocab.stoi[t] for t in tokenized]
+    length = [len(indexed)]
+    tensor = torch.LongTensor(indexed).to(device)
+    tensor = tensor.unsqueeze(1)
+    length_tensor = torch.LongTensor(length)
+    prediction = torch.sigmoid(model(tensor, length_tensor))
+    return prediction.item()
+
+# 示例
+sentence = "This film is terrible!"
+prediction = predict_sentiment(model, sentence)
+print(f"Prediction: {prediction:.4f}")  # 输出: Prediction: 0.1234 (接近0表示负面评论)
+```
+
+## 7. 总结
+
+在本教程中，我们使用PyTorch构建了一个简单的文本分类模型。我们从数据预处理开始，逐步构建了一个LSTM模型，并进行了训练和评估。通过这个项目，你应该对如何使用深度学习处理文本数据有了初步的了解。
+
+## 8. 附加资源与练习
+
+- **练习**：尝试使用不同的模型架构（如GRU或CNN）来改进分类性能。
+- **资源**：
+  - [PyTorch官方文档](https://pytorch.org/docs/stable/index.html)
+  - [torchtext库文档](https://pytorch.org/text/stable/index.html)
+  - [深度学习与自然语言处理](https://www.deeplearningbook.org/)（书籍）
+
+通过不断实践和探索，你将能够掌握更多高级的文本分类技术！

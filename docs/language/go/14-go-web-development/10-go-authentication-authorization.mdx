@@ -1,0 +1,237 @@
+---
+title: Go 认证与授权
+description: 了解如何在 Go Web 开发中实现认证与授权，保护您的应用程序免受未经授权的访问。
+---
+
+# Go 认证与授权
+
+在现代 Web 开发中，认证（Authentication）和授权（Authorization）是保护应用程序安全的关键机制。认证用于验证用户的身份，而授权则用于确定用户是否有权限执行特定操作。本文将逐步介绍如何在 Go 中实现认证与授权，并通过实际案例帮助您理解这些概念。
+
+## 什么是认证与授权？
+
+- **认证（Authentication）**：验证用户身份的过程。通常通过用户名和密码、OAuth、JWT 等方式实现。
+- **授权（Authorization）**：验证用户是否有权限访问特定资源或执行特定操作。
+
+两者结合使用，可以确保只有经过验证且具有适当权限的用户才能访问受保护的资源。
+
+---
+
+## 实现认证
+
+### 1. 使用 JWT 进行认证
+
+JSON Web Token（JWT）是一种流行的认证机制。它通过生成一个加密的令牌来验证用户身份。以下是一个简单的 JWT 认证实现示例：
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+    "github.com/dgrijalva/jwt-go"
+)
+
+var jwtKey = []byte("my_secret_key")
+
+type Claims struct {
+    Username string `json:"username"`
+    jwt.StandardClaims
+}
+
+func generateToken(username string) (string, error) {
+    expirationTime := time.Now().Add(5 * time.Minute)
+    claims := &Claims{
+        Username: username,
+        StandardClaims: jwt.StandardClaims{
+            ExpiresAt: expirationTime.Unix(),
+        },
+    }
+
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString(jwtKey)
+}
+
+func validateToken(tokenString string) (*Claims, error) {
+    claims := &Claims{}
+    token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+        return jwtKey, nil
+    })
+
+    if err != nil {
+        return nil, err
+    }
+
+    if !token.Valid {
+        return nil, fmt.Errorf("invalid token")
+    }
+
+    return claims, nil
+}
+
+func main() {
+    token, err := generateToken("user123")
+    if err != nil {
+        fmt.Println("Error generating token:", err)
+        return
+    }
+    fmt.Println("Generated Token:", token)
+
+    claims, err := validateToken(token)
+    if err != nil {
+        fmt.Println("Error validating token:", err)
+        return
+    }
+    fmt.Println("Token is valid for user:", claims.Username)
+}
+```
+
+**输入：**
+- 用户名：`user123`
+
+**输出：**
+- 生成的 JWT 令牌。
+- 验证令牌并返回用户信息。
+
+:::tip
+JWT 令牌通常包含三部分：头部（Header）、载荷（Payload）和签名（Signature）。载荷中可以存储用户信息，如用户名或角色。
+:::
+
+---
+
+### 2. 使用中间件进行认证
+
+在 Go Web 开发中，中间件是处理认证的常见方式。以下是一个使用 JWT 认证的中间件示例：
+
+```go
+package main
+
+import (
+    "net/http"
+    "strings"
+    "github.com/dgrijalva/jwt-go"
+)
+
+func authMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "Authorization header is required", http.StatusUnauthorized)
+            return
+        }
+
+        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+        claims, err := validateToken(tokenString)
+        if err != nil {
+            http.Error(w, "Invalid token", http.StatusUnauthorized)
+            return
+        }
+
+        // 将用户信息存储在请求上下文中
+        ctx := context.WithValue(r.Context(), "username", claims.Username)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+```
+
+**使用场景：**
+- 在需要保护的 API 路由上应用此中间件，确保只有经过认证的用户才能访问。
+
+---
+
+## 实现授权
+
+### 1. 基于角色的访问控制（RBAC）
+
+RBAC 是一种常见的授权机制，通过为用户分配角色来控制访问权限。以下是一个简单的 RBAC 实现示例：
+
+```go
+package main
+
+import (
+    "fmt"
+    "net/http"
+)
+
+type User struct {
+    Username string
+    Role     string
+}
+
+var users = map[string]User{
+    "user123": {Username: "user123", Role: "admin"},
+    "user456": {Username: "user456", Role: "user"},
+}
+
+func checkPermission(role string, resource string) bool {
+    // 定义角色和资源的权限关系
+    permissions := map[string][]string{
+        "admin": {"read", "write", "delete"},
+        "user":  {"read"},
+    }
+
+    for _, perm := range permissions[role] {
+        if perm == resource {
+            return true
+        }
+    }
+    return false
+}
+
+func protectedHandler(w http.ResponseWriter, r *http.Request) {
+    username := r.Context().Value("username").(string)
+    user, ok := users[username]
+    if !ok {
+        http.Error(w, "User not found", http.StatusUnauthorized)
+        return
+    }
+
+    resource := "write" // 假设用户尝试执行写操作
+    if !checkPermission(user.Role, resource) {
+        http.Error(w, "Permission denied", http.StatusForbidden)
+        return
+    }
+
+    fmt.Fprintf(w, "Access granted to %s for resource %s", user.Username, resource)
+}
+```
+
+**使用场景：**
+- 在需要控制用户权限的 API 路由上应用此逻辑，确保只有具有适当角色的用户才能执行特定操作。
+
+---
+
+## 实际案例：用户管理系统
+
+假设我们正在开发一个用户管理系统，需要实现以下功能：
+1. 用户登录并获取 JWT 令牌。
+2. 只有管理员可以删除用户。
+3. 普通用户只能查看自己的信息。
+
+**实现步骤：**
+1. 使用 JWT 进行用户认证。
+2. 使用 RBAC 控制用户权限。
+3. 在 API 路由上应用认证和授权中间件。
+
+---
+
+## 总结
+
+认证与授权是保护 Web 应用程序安全的关键机制。通过本文的学习，您已经掌握了如何在 Go 中实现 JWT 认证和基于角色的授权。以下是进一步学习的资源：
+
+- [JWT 官方文档](https://jwt.io/)
+- [Go 标准库 `net/http`](https://pkg.go.dev/net/http)
+- [Go 中间件模式](https://github.com/gorilla/mux)
+
+:::caution
+在实际生产环境中，请确保使用安全的密钥管理方案，并定期更新密钥以防止安全漏洞。
+:::
+
+---
+
+## 练习
+
+1. 扩展 JWT 认证示例，支持刷新令牌功能。
+2. 实现一个完整的用户管理系统，包括注册、登录、查看和删除用户功能。
+3. 尝试集成 OAuth 2.0 认证，支持第三方登录（如 Google 或 GitHub）。
+
+通过完成这些练习，您将更深入地理解 Go 中的认证与授权机制。

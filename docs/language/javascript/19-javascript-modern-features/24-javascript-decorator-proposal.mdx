@@ -1,0 +1,411 @@
+---
+title: JavaScript 装饰器提案
+description: 探索JavaScript装饰器提案的基础知识、语法和应用场景，为初学者提供全面的装饰器概念介绍
+---
+
+# JavaScript 装饰器提案
+
+## 什么是装饰器？
+
+装饰器（Decorators）是一种特殊的声明，它允许我们以声明式的方式修改类、类成员或其他 JavaScript 对象的行为。通俗来说，装饰器就像是一个包装器，可以在不修改原始代码的情况下，增强或改变代码的功能。
+
+:::note
+装饰器目前仍是一个处于 ECMAScript 提案阶段的特性（Stage 3），尚未成为正式标准。但由于其强大的功能和实用性，许多项目已经通过转译工具（如 Babel）采用了这一特性。
+:::
+
+## 装饰器的基本概念
+
+装饰器使用 `@` 符号，后跟装饰器的名称。它们通常放置在要装饰的声明之前。装饰器可以应用于：
+
+- 类声明
+- 类字段（属性）
+- 类方法
+- 访问器（getter/setter）
+- 类静态初始化块
+
+## 装饰器语法
+
+### 类装饰器
+
+类装饰器应用于类声明，可以用来监视、修改或替换类定义：
+
+```js
+// 定义一个类装饰器
+function classDecorator(target) {
+  // target 是被装饰的类
+  target.prototype.newProperty = '这是一个新属性';
+  target.prototype.sayHello = function() {
+    return 'Hello!';
+  };
+  return target;
+}
+
+// 使用装饰器
+@classDecorator
+class MyClass {
+  constructor() {
+    // 原始构造函数
+  }
+}
+
+// 创建实例
+const instance = new MyClass();
+console.log(instance.newProperty); // 输出: "这是一个新属性"
+console.log(instance.sayHello()); // 输出: "Hello!"
+```
+
+### 方法装饰器
+
+方法装饰器应用于类的方法，可以监视、修改或替换方法定义：
+
+```js
+function logMethod(target, key, descriptor) {
+  // 保存原始方法
+  const originalMethod = descriptor.value;
+  
+  // 修改方法
+  descriptor.value = function(...args) {
+    console.log(`调用方法 ${key} 参数:`, args);
+    
+    // 调用原始方法
+    const result = originalMethod.apply(this, args);
+    
+    console.log(`方法 ${key} 返回:`, result);
+    return result;
+  };
+  
+  return descriptor;
+}
+
+class Calculator {
+  @logMethod
+  add(a, b) {
+    return a + b;
+  }
+}
+
+const calc = new Calculator();
+calc.add(2, 3);
+// 输出:
+// 调用方法 add 参数: [2, 3]
+// 方法 add 返回: 5
+```
+
+### 属性装饰器
+
+属性装饰器可以用来监视对类属性的访问：
+
+```js
+function validate(target, key, descriptor) {
+  // 获取属性的原始 setter
+  const originalSet = descriptor.set;
+  
+  // 设置新的 setter
+  descriptor.set = function(value) {
+    if (value < 0) {
+      throw new Error('价格不能为负数！');
+    }
+    
+    // 调用原始 setter
+    originalSet.call(this, value);
+  };
+  
+  return descriptor;
+}
+
+class Product {
+  constructor(name, price) {
+    this.name = name;
+    this.price = price;
+  }
+  
+  @validate
+  set price(value) {
+    this._price = value;
+  }
+  
+  get price() {
+    return this._price;
+  }
+}
+
+const phone = new Product('手机', 1000);
+console.log(phone.price); // 输出: 1000
+
+try {
+  phone.price = -10; // 抛出错误
+} catch (e) {
+  console.error(e.message); // 输出: "价格不能为负数！"
+}
+```
+
+## 装饰器工厂
+
+装饰器工厂是一个返回装饰器的函数，允许我们创建接受参数的装饰器：
+
+```js
+function timeout(ms) {
+  // 这是装饰器工厂
+  return function(target, key, descriptor) {
+    // 这是实际的装饰器
+    const originalMethod = descriptor.value;
+    
+    descriptor.value = function(...args) {
+      setTimeout(() => {
+        originalMethod.apply(this, args);
+      }, ms);
+    };
+    
+    return descriptor;
+  };
+}
+
+class TaskManager {
+  constructor() {
+    this.tasks = [];
+  }
+  
+  @timeout(2000)
+  addTask(task) {
+    this.tasks.push(task);
+    console.log(`添加了任务: ${task}`);
+    console.log('当前任务列表:', this.tasks);
+  }
+}
+
+const manager = new TaskManager();
+manager.addTask('学习装饰器');
+// 2秒后输出:
+// 添加了任务: 学习装饰器
+// 当前任务列表: ["学习装饰器"]
+```
+
+## 装饰器的实际应用场景
+
+### 1. 日志记录和性能监控
+
+可以使用装饰器来跟踪方法的执行时间和调用频率：
+
+```js
+function measurePerformance(target, name, descriptor) {
+  const originalMethod = descriptor.value;
+  
+  descriptor.value = function(...args) {
+    const start = performance.now();
+    const result = originalMethod.apply(this, args);
+    const finish = performance.now();
+    
+    console.log(`${name} 方法执行耗时: ${finish - start} 毫秒`);
+    return result;
+  };
+  
+  return descriptor;
+}
+
+class APIService {
+  @measurePerformance
+  fetchData() {
+    // 模拟 API 请求
+    const startTime = Date.now();
+    while (Date.now() - startTime < 100) {
+      // 模拟耗时操作
+    }
+    return { data: '请求结果' };
+  }
+}
+
+const service = new APIService();
+service.fetchData();
+// 输出类似: fetchData 方法执行耗时: 102.45 毫秒
+```
+
+### 2. 权限控制
+
+使用装饰器可以方便地实现权限验证：
+
+```js
+function requireAuth(role) {
+  return function(target, name, descriptor) {
+    const originalMethod = descriptor.value;
+    
+    descriptor.value = function(...args) {
+      // 模拟当前用户角色
+      const currentUser = { role: 'user' };
+      
+      if (currentUser.role !== role) {
+        throw new Error(`需要 ${role} 权限才能执行此操作`);
+      }
+      
+      return originalMethod.apply(this, args);
+    };
+    
+    return descriptor;
+  };
+}
+
+class AdminPanel {
+  @requireAuth('admin')
+  deleteUser(userId) {
+    console.log(`已删除用户 ${userId}`);
+    return true;
+  }
+  
+  @requireAuth('user')
+  viewProfile(userId) {
+    console.log(`查看用户资料 ${userId}`);
+    return { id: userId, name: '示例用户' };
+  }
+}
+
+const panel = new AdminPanel();
+
+try {
+  panel.deleteUser(123); // 抛出错误
+} catch (e) {
+  console.error(e.message); // 输出: "需要 admin 权限才能执行此操作"
+}
+
+// 这个会成功执行
+panel.viewProfile(123);
+// 输出: 查看用户资料 123
+```
+
+### 3. 依赖注入
+
+装饰器可以用于实现简单的依赖注入系统：
+
+```js
+// 简单的服务容器
+const serviceContainer = {
+  logger: {
+    log: (msg) => console.log(`[日志] ${msg}`)
+  },
+  database: {
+    save: (data) => console.log(`[数据库] 保存数据: ${JSON.stringify(data)}`)
+  }
+};
+
+// 依赖注入装饰器
+function inject(serviceName) {
+  return function(target, key) {
+    // 在目标类首次实例化时提供服务
+    Object.defineProperty(target, key, {
+      get: function() {
+        return serviceContainer[serviceName];
+      },
+      enumerable: true,
+      configurable: true
+    });
+  };
+}
+
+class UserService {
+  @inject('logger')
+  logger;
+  
+  @inject('database')
+  db;
+  
+  createUser(username) {
+    this.logger.log(`创建用户: ${username}`);
+    this.db.save({ username });
+    return true;
+  }
+}
+
+const userService = new UserService();
+userService.createUser('alice');
+// 输出:
+// [日志] 创建用户: alice
+// [数据库] 保存数据: {"username":"alice"}
+```
+
+## 装饰器执行顺序
+
+理解装饰器的执行顺序非常重要：
+
+1. **装饰器工厂**从上到下执行
+2. **装饰器函数**从下到上执行
+3. 多个装饰器应用时，先从内到外进行求值，再从外到内进行调用
+
+```js
+function first() {
+  console.log("first(): 工厂执行");
+  return function(target, property, descriptor) {
+    console.log("first(): 装饰器被调用");
+  };
+}
+
+function second() {
+  console.log("second(): 工厂执行");
+  return function(target, property, descriptor) {
+    console.log("second(): 装饰器被调用");
+  };
+}
+
+class Example {
+  @first()
+  @second()
+  method() {}
+}
+
+// 输出顺序:
+// first(): 工厂执行
+// second(): 工厂执行
+// second(): 装饰器被调用
+// first(): 装饰器被调用
+```
+
+## 使用装饰器的注意事项
+
+1. **浏览器兼容性**：装饰器目前仍是提案，需要使用 Babel、TypeScript 等工具转译。
+
+2. **提案变化**：装饰器提案曾多次更改，请确保使用最新的语法。
+
+3. **性能考量**：装饰器会增加一层函数调用，对于性能敏感的操作可能有影响。
+
+4. **调试复杂性**：装饰器可能使代码调试变得更加复杂。
+
+## 在项目中启用装饰器
+
+### 使用 Babel
+
+```json
+{
+  "plugins": [
+    ["@babel/plugin-proposal-decorators", { "version": "2023-05" }]
+  ]
+}
+```
+
+### 使用 TypeScript
+
+```json
+{
+  "compilerOptions": {
+    "experimentalDecorators": true
+  }
+}
+```
+
+## 总结
+
+JavaScript 装饰器是一种强大的特性，允许我们以声明式的方式扩展和修改类和类成员的行为，而不需要修改其原始代码。虽然它仍处于提案阶段，但已被广泛应用于各种框架和库中。装饰器可以提高代码的复用性、可读性，并支持关注点分离。随着你对 JavaScript 理解的深入，装饰器将成为你工具箱中的重要工具。
+
+## 练习与资源
+
+### 练习:
+
+1. 创建一个 `@readonly` 装饰器，使类属性变为只读。
+2. 实现一个 `@debounce` 装饰器，限制方法在一定时间内只能被调用一次。
+3. 设计一个 `@validate` 装饰器，用于验证方法参数。
+
+### 进一步学习资源:
+
+- [TC39 装饰器提案](https://github.com/tc39/proposal-decorators)
+- [MDN Web Docs: JavaScript 装饰器](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Decorators)
+- [TypeScript 中的装饰器](https://www.typescriptlang.org/docs/handbook/decorators.html)
+
+:::tip
+装饰器模式不仅仅是 JavaScript 中的概念，它是一种经典的设计模式，也被运用在许多其他编程语言中。理解这种模式的本质将帮助你在各种编程环境中应用这一思想。
+:::

@@ -1,0 +1,171 @@
+---
+title: Spring JWT
+description: 了解如何在 Spring Security 中使用 JSON Web Tokens (JWT) 实现安全的身份验证和授权机制。
+---
+
+# Spring JWT
+
+在现代 Web 应用程序中，身份验证和授权是确保系统安全的关键部分。JSON Web Token (JWT) 是一种轻量级的、自包含的令牌格式，广泛用于在客户端和服务器之间安全地传输信息。Spring Security 提供了对 JWT 的支持，使得在 Spring 应用程序中实现基于 JWT 的身份验证变得非常简单。
+
+## 什么是 JWT？
+
+JWT 是一种开放标准（RFC 7519），它定义了一种紧凑且自包含的方式，用于在各方之间作为 JSON 对象安全地传输信息。JWT 通常用于身份验证和信息交换。它由三部分组成：
+
+1. **Header**：包含令牌的类型（通常是 JWT）和所使用的签名算法（如 HMAC SHA256 或 RSA）。
+2. **Payload**：包含声明（claims），声明是关于实体（通常是用户）和其他数据的声明。
+3. **Signature**：用于验证消息在传输过程中没有被篡改。
+
+JWT 的格式如下：
+
+```
+header.payload.signature
+```
+
+## 为什么使用 JWT？
+
+JWT 具有以下优点：
+
+- **无状态**：JWT 是自包含的，服务器不需要在会话中存储用户状态。
+- **跨域**：JWT 可以在不同的域之间使用，非常适合单点登录（SSO）场景。
+- **安全性**：JWT 可以使用签名或加密来保护数据。
+
+## 在 Spring Security 中使用 JWT
+
+要在 Spring Security 中使用 JWT，我们需要完成以下步骤：
+
+1. **添加依赖**：首先，我们需要在 `pom.xml` 中添加相关的依赖。
+2. **配置 Spring Security**：配置 Spring Security 以使用 JWT 进行身份验证。
+3. **生成 JWT**：在用户登录成功后生成 JWT。
+4. **验证 JWT**：在每次请求中验证 JWT 的有效性。
+
+### 1. 添加依赖
+
+首先，我们需要在 `pom.xml` 中添加以下依赖：
+
+```xml
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt</artifactId>
+    <version>0.9.1</version>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+```
+
+### 2. 配置 Spring Security
+
+接下来，我们需要配置 Spring Security 以使用 JWT。我们可以通过扩展 `WebSecurityConfigurerAdapter` 来实现这一点。
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.csrf().disable()
+            .authorizeRequests()
+            .antMatchers("/api/public/**").permitAll()
+            .anyRequest().authenticated()
+            .and()
+            .addFilter(new JwtAuthenticationFilter(authenticationManager()))
+            .addFilter(new JwtAuthorizationFilter(authenticationManager()));
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+```
+
+### 3. 生成 JWT
+
+在用户登录成功后，我们可以生成 JWT 并将其返回给客户端。
+
+```java
+public String generateToken(UserDetails userDetails) {
+    Map<String, Object> claims = new HashMap<>();
+    return Jwts.builder()
+            .setClaims(claims)
+            .setSubject(userDetails.getUsername())
+            .setIssuedAt(new Date(System.currentTimeMillis()))
+            .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 10)) // 10 hours
+            .signWith(SignatureAlgorithm.HS256, "secret")
+            .compact();
+}
+```
+
+### 4. 验证 JWT
+
+在每次请求中，我们需要验证 JWT 的有效性。
+
+```java
+public Boolean validateToken(String token, UserDetails userDetails) {
+    final String username = extractUsername(token);
+    return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+}
+
+private Boolean isTokenExpired(String token) {
+    return extractExpiration(token).before(new Date());
+}
+
+public Date extractExpiration(String token) {
+    return Jwts.parser().setSigningKey("secret").parseClaimsJws(token).getBody().getExpiration();
+}
+```
+
+## 实际案例
+
+假设我们有一个简单的用户登录系统，用户登录成功后，服务器会生成一个 JWT 并返回给客户端。客户端在后续的请求中需要携带这个 JWT 以访问受保护的资源。
+
+```java
+@RestController
+@RequestMapping("/api")
+public class AuthController {
+
+    @Autowired
+    private JwtUtil jwtUtil;
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @PostMapping("/login")
+    public ResponseEntity<?> createAuthenticationToken(@RequestBody AuthenticationRequest authenticationRequest) throws Exception {
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(authenticationRequest.getUsername(), authenticationRequest.getPassword())
+            );
+        } catch (BadCredentialsException e) {
+            throw new Exception("Incorrect username or password", e);
+        }
+
+        final UserDetails userDetails = userDetailsService.loadUserByUsername(authenticationRequest.getUsername());
+        final String jwt = jwtUtil.generateToken(userDetails);
+
+        return ResponseEntity.ok(new AuthenticationResponse(jwt));
+    }
+}
+```
+
+## 总结
+
+JWT 是一种强大的工具，可以在现代 Web 应用程序中实现安全的身份验证和授权。通过 Spring Security 和 JWT，我们可以轻松地构建一个无状态的、安全的身份验证系统。希望本文能帮助你理解如何在 Spring 应用程序中使用 JWT。
+
+## 附加资源
+
+- [JWT 官方网站](https://jwt.io/)
+- [Spring Security 官方文档](https://spring.io/projects/spring-security)
+- [JJWT 库文档](https://github.com/jwtk/jjwt)
+
+## 练习
+
+1. 尝试在现有的 Spring Boot 项目中集成 JWT 身份验证。
+2. 修改 JWT 的过期时间，并测试其效果。
+3. 实现一个简单的用户注册和登录系统，使用 JWT 进行身份验证。
+
+:::tip
+在实现 JWT 时，请确保使用强密码和安全的签名算法来保护你的令牌。
+:::

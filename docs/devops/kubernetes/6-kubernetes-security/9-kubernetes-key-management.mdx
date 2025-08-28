@@ -1,0 +1,164 @@
+---
+title: Kubernetes 密钥管理
+description: 了解如何在Kubernetes中安全地管理密钥（Secrets），包括创建、使用和最佳实践。
+---
+
+# Kubernetes 密钥管理
+
+在Kubernetes中，密钥（Secrets）是用于存储敏感信息（如密码、API密钥、TLS证书等）的对象。密钥管理是Kubernetes安全的重要组成部分，确保敏感数据不会被泄露或滥用。本文将详细介绍如何在Kubernetes中创建、使用和管理密钥，并提供实际案例和最佳实践。
+
+## 什么是Kubernetes密钥？
+
+Kubernetes密钥是一种用于存储和管理敏感信息的资源对象。与ConfigMap类似，密钥可以存储键值对，但密钥的内容是经过Base64编码的，以确保敏感信息的安全性。密钥可以挂载到Pod中，供容器使用，也可以通过环境变量注入到容器中。
+
+:::note
+密钥的内容是经过Base64编码的，但Base64编码并不是加密。因此，密钥的安全性依赖于Kubernetes集群的安全性。
+:::
+
+## 创建密钥
+
+在Kubernetes中，可以通过命令行或YAML文件创建密钥。以下是两种常见的创建密钥的方式。
+
+### 使用命令行创建密钥
+
+```bash
+kubectl create secret generic my-secret --from-literal=username=admin --from-literal=password=secret
+```
+
+这个命令创建了一个名为 `my-secret` 的密钥，其中包含两个键值对：`username=admin` 和 `password=secret`。
+
+### 使用YAML文件创建密钥
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+type: Opaque
+data:
+  username: YWRtaW4=  # Base64编码的 "admin"
+  password: c2VjcmV0  # Base64编码的 "secret"
+```
+
+将上述YAML文件保存为 `my-secret.yaml`，然后使用以下命令创建密钥：
+
+```bash
+kubectl apply -f my-secret.yaml
+```
+
+## 使用密钥
+
+创建密钥后，可以通过以下方式在Pod中使用密钥。
+
+### 将密钥挂载为文件
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+  - name: my-container
+    image: nginx
+    volumeMounts:
+    - name: secret-volume
+      mountPath: /etc/secret
+      readOnly: true
+  volumes:
+  - name: secret-volume
+    secret:
+      secretName: my-secret
+```
+
+在这个例子中，`my-secret` 密钥被挂载到Pod中的 `/etc/secret` 目录下，容器可以通过文件系统访问密钥的内容。
+
+### 将密钥注入为环境变量
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  containers:
+  - name: my-container
+    image: nginx
+    env:
+    - name: SECRET_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: my-secret
+          key: username
+    - name: SECRET_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: my-secret
+          key: password
+```
+
+在这个例子中，`my-secret` 密钥中的 `username` 和 `password` 被注入为环境变量 `SECRET_USERNAME` 和 `SECRET_PASSWORD`，容器可以通过环境变量访问这些值。
+
+## 实际案例
+
+假设你有一个需要访问数据库的应用程序，数据库的用户名和密码是敏感信息。你可以将这些信息存储在Kubernetes密钥中，并在Pod中使用这些密钥。
+
+### 创建数据库密钥
+
+```bash
+kubectl create secret generic db-secret --from-literal=db-username=admin --from-literal=db-password=supersecret
+```
+
+### 在Pod中使用数据库密钥
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: db-app
+spec:
+  containers:
+  - name: db-container
+    image: my-db-app
+    env:
+    - name: DB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: db-secret
+          key: db-username
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: db-secret
+          key: db-password
+```
+
+在这个例子中，`db-secret` 密钥中的 `db-username` 和 `db-password` 被注入为环境变量 `DB_USERNAME` 和 `DB_PASSWORD`，应用程序可以通过这些环境变量访问数据库。
+
+## 最佳实践
+
+1. **限制密钥的访问权限**：使用Kubernetes的RBAC（基于角色的访问控制）来限制对密钥的访问，确保只有授权的用户和服务账户可以访问密钥。
+
+2. **加密密钥**：在Kubernetes 1.13及以上版本中，可以使用加密提供程序（EncryptionConfiguration）来加密密钥的存储。
+
+3. **定期轮换密钥**：定期轮换密钥，以减少密钥泄露的风险。
+
+4. **避免将密钥存储在版本控制系统中**：密钥是敏感信息，不应存储在Git等版本控制系统中。
+
+## 总结
+
+Kubernetes密钥管理是确保集群安全的重要环节。通过合理地创建、使用和管理密钥，可以有效地保护敏感信息，防止数据泄露。本文介绍了如何创建和使用密钥，并提供了实际案例和最佳实践。
+
+## 附加资源
+
+- [Kubernetes官方文档 - Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
+- [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+- [Kubernetes加密提供程序](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/)
+
+## 练习
+
+1. 创建一个包含TLS证书的密钥，并将其挂载到Pod中。
+2. 使用RBAC限制对某个密钥的访问权限。
+3. 尝试使用加密提供程序加密密钥的存储。
+
+通过完成这些练习，你将更深入地理解Kubernetes密钥管理的各个方面。

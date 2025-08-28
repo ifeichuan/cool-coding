@@ -1,0 +1,119 @@
+---
+title: SkyWalking H2数据库（测试用）
+description: "了解SkyWalking中用于开发和测试的轻量级H2数据库存储方案，掌握其配置和使用方法。"
+---
+
+# SkyWalking H2数据库（测试用）
+
+## 概述
+
+H2是一个开源的嵌入式内存数据库，SkyWalking默认将其作为**开发和测试环境**的后端存储。它无需独立部署，适合快速验证功能，但不推荐用于生产环境。
+
+:::note 特点速览
+- **零配置**：默认集成，启动即用
+- **内存模式**：数据仅保存在内存中（重启丢失）
+- **文件模式**：可选持久化到磁盘
+- **兼容性**：支持标准SQL语法
+:::
+
+## 工作原理
+
+```mermaid
+graph LR
+    A[SkyWalking OAP Server] -->|写入数据| B[H2 Database]
+    B -->|查询响应| A
+    C[测试工具/Dev环境] --> A
+```
+
+## 配置方法
+
+### 默认配置
+修改 `config/application.yml` 中的存储部分：
+
+```yaml
+storage:
+  selector: ${SW_STORAGE:h2}
+  h2:
+    driver: org.h2.jdbcx.JdbcDataSource
+    url: jdbc:h2:mem:skywalking-oap-db
+    user: sa
+    metadataQueryMaxSize: ${SW_STORAGE_H2_QUERY_MAX_SIZE:5000}
+```
+
+:::tip 模式切换
+- **内存模式**：`jdbc:h2:mem:dbname`
+- **文件模式**：`jdbc:h2:file:/path/to/dbname`
+:::
+
+## 实战示例
+
+### 场景：本地调试指标存储
+1. 启动OAP Server时自动创建H2数据库
+2. 通过REST API插入测试数据：
+```bash
+curl -X POST http://localhost:12800/v3/segments -H 'Content-Type: application/json' -d '{
+  "traceId": "abc123",
+  "service": "demo-service",
+  "spans": [{
+    "operationName": "/test-endpoint",
+    "duration": 500
+  }]
+}'
+```
+3. 查询数据验证：
+```sql
+-- 通过H2控制台执行
+SELECT * FROM traces WHERE trace_id = 'abc123';
+```
+
+### 输出结果示例
+```
+TRACE_ID   | SERVICE      | SPAN_COUNT
+-----------+--------------+-----------
+abc123     | demo-service | 1
+```
+
+## 生产环境限制
+
+:::warning 重要限制
+1. **无集群支持**：单节点读写
+2. **性能瓶颈**：约支持1000TPS的写入
+3. **无数据分片**：长期运行会导致文件膨胀
+4. **无备份机制**：需自行实现数据导出
+:::
+
+## 管理技巧
+
+### 访问H2控制台
+1. 添加依赖到OAP启动配置：
+```yaml
+h2:
+  console:
+    enabled: true
+    port: 8082
+```
+2. 访问 `http://localhost:8082` 使用Web界面
+
+### 数据导出示例
+```bash
+# 运行时导出SQL
+java -cp h2*.jar org.h2.tools.Script -url jdbc:h2:file:/path/to/db -user sa -script backup.zip -options compression zip
+```
+
+## 总结
+
+H2数据库为SkyWalking提供了开箱即用的测试存储方案，适合：
+- 本地开发验证
+- CI/CD流水线测试
+- 功能演示环境
+
+:::caution 下一步建议
+1. 测试完成后应迁移到Elasticsearch/MySQL等生产级存储
+2. 使用[官方Docker镜像](https://hub.docker.com/_/h2)进行独立部署测试
+3. 通过`jdbc:h2:tcp://`模式实现多进程共享
+:::
+
+## 扩展练习
+1. 尝试配置H2文件模式并观察持久化效果
+2. 使用H2控制台执行复杂查询（如JOIN操作）
+3. 模拟高并发写入观察性能变化

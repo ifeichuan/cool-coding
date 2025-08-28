@@ -1,0 +1,107 @@
+---
+title: Seata 分库分表支持
+description: 了解Seata如何支持分库分表，以及如何在实际项目中应用这一特性。
+---
+
+# Seata 分库分表支持
+
+## 介绍
+
+在现代分布式系统中，随着数据量的增长，单一的数据库往往无法满足性能和存储的需求。分库分表（Sharding）是一种常见的解决方案，它将数据分散到多个数据库或表中，以提高系统的扩展性和性能。然而，分库分表也带来了事务管理的复杂性，尤其是在分布式事务场景下。
+
+Seata（Simple Extensible Autonomous Transaction Architecture）是一个开源的分布式事务解决方案，它提供了对分库分表的支持，帮助开发者在分库分表的环境中实现分布式事务的一致性。
+
+## 分库分表的基本概念
+
+分库分表通常分为两种方式：
+
+1. **垂直分库**：将不同的表分散到不同的数据库中。
+2. **水平分库**：将同一张表的数据分散到多个数据库或表中。
+
+在分库分表的环境中，事务管理变得更加复杂，因为事务可能涉及多个数据库或表。Seata通过其全局事务管理机制，确保在分库分表的环境中，事务的原子性和一致性。
+
+## Seata 的分库分表支持
+
+Seata通过以下机制支持分库分表：
+
+1. **全局事务管理**：Seata通过全局事务ID（XID）来管理跨多个数据库或表的事务。每个分支事务都会注册到全局事务中，确保所有分支事务要么全部提交，要么全部回滚。
+
+2. **分支事务协调**：Seata的TC（Transaction Coordinator）负责协调所有分支事务的状态，确保它们按照全局事务的要求执行。
+
+3. **数据源代理**：Seata通过数据源代理（DataSource Proxy）拦截SQL语句，并根据分库分表规则将请求路由到正确的数据库或表。
+
+## 实际案例
+
+假设我们有一个电商系统，订单表（`order`）被水平分表到两个数据库中：`order_db_0`和`order_db_1`。每个数据库中的订单表又被水平分表为`order_0`和`order_1`。
+
+### 分库分表规则
+
+```sql
+-- 分库规则：根据用户ID的奇偶性分库
+CREATE TABLE order_db_0.order_0 ( ... );
+CREATE TABLE order_db_0.order_1 ( ... );
+CREATE TABLE order_db_1.order_0 ( ... );
+CREATE TABLE order_db_1.order_1 ( ... );
+```
+
+### Seata 配置
+
+在Seata中，我们需要配置数据源代理和分库分表规则：
+
+```yaml
+seata:
+  enabled: true
+  application-id: order-service
+  tx-service-group: my_tx_group
+  service:
+    vgroup-mapping:
+      my_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+  config:
+    type: file
+    file:
+      name: file.conf
+  registry:
+    type: file
+    file:
+      name: registry.conf
+```
+
+### 代码示例
+
+以下是一个简单的Java代码示例，展示了如何在分库分表的环境中使用Seata进行事务管理：
+
+```java
+@GlobalTransactional
+public void createOrder(Long userId, Order order) {
+    // 根据用户ID选择正确的数据库和表
+    String dbName = "order_db_" + (userId % 2);
+    String tableName = "order_" + (userId % 2);
+
+    // 插入订单
+    orderMapper.insertOrder(dbName, tableName, order);
+
+    // 其他业务逻辑...
+}
+```
+
+### 输入与输出
+
+假设用户ID为`12345`，订单数据为`{orderId: 1, amount: 100.0}`，那么：
+
+- **输入**：`userId = 12345`, `order = {orderId: 1, amount: 100.0}`
+- **输出**：订单被插入到`order_db_1.order_1`表中。
+
+## 总结
+
+Seata通过其全局事务管理和数据源代理机制，有效地支持了分库分表环境下的分布式事务管理。开发者可以通过简单的配置和代码实现，确保在分库分表的环境中，事务的原子性和一致性。
+
+## 附加资源与练习
+
+- **练习**：尝试在一个分库分表的环境中配置Seata，并编写一个简单的分布式事务示例。
+- **资源**：
+  - [Seata官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+  - [分库分表的最佳实践](https://dbaplus.cn/news-11-2515-1.html)
+
+通过本文的学习，你应该已经掌握了Seata在分库分表环境中的基本应用。继续深入学习和实践，你将能够更好地应对分布式系统中的事务管理挑战。

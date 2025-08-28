@@ -1,0 +1,139 @@
+---
+title: Seata AT 原理
+description: 了解 Seata AT 模式的实现原理，掌握其如何通过自动补偿机制实现分布式事务的一致性。
+---
+
+# Seata AT 原理
+
+## 介绍
+
+Seata（Simple Extensible Autonomous Transaction Architecture）是一个开源的分布式事务解决方案，旨在解决微服务架构下的分布式事务问题。Seata 提供了多种事务模式，其中 **AT（Automatic Transaction）模式** 是最常用的一种。AT 模式通过自动补偿机制，实现了分布式事务的一致性，同时减少了开发者的工作量。
+
+本文将详细介绍 Seata AT 模式的原理，帮助初学者理解其工作机制，并通过实际案例展示其应用场景。
+
+---
+
+## AT 模式的核心概念
+
+### 1. 全局事务与分支事务
+
+在 Seata 中，一个分布式事务被称为 **全局事务**，而全局事务中的每个本地事务被称为 **分支事务**。全局事务由 **Transaction Coordinator（TC）** 管理，而分支事务由 **Resource Manager（RM）** 管理。
+
+### 2. 两阶段提交（2PC）
+
+AT 模式基于 **两阶段提交（2PC）** 协议实现分布式事务。两阶段提交分为以下两个阶段：
+
+1. **准备阶段（Prepare Phase）**：每个分支事务执行本地事务，并将执行结果报告给 TC。
+2. **提交/回滚阶段（Commit/Rollback Phase）**：TC 根据所有分支事务的执行结果，决定全局事务是提交还是回滚。
+
+### 3. 自动补偿机制
+
+AT 模式的核心是 **自动补偿机制**。在准备阶段，Seata 会记录每个分支事务的 **前置镜像（Before Image）** 和 **后置镜像（After Image）**。如果全局事务需要回滚，Seata 会根据这些镜像自动生成补偿 SQL，将数据恢复到事务开始前的状态。
+
+---
+
+## AT 模式的工作原理
+
+### 1. 全局事务的开始
+
+当一个全局事务开始时，TC 会为该事务生成一个唯一的 **XID（全局事务 ID）**，并将其传播到所有参与的分支事务中。
+
+```java
+// 示例：开启全局事务
+GlobalTransaction tx = GlobalTransactionContext.getCurrentOrCreate();
+tx.begin();
+```
+
+### 2. 分支事务的执行
+
+每个分支事务在执行本地事务时，Seata 会拦截 SQL 语句，记录前置镜像和后置镜像，并将这些信息保存到 **undo_log** 表中。
+
+```sql
+-- 示例：分支事务的 SQL 操作
+UPDATE account SET balance = balance - 100 WHERE id = 1;
+```
+
+在执行 SQL 之前，Seata 会记录前置镜像：
+
+```sql
+SELECT balance FROM account WHERE id = 1;
+```
+
+在执行 SQL 之后，Seata 会记录后置镜像：
+
+```sql
+SELECT balance FROM account WHERE id = 1;
+```
+
+### 3. 全局事务的提交或回滚
+
+当所有分支事务都执行成功后，TC 会通知所有分支事务提交。如果某个分支事务失败，TC 会通知所有分支事务回滚。
+
+在回滚时，Seata 会根据 `undo_log` 表中的镜像信息生成补偿 SQL，将数据恢复到事务开始前的状态。
+
+```sql
+-- 示例：生成补偿 SQL
+UPDATE account SET balance = balance + 100 WHERE id = 1;
+```
+
+---
+
+## 实际案例
+
+假设我们有一个电商系统，用户下单时需要扣减库存和扣减账户余额。这两个操作分别由两个微服务完成：
+
+1. **库存服务**：扣减商品库存。
+2. **账户服务**：扣减用户余额。
+
+使用 Seata AT 模式，我们可以确保这两个操作要么同时成功，要么同时回滚。
+
+```java
+// 示例：全局事务的执行
+GlobalTransaction tx = GlobalTransactionContext.getCurrentOrCreate();
+tx.begin();
+
+try {
+    // 调用库存服务
+    inventoryService.deductStock(productId, quantity);
+
+    // 调用账户服务
+    accountService.deductBalance(userId, amount);
+
+    // 提交全局事务
+    tx.commit();
+} catch (Exception e) {
+    // 回滚全局事务
+    tx.rollback();
+}
+```
+
+如果库存扣减成功但账户扣减失败，Seata 会自动生成补偿 SQL，将库存恢复到原始状态。
+
+---
+
+## 总结
+
+Seata AT 模式通过自动补偿机制，简化了分布式事务的开发。其核心原理包括：
+
+1. 全局事务与分支事务的管理。
+2. 基于两阶段提交的分布式事务协议。
+3. 通过前置镜像和后置镜像实现自动回滚。
+
+对于初学者来说，理解这些概念是掌握 Seata 的关键。通过实际案例，我们可以看到 AT 模式在微服务架构中的强大作用。
+
+---
+
+## 附加资源与练习
+
+### 资源
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务原理与实践](https://book.douban.com/subject/27665177/)
+
+### 练习
+1. 尝试在本地搭建一个 Seata 环境，并实现一个简单的分布式事务场景。
+2. 修改上述案例，增加更多的分支事务（如物流服务），并观察 Seata 的行为。
+3. 阅读 Seata 源码，深入了解其实现细节。
+
+:::tip
+如果你在练习中遇到问题，可以参考 Seata 的官方文档或社区论坛，获取更多帮助。
+:::

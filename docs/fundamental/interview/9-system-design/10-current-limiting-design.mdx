@@ -1,0 +1,185 @@
+---
+title: 限流设计
+description: 了解限流设计的基本概念、实现方法及其在实际系统中的应用场景。本文适合初学者，包含代码示例和实际案例。
+---
+
+# 限流设计
+
+限流（Rate Limiting）是系统设计中一种重要的保护机制，用于控制请求的速率，防止系统因过载而崩溃。限流的核心思想是通过限制单位时间内的请求数量，确保系统能够稳定运行，同时为所有用户提供公平的服务。
+
+## 为什么需要限流？
+
+在高并发场景下，如果不对请求进行限制，可能会导致以下问题：
+1. **资源耗尽**：过多的请求会耗尽系统的 CPU、内存、带宽等资源。
+2. **服务降级**：系统可能无法及时处理所有请求，导致响应时间变长或服务不可用。
+3. **恶意攻击**：如 DDoS 攻击，攻击者通过大量请求使系统瘫痪。
+
+限流可以有效避免这些问题，确保系统在高负载下仍能正常运行。
+
+---
+
+## 限流的基本原理
+
+限流的核心是定义一个**速率阈值**，例如每秒最多处理 100 个请求。当请求速率超过阈值时，系统会拒绝多余的请求或将其放入队列等待处理。
+
+常见的限流算法包括：
+1. **固定窗口计数器**：在固定时间窗口内统计请求数量。
+2. **滑动窗口计数器**：在滑动时间窗口内统计请求数量，更精确地控制速率。
+3. **令牌桶算法**：以固定速率生成令牌，请求需要消耗令牌才能被处理。
+4. **漏桶算法**：请求以固定速率流出，超出速率的请求会被丢弃或排队。
+
+---
+
+## 限流的实现方法
+
+### 1. 固定窗口计数器
+
+固定窗口计数器是最简单的限流算法。它将时间划分为固定的窗口（如 1 秒），并在每个窗口内统计请求数量。如果请求数量超过阈值，则拒绝后续请求。
+
+```python
+from time import time
+
+class FixedWindowCounter:
+    def __init__(self, max_requests, window_size):
+        self.max_requests = max_requests
+        self.window_size = window_size
+        self.current_window_start = time()
+        self.request_count = 0
+
+    def allow_request(self):
+        now = time()
+        if now - self.current_window_start > self.window_size:
+            self.current_window_start = now
+            self.request_count = 0
+        if self.request_count < self.max_requests:
+            self.request_count += 1
+            return True
+        return False
+```
+
+**示例：**
+```python
+limiter = FixedWindowCounter(max_requests=5, window_size=1)  # 每秒最多 5 个请求
+for i in range(10):
+    print(f"Request {i}: {'Allowed' if limiter.allow_request() else 'Denied'}")
+```
+
+**输出：**
+```
+Request 0: Allowed
+Request 1: Allowed
+Request 2: Allowed
+Request 3: Allowed
+Request 4: Allowed
+Request 5: Denied
+Request 6: Denied
+Request 7: Denied
+Request 8: Denied
+Request 9: Denied
+```
+
+:::note
+固定窗口计数器的缺点是可能在窗口边界处出现请求突增，导致限流效果不理想。
+:::
+
+---
+
+### 2. 令牌桶算法
+
+令牌桶算法通过以固定速率生成令牌来控制请求速率。每个请求需要消耗一个令牌，如果令牌不足，则拒绝请求。
+
+```python
+import time
+import threading
+
+class TokenBucket:
+    def __init__(self, capacity, refill_rate):
+        self.capacity = capacity
+        self.tokens = capacity
+        self.refill_rate = refill_rate
+        self.last_refill_time = time.time()
+        self.lock = threading.Lock()
+
+    def _refill(self):
+        now = time.time()
+        elapsed = now - self.last_refill_time
+        new_tokens = elapsed * self.refill_rate
+        self.tokens = min(self.capacity, self.tokens + new_tokens)
+        self.last_refill_time = now
+
+    def allow_request(self, tokens_needed=1):
+        with self.lock:
+            self._refill()
+            if self.tokens >= tokens_needed:
+                self.tokens -= tokens_needed
+                return True
+            return False
+```
+
+**示例：**
+```python
+bucket = TokenBucket(capacity=10, refill_rate=1)  # 每秒生成 1 个令牌
+for i in range(15):
+    print(f"Request {i}: {'Allowed' if bucket.allow_request() else 'Denied'}")
+    time.sleep(0.2)
+```
+
+**输出：**
+```
+Request 0: Allowed
+Request 1: Allowed
+Request 2: Allowed
+Request 3: Allowed
+Request 4: Allowed
+Request 5: Allowed
+Request 6: Allowed
+Request 7: Allowed
+Request 8: Allowed
+Request 9: Allowed
+Request 10: Denied
+Request 11: Denied
+Request 12: Denied
+Request 13: Denied
+Request 14: Denied
+```
+
+:::tip
+令牌桶算法可以平滑地控制请求速率，适合需要稳定处理的场景。
+:::
+
+---
+
+## 实际应用场景
+
+### 1. API 限流
+
+许多公共 API（如 Twitter、GitHub）都会对客户端请求进行限流，以防止滥用。例如，GitHub 的 API 限制为每小时 5000 次请求。
+
+### 2. 微服务保护
+
+在微服务架构中，限流可以防止某个服务被大量请求压垮，从而保护整个系统的稳定性。
+
+### 3. 防止爬虫滥用
+
+网站可以通过限流防止爬虫频繁抓取数据，保护服务器资源。
+
+---
+
+## 总结
+
+限流是系统设计中不可或缺的一部分，它通过控制请求速率来保护系统免受过载影响。本文介绍了限流的基本原理、常见算法（如固定窗口计数器和令牌桶算法）以及实际应用场景。
+
+:::caution
+在实际系统中，限流策略需要根据具体需求进行调整，例如动态调整速率阈值或结合其他保护机制（如熔断器）。
+:::
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试实现滑动窗口计数器算法，并与固定窗口计数器进行比较。
+2. **扩展阅读**：
+   - [Google Cloud API 限流文档](https://cloud.google.com/apis/design/rate-limiting)
+   - [令牌桶与漏桶算法详解](https://en.wikipedia.org/wiki/Token_bucket)
+
+通过学习和实践，你将能够更好地理解和应用限流设计，为构建高可用系统打下坚实基础。

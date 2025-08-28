@@ -1,0 +1,304 @@
+---
+title: C++ 11委托构造函数
+description: 了解C++11引入的委托构造函数特性，如何避免代码重复并简化构造函数的编写。
+---
+
+# C++ 11委托构造函数
+
+## 什么是委托构造函数
+
+在C++11之前，如果一个类有多个构造函数，它们之间经常会有许多重复的初始化代码。为了避免这种代码冗余，程序员通常会创建一个私有的初始化函数，然后在每个构造函数中调用它。C++11引入了**委托构造函数**（Delegating Constructor）的概念，使一个构造函数可以调用同一个类中的另一个构造函数，从而实现代码重用，提高代码的可维护性和可读性。
+
+## 基本语法
+
+委托构造函数使用成员初始化列表语法，但不是初始化成员变量，而是调用同一个类的另一个构造函数：
+
+```cpp
+class MyClass {
+private:
+    int x;
+    double y;
+    std::string z;
+
+public:
+    // 主构造函数
+    MyClass(int a, double b, const std::string& c) : x(a), y(b), z(c) {
+        // 完整的初始化工作
+    }
+
+    // 委托构造函数
+    MyClass() : MyClass(0, 0.0, "") {
+        // 可能有一些额外的操作
+    }
+
+    // 另一个委托构造函数
+    MyClass(int a) : MyClass(a, 0.0, "") {
+        // 可能有一些额外的操作
+    }
+};
+```
+
+在上面的例子中，无参构造函数和只接受一个`int`参数的构造函数都委托给了接受三个参数的"主"构造函数来完成初始化工作。
+
+## 委托构造的执行顺序
+
+当使用委托构造函数时，执行顺序如下：
+
+1. 首先执行被委托的构造函数
+2. 被委托构造函数完成后，执行委托构造函数中的其他语句
+
+这个顺序很重要，因为你可能想在委托构造函数中添加一些特定于该构造函数的额外初始化或处理逻辑。
+
+:::note
+委托构造函数和被委托的构造函数之间不能形成循环调用，否则会导致无限递归，进而引起栈溢出。
+:::
+
+## 与成员初始化列表的区别
+
+委托构造函数不能同时使用成员初始化列表来初始化其他成员变量。也就是说，以下代码是**错误**的：
+
+```cpp
+class Wrong {
+    int x, y;
+public:
+    Wrong(int a, int b) : x(a), y(b) {}
+    
+    // 错误: 不能同时委托构造和初始化成员变量
+    Wrong(int a) : Wrong(a, 0), x(a) {}  // 编译错误
+};
+```
+
+一个构造函数要么使用委托构造，要么使用成员初始化列表，不能两者兼得。
+
+## 实际应用案例
+
+### 案例1：带默认参数的复杂对象
+
+假设我们有一个表示人的类，具有多个属性，但大多数情况下只需要设置一部分属性：
+
+```cpp
+class Person {
+private:
+    std::string name;
+    int age;
+    std::string address;
+    std::string phoneNumber;
+    
+public:
+    // 主构造函数，包含所有参数
+    Person(const std::string& n, int a, const std::string& addr, const std::string& phone)
+        : name(n), age(a), address(addr), phoneNumber(phone) {
+        std::cout << "创建了一个完整的Person对象" << std::endl;
+    }
+    
+    // 只有姓名和年龄的构造函数
+    Person(const std::string& n, int a)
+        : Person(n, a, "", "") {
+        std::cout << "创建了一个只有姓名和年龄的Person对象" << std::endl;
+    }
+    
+    // 只有姓名的构造函数
+    Person(const std::string& n)
+        : Person(n, 0, "", "") {
+        std::cout << "创建了一个只有姓名的Person对象" << std::endl;
+    }
+    
+    void display() const {
+        std::cout << "姓名: " << name << ", 年龄: " << age
+                  << ", 地址: " << (address.empty() ? "未知" : address)
+                  << ", 电话: " << (phoneNumber.empty() ? "未知" : phoneNumber)
+                  << std::endl;
+    }
+};
+```
+
+使用这个类：
+
+```cpp
+#include <iostream>
+#include <string>
+
+int main() {
+    Person p1("张三", 30, "北京市海淀区", "12345678901");
+    Person p2("李四", 25);
+    Person p3("王五");
+    
+    std::cout << "\n人员信息：" << std::endl;
+    p1.display();
+    p2.display();
+    p3.display();
+    
+    return 0;
+}
+```
+
+输出：
+
+```
+创建了一个完整的Person对象
+创建了一个只有姓名和年龄的Person对象
+创建了一个只有姓名的Person对象
+
+人员信息：
+姓名: 张三, 年龄: 30, 地址: 北京市海淀区, 电话: 12345678901
+姓名: 李四, 年龄: 25, 地址: 未知, 电话: 未知
+姓名: 王五, 年龄: 0, 地址: 未知, 电话: 未知
+```
+
+### 案例2：复杂资源管理
+
+当类需要管理复杂资源时，委托构造函数特别有用：
+
+```cpp
+class ResourceManager {
+private:
+    int* data;
+    size_t size;
+    
+    void logAllocation() const {
+        std::cout << "分配了 " << size << " 个整数的内存" << std::endl;
+    }
+    
+public:
+    // 主构造函数
+    ResourceManager(size_t n) : size(n) {
+        data = new int[size]();  // 分配并初始化为0
+        logAllocation();
+    }
+    
+    // 使用默认大小
+    ResourceManager() : ResourceManager(100) {
+        std::cout << "使用默认大小创建资源管理器" << std::endl;
+    }
+    
+    // 从数组初始化
+    ResourceManager(const int* arr, size_t n) : ResourceManager(n) {
+        for (size_t i = 0; i < n; ++i) {
+            data[i] = arr[i];
+        }
+        std::cout << "从数组初始化资源" << std::endl;
+    }
+    
+    // 析构函数
+    ~ResourceManager() {
+        delete[] data;
+        std::cout << "释放了资源" << std::endl;
+    }
+    
+    int sum() const {
+        int total = 0;
+        for (size_t i = 0; i < size; ++i) {
+            total += data[i];
+        }
+        return total;
+    }
+};
+```
+
+使用这个类：
+
+```cpp
+int main() {
+    {
+        ResourceManager rm1;
+        std::cout << "默认资源管理器的总和: " << rm1.sum() << std::endl;
+    }
+    
+    std::cout << "\n--------------------\n" << std::endl;
+    
+    {
+        int values[] = {1, 2, 3, 4, 5};
+        ResourceManager rm2(values, 5);
+        std::cout << "自定义资源管理器的总和: " << rm2.sum() << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+输出：
+
+```
+分配了 100 个整数的内存
+使用默认大小创建资源管理器
+默认资源管理器的总和: 0
+释放了资源
+
+--------------------
+
+分配了 5 个整数的内存
+从数组初始化资源
+自定义资源管理器的总和: 15
+释放了资源
+```
+
+## 委托构造函数的优点
+
+1. **减少代码重复**：相同的初始化代码只需写一次
+2. **提高代码维护性**：修改初始化逻辑时，只需更改一处
+3. **确保一致性**：所有构造函数使用相同的初始化路径
+4. **简化代码**：不再需要额外的私有初始化函数
+
+## 委托构造函数的注意事项
+
+1. **避免循环委托**：构造函数之间不能形成循环委托
+2. **委托构造函数调用完成后才执行其自身的函数体**：这意味着初始化顺序可能与预期不同
+3. **不能同时委托构造和使用成员初始化列表**：必须二选一
+
+## 与继承的构造函数的区别
+
+不要将委托构造函数与C++11中另一个特性"继承构造函数"混淆：
+
+- **委托构造函数**：在同一个类内部，一个构造函数调用另一个构造函数
+- **继承构造函数**：子类继承父类的构造函数，使用`using Base::Base;`语法
+
+## 总结
+
+C++11的委托构造函数是一个强大的特性，它通过允许一个构造函数调用同一个类中的另一个构造函数，有效减少了代码冗余，提高了代码可维护性。这一特性在处理多种初始化情况的复杂类中特别有用，使得构造函数代码更加简洁和一致。
+
+通过委托构造函数，我们可以编写更加优雅、清晰的代码，遵循DRY（Don't Repeat Yourself）原则，同时确保对象初始化的一致性和正确性。
+
+## 练习
+
+1. 创建一个`Rectangle`类，它有长度和宽度两个属性。编写至少三个构造函数，并使用委托构造函数来避免代码重复。
+
+2. 修改以下类，使用委托构造函数代替重复的初始化代码：
+   ```cpp
+   class Student {
+   private:
+       std::string name;
+       int age;
+       double gpa;
+       
+   public:
+       Student() {
+           name = "Unknown";
+           age = 0;
+           gpa = 0.0;
+       }
+       
+       Student(const std::string& n) {
+           name = n;
+           age = 0;
+           gpa = 0.0;
+       }
+       
+       Student(const std::string& n, int a) {
+           name = n;
+           age = a;
+           gpa = 0.0;
+       }
+       
+       Student(const std::string& n, int a, double g) {
+           name = n;
+           age = a;
+           gpa = g;
+       }
+   };
+   ```
+
+3. 思考问题：在什么情况下，委托构造函数比使用私有初始化函数更有优势？有没有情况下私有初始化函数仍然是更好的选择？
+
+:::tip
+记住：编写构造函数时，总是考虑委托给最全面的构造函数，这样可以确保对象的一致性初始化。
+:::

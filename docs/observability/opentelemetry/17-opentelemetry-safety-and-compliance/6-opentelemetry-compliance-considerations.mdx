@@ -1,0 +1,107 @@
+---
+title: OpenTelemetry 合规性考虑
+description: 了解OpenTelemetry在数据收集与传输中的合规性要求，包括GDPR、HIPAA等法规的实践指南。
+---
+
+## 引言
+
+OpenTelemetry作为云原生可观测性的核心工具，在收集应用程序的追踪（Traces）、指标（Metrics）和日志（Logs）时，可能涉及敏感数据处理。合规性（Compliance）确保这些操作符合法律法规（如GDPR、HIPAA）和行业标准。本文将介绍OpenTelemetry在设计和部署时需注意的关键合规性要求。
+
+:::note 关键术语
+- **合规性**：遵循法律、法规或行业标准的行为。
+- **PII（个人身份信息）**：如姓名、邮箱等可直接或间接识别个人的数据。
+:::
+
+---
+
+## 1. 数据隐私与法规
+
+### GDPR（通用数据保护条例）
+适用于欧盟用户数据的场景。OpenTelemetry需避免未经授权收集PII，例如：
+```python
+# 错误示例：在Span属性中记录用户邮箱
+span.set_attribute("user.email", "user@example.com")  # 违反GDPR
+
+# 正确做法：使用匿名标识符
+span.set_attribute("user.id", "anon-12345")  # 合规
+```
+
+### HIPAA（健康保险可携性和责任法案）
+涉及医疗健康数据时，需确保加密传输和存储：
+```yaml
+# OpenTelemetry Collector配置示例（启用TLS）
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        tls:
+          cert_file: server.crt
+          key_file: server.key
+```
+
+---
+
+## 2. 敏感数据处理策略
+
+### 数据脱敏（Redaction）
+通过处理器过滤敏感字段：
+```go
+// 使用OpenTelemetry Collector的transform处理器
+processors:
+  transform:
+    traces:
+      queries:
+        - "delete(attributes[\"credit_card_number\"])"  // 删除信用卡号字段
+```
+
+### 采样（Sampling）
+减少数据量以降低合规风险：
+```javascript
+// 基于概率的采样（仅收集10%的Trace数据）
+const sampler = new ParentBasedSampler({
+  root: new TraceIdRatioBasedSampler(0.1)
+});
+```
+
+---
+
+## 3. 实际案例：电商平台合规实践
+
+### 场景描述
+一个跨国电商平台使用OpenTelemetry监控订单流程，需同时满足GDPR和PCI DSS（支付卡行业标准）。
+
+### 实施步骤
+1. **识别敏感数据**：订单中的地址、支付信息。
+2. **配置脱敏规则**：
+   ```yaml
+   processors:
+     attributes/redact:
+       actions:
+         - key: "user.address"
+           action: delete
+   ```
+3. **审计日志加密**：
+   ```mermaid
+   flowchart LR
+     A[应用程序] --加密HTTPS--> B[Collector]
+     B --TLS加密--> C[存储后端]
+   ```
+
+---
+
+## 4. 总结与资源
+
+### 核心原则
+- **最小化收集**：仅采集必要数据。
+- **端到端加密**：传输和存储中使用TLS/SSL。
+- **访问控制**：限制数据访问权限。
+
+### 延伸阅读
+- [OpenTelemetry安全文档](https://opentelemetry.io/docs/concepts/security/)
+- [GDPR官方指南](https://gdpr-info.eu/)
+- 练习：在本地环境中配置一个脱敏处理器，过滤掉HTTP请求头中的`Authorization`字段。
+
+:::warning 注意
+合规性要求可能因地区而异，部署前请咨询法律专家。
+:::

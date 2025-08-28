@@ -1,0 +1,84 @@
+---
+title: Seata TCC空回滚
+description: 了解 Seata TCC 模式中的空回滚概念，掌握其原理、应用场景及如何避免空回滚问题。
+---
+
+## 什么是 Seata TCC 空回滚？
+
+在分布式事务中，Seata 的 TCC（Try-Confirm-Cancel）模式是一种常见的事务处理方式。TCC 模式通过三个阶段（Try、Confirm、Cancel）来确保事务的一致性。然而，在某些情况下，可能会出现 **空回滚** 的问题。
+
+**空回滚** 指的是在 TCC 事务中，Cancel 阶段被触发，但实际上 Try 阶段并未执行或未成功执行。这种情况下，Cancel 操作可能会对系统状态产生不必要的影响，甚至导致数据不一致。
+
+## 空回滚的原因
+
+空回滚通常发生在以下场景中：
+
+1. **Try 阶段未执行**：由于网络问题或系统异常，Try 阶段未能成功执行，但事务管理器仍然触发了 Cancel 阶段。
+2. **Try 阶段执行失败**：Try 阶段执行失败后，事务管理器触发了 Cancel 阶段，但 Cancel 操作可能会对未成功执行的 Try 操作进行回滚。
+
+## 如何避免空回滚？
+
+为了避免空回滚问题，可以在 Try 阶段记录事务状态，并在 Cancel 阶段检查该状态。如果 Try 阶段未执行或未成功执行，则 Cancel 阶段可以跳过回滚操作。
+
+### 代码示例
+
+以下是一个简单的 TCC 事务示例，展示了如何避免空回滚：
+
+```java
+public class AccountServiceTCC {
+
+    private Map<String, Boolean> tryStatusMap = new ConcurrentHashMap<>();
+
+    @TwoPhaseBusinessAction(name = "deduct", commitMethod = "confirm", rollbackMethod = "cancel")
+    public void deduct(BusinessActionContext context, String accountId, double amount) {
+        // Try 阶段：记录事务状态
+        tryStatusMap.put(context.getXid(), true);
+        // 执行扣款操作
+        // ...
+    }
+
+    public boolean confirm(BusinessActionContext context) {
+        // Confirm 阶段：提交事务
+        tryStatusMap.remove(context.getXid());
+        return true;
+    }
+
+    public boolean cancel(BusinessActionContext context) {
+        // Cancel 阶段：检查 Try 阶段是否执行
+        if (tryStatusMap.containsKey(context.getXid())) {
+            // 执行回滚操作
+            // ...
+            tryStatusMap.remove(context.getXid());
+        }
+        return true;
+    }
+}
+```
+
+### 输入与输出
+
+- **输入**：`deduct` 方法被调用，尝试扣款。
+- **输出**：
+  - 如果 `deduct` 成功执行，`confirm` 方法将被调用以提交事务。
+  - 如果 `deduct` 失败或未执行，`cancel` 方法将被调用，但会检查 `tryStatusMap` 以避免空回滚。
+
+## 实际应用场景
+
+假设你正在开发一个电商系统，用户下单后需要扣减库存。如果扣减库存的 Try 阶段由于网络问题未能执行，但事务管理器仍然触发了 Cancel 阶段，这时如果没有处理空回滚问题，可能会导致库存数据不一致。
+
+通过在上述代码中引入 `tryStatusMap`，可以确保 Cancel 阶段仅在 Try 阶段成功执行时才进行回滚操作，从而避免空回滚问题。
+
+## 总结
+
+Seata TCC 模式中的空回滚是一个需要特别注意的问题。通过在 Try 阶段记录事务状态，并在 Cancel 阶段检查该状态，可以有效避免空回滚问题。理解并正确处理空回滚，对于确保分布式事务的一致性至关重要。
+
+## 附加资源与练习
+
+- **练习**：尝试在本地环境中模拟一个 TCC 事务，并故意制造空回滚场景，观察系统行为。
+- **资源**：
+  - [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+  - [分布式事务与 TCC 模式详解](https://dubbo.apache.org/zh/docs/advanced/tcc-transaction/)
+
+:::tip
+在实际开发中，建议结合日志记录和监控系统，实时跟踪 TCC 事务的执行状态，以便及时发现和处理空回滚问题。
+:::

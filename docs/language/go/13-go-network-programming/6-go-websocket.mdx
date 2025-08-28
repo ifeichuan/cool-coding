@@ -1,0 +1,207 @@
+---
+title: Go WebSocket
+description: 学习如何在 Go 中使用 WebSocket 实现实时通信。本文将从基础概念讲起，逐步深入，并提供代码示例和实际应用场景。
+---
+
+# Go WebSocket
+
+WebSocket 是一种在单个 TCP 连接上进行全双工通信的协议。与传统的 HTTP 请求-响应模式不同，WebSocket 允许服务器和客户端之间进行实时、双向的数据传输。这使得 WebSocket 成为构建实时应用程序（如聊天应用、在线游戏和实时通知系统）的理想选择。
+
+## WebSocket 基础
+
+WebSocket 协议通过 HTTP 握手建立连接，之后升级为 WebSocket 协议。一旦连接建立，客户端和服务器可以随时发送数据，而不需要等待对方的请求。
+
+### WebSocket 握手
+
+WebSocket 连接始于一个 HTTP 请求，其中包含一个特殊的 `Upgrade` 头，指示客户端希望将连接升级为 WebSocket。服务器如果支持 WebSocket，则会响应一个 `101 Switching Protocols` 状态码，表示连接已成功升级。
+
+```http
+GET /chat HTTP/1.1
+Host: example.com
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+Sec-WebSocket-Version: 13
+```
+
+服务器响应：
+
+```http
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+```
+
+### WebSocket 数据帧
+
+WebSocket 数据以帧的形式传输。帧可以是文本、二进制数据或控制帧（如关闭连接或 ping/pong 帧）。WebSocket 协议定义了如何将这些帧编码和解码。
+
+## 在 Go 中使用 WebSocket
+
+Go 标准库中没有直接支持 WebSocket 的包，但我们可以使用 `gorilla/websocket` 包来实现 WebSocket 功能。
+
+### 安装 `gorilla/websocket`
+
+首先，使用以下命令安装 `gorilla/websocket` 包：
+
+```bash
+go get github.com/gorilla/websocket
+```
+
+### 创建 WebSocket 服务器
+
+以下是一个简单的 WebSocket 服务器示例，它接受客户端连接并回显收到的消息。
+
+```go
+package main
+
+import (
+    "log"
+    "net/http"
+    "github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+    CheckOrigin: func(r *http.Request) bool {
+        return true
+    },
+}
+
+func echoHandler(w http.ResponseWriter, r *http.Request) {
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        log.Println("Upgrade error:", err)
+        return
+    }
+    defer conn.Close()
+
+    for {
+        messageType, message, err := conn.ReadMessage()
+        if err != nil {
+            log.Println("Read error:", err)
+            break
+        }
+        log.Printf("Received: %s", message)
+        if err := conn.WriteMessage(messageType, message); err != nil {
+            log.Println("Write error:", err)
+            break
+        }
+    }
+}
+
+func main() {
+    http.HandleFunc("/echo", echoHandler)
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+```
+
+### 创建 WebSocket 客户端
+
+以下是一个简单的 WebSocket 客户端示例，它连接到服务器并发送消息。
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+    "os/signal"
+    "time"
+    "github.com/gorilla/websocket"
+)
+
+func main() {
+    interrupt := make(chan os.Signal, 1)
+    signal.Notify(interrupt, os.Interrupt)
+
+    url := "ws://localhost:8080/echo"
+    conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+    if err != nil {
+        log.Fatal("Dial error:", err)
+    }
+    defer conn.Close()
+
+    done := make(chan struct{})
+
+    go func() {
+        defer close(done)
+        for {
+            _, message, err := conn.ReadMessage()
+            if err != nil {
+                log.Println("Read error:", err)
+                return
+            }
+            log.Printf("Received: %s", message)
+        }
+    }()
+
+    ticker := time.NewTicker(time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-done:
+            return
+        case t := <-ticker.C:
+            err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
+            if err != nil {
+                log.Println("Write error:", err)
+                return
+            }
+        case <-interrupt:
+            log.Println("Interrupt received, closing connection...")
+            err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+            if err != nil {
+                log.Println("Write close error:", err)
+                return
+            }
+            select {
+            case <-done:
+            case <-time.After(time.Second):
+            }
+            return
+        }
+    }
+}
+```
+
+### 运行示例
+
+1. 启动服务器：
+
+```bash
+go run server.go
+```
+
+2. 启动客户端：
+
+```bash
+go run client.go
+```
+
+客户端将每秒向服务器发送一条消息，并打印服务器返回的消息。
+
+## 实际应用场景
+
+WebSocket 在许多实时应用中都有广泛的应用，例如：
+
+- **聊天应用**：用户可以在聊天室中实时发送和接收消息。
+- **在线游戏**：玩家可以实时交互，游戏状态可以实时更新。
+- **实时通知**：系统可以向用户推送实时通知，如新消息或系统更新。
+
+## 总结
+
+WebSocket 提供了一种高效的方式来实现客户端和服务器之间的实时通信。通过 `gorilla/websocket` 包，我们可以轻松地在 Go 中实现 WebSocket 功能。本文介绍了 WebSocket 的基础知识，并提供了一个简单的服务器和客户端示例。
+
+## 附加资源
+
+- [gorilla/websocket 官方文档](https://pkg.go.dev/github.com/gorilla/websocket)
+- [WebSocket 协议 RFC 6455](https://tools.ietf.org/html/rfc6455)
+- [Go 官方文档](https://golang.org/doc/)
+
+## 练习
+
+1. 修改服务器代码，使其能够处理多个客户端连接。
+2. 扩展客户端代码，使其能够从标准输入读取消息并发送到服务器。
+3. 实现一个简单的聊天应用，允许多个用户在同一个聊天室中交流。

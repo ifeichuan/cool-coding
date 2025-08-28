@@ -1,0 +1,158 @@
+---
+title: Seata 表结构设计
+description: 了解Seata分布式事务解决方案中的表结构设计，掌握其核心表的作用与设计原理，帮助初学者快速上手Seata存储模式。
+---
+
+# Seata 表结构设计
+
+## 介绍
+
+Seata 是一款开源的分布式事务解决方案，旨在解决微服务架构下的分布式事务问题。在 Seata 中，存储模式（Store Mode）是一个关键概念，它决定了事务日志和状态信息的存储方式。Seata 支持多种存储模式，包括文件、数据库等。本文将重点介绍 Seata 在数据库存储模式下的表结构设计。
+
+Seata 的数据库存储模式主要依赖于几张核心表来记录事务的状态和日志信息。这些表的设计直接影响到 Seata 的性能和可靠性。接下来，我们将逐步讲解这些表的结构及其作用。
+
+## 核心表结构
+
+Seata 的数据库存储模式主要包含以下三张核心表：
+
+1. **全局事务表（global_table）**
+2. **分支事务表（branch_table）**
+3. **锁表（lock_table）**
+
+### 1. 全局事务表（global_table）
+
+全局事务表用于记录分布式事务的全局状态信息。每个分布式事务都会在全局事务表中生成一条记录。
+
+```sql
+CREATE TABLE IF NOT EXISTS `global_table` (
+  `xid` VARCHAR(128) NOT NULL COMMENT '全局事务ID',
+  `transaction_id` BIGINT COMMENT '事务ID',
+  `status` TINYINT NOT NULL COMMENT '全局事务状态',
+  `application_id` VARCHAR(32) COMMENT '应用ID',
+  `transaction_service_group` VARCHAR(32) COMMENT '事务服务组',
+  `transaction_name` VARCHAR(128) COMMENT '事务名称',
+  `timeout` INT COMMENT '超时时间',
+  `begin_time` BIGINT COMMENT '开始时间',
+  `application_data` VARCHAR(2000) COMMENT '应用数据',
+  `gmt_create` DATETIME COMMENT '创建时间',
+  `gmt_modified` DATETIME COMMENT '修改时间',
+  PRIMARY KEY (`xid`),
+  KEY `idx_gmt_modified_status` (`gmt_modified`, `status`),
+  KEY `idx_transaction_id` (`transaction_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+```
+
+- **xid**: 全局事务的唯一标识符。
+- **transaction_id**: 事务的唯一ID。
+- **status**: 事务的当前状态（如：开始、提交、回滚等）。
+- **application_id**: 发起事务的应用ID。
+- **transaction_service_group**: 事务所属的服务组。
+- **transaction_name**: 事务的名称。
+- **timeout**: 事务的超时时间。
+- **begin_time**: 事务的开始时间。
+- **application_data**: 应用自定义的数据。
+- **gmt_create**: 记录的创建时间。
+- **gmt_modified**: 记录的修改时间。
+
+:::tip
+全局事务表是 Seata 中最重要的表之一，它记录了每个分布式事务的全局状态。通过这张表，Seata 可以追踪事务的执行情况，并在需要时进行回滚或提交。
+:::
+
+### 2. 分支事务表（branch_table）
+
+分支事务表用于记录每个全局事务下的分支事务信息。每个分支事务都会在分支事务表中生成一条记录。
+
+```sql
+CREATE TABLE IF NOT EXISTS `branch_table` (
+  `branch_id` BIGINT NOT NULL COMMENT '分支事务ID',
+  `xid` VARCHAR(128) NOT NULL COMMENT '全局事务ID',
+  `transaction_id` BIGINT COMMENT '事务ID',
+  `resource_group_id` VARCHAR(32) COMMENT '资源组ID',
+  `resource_id` VARCHAR(256) COMMENT '资源ID',
+  `branch_type` VARCHAR(8) COMMENT '分支事务类型',
+  `status` TINYINT COMMENT '分支事务状态',
+  `client_id` VARCHAR(64) COMMENT '客户端ID',
+  `application_data` VARCHAR(2000) COMMENT '应用数据',
+  `gmt_create` DATETIME COMMENT '创建时间',
+  `gmt_modified` DATETIME COMMENT '修改时间',
+  PRIMARY KEY (`branch_id`),
+  KEY `idx_xid` (`xid`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+```
+
+- **branch_id**: 分支事务的唯一标识符。
+- **xid**: 关联的全局事务ID。
+- **transaction_id**: 事务的唯一ID。
+- **resource_group_id**: 资源组ID。
+- **resource_id**: 资源ID。
+- **branch_type**: 分支事务的类型（如：AT、TCC等）。
+- **status**: 分支事务的当前状态。
+- **client_id**: 客户端ID。
+- **application_data**: 应用自定义的数据。
+- **gmt_create**: 记录的创建时间。
+- **gmt_modified**: 记录的修改时间。
+
+:::note
+分支事务表记录了每个分支事务的详细信息，Seata 通过这些信息来管理分支事务的执行和状态。
+:::
+
+### 3. 锁表（lock_table）
+
+锁表用于记录分布式事务中的资源锁信息，确保在并发环境下资源的一致性。
+
+```sql
+CREATE TABLE IF NOT EXISTS `lock_table` (
+  `row_key` VARCHAR(128) NOT NULL COMMENT '行键',
+  `xid` VARCHAR(96) COMMENT '全局事务ID',
+  `transaction_id` BIGINT COMMENT '事务ID',
+  `branch_id` BIGINT NOT NULL COMMENT '分支事务ID',
+  `resource_id` VARCHAR(256) COMMENT '资源ID',
+  `table_name` VARCHAR(32) COMMENT '表名',
+  `pk` VARCHAR(36) COMMENT '主键',
+  `gmt_create` DATETIME COMMENT '创建时间',
+  `gmt_modified` DATETIME COMMENT '修改时间',
+  PRIMARY KEY (`row_key`),
+  KEY `idx_branch_id` (`branch_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+```
+
+- **row_key**: 锁的唯一标识符。
+- **xid**: 关联的全局事务ID。
+- **transaction_id**: 事务的唯一ID。
+- **branch_id**: 分支事务的唯一标识符。
+- **resource_id**: 资源ID。
+- **table_name**: 表名。
+- **pk**: 主键。
+- **gmt_create**: 记录的创建时间。
+- **gmt_modified**: 记录的修改时间。
+
+:::caution
+锁表是 Seata 实现分布式锁的关键表，它确保了在分布式环境下资源的一致性。在高并发场景下，锁表的设计和性能优化尤为重要。
+:::
+
+## 实际应用场景
+
+假设我们有一个电商系统，用户下单时需要同时扣减库存和生成订单。这两个操作分别由库存服务和订单服务处理，属于不同的微服务。为了保证这两个操作的一致性，我们可以使用 Seata 来管理这个分布式事务。
+
+1. **全局事务开始**：用户下单时，Seata 会生成一个全局事务，并在 `global_table` 中插入一条记录。
+2. **分支事务执行**：库存服务和订单服务分别执行扣减库存和生成订单的操作，并在 `branch_table` 中插入对应的分支事务记录。
+3. **资源锁定**：在扣减库存时，Seata 会在 `lock_table` 中插入一条锁记录，确保库存资源的一致性。
+4. **事务提交或回滚**：如果所有分支事务都执行成功，Seata 会提交全局事务；如果任何一个分支事务失败，Seata 会回滚全局事务。
+
+## 总结
+
+Seata 的表结构设计是其分布式事务解决方案的核心部分。通过 `global_table`、`branch_table` 和 `lock_table`，Seata 能够有效地管理分布式事务的状态、分支事务的执行以及资源的锁定。理解这些表的结构和作用，对于掌握 Seata 的使用和优化至关重要。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务原理与实践](https://book.douban.com/subject/30443551/)
+
+## 练习
+
+1. 尝试在本地数据库中创建 Seata 的三张核心表，并插入一些测试数据。
+2. 模拟一个分布式事务场景，观察 Seata 如何通过这三张表来管理事务的状态和资源锁。
+
+:::warning
+在实际生产环境中，Seata 的表结构设计需要根据具体的业务场景进行优化，特别是在高并发和大数据量的情况下。
+:::

@@ -1,0 +1,152 @@
+---
+title: Logstash与Loki集成
+description: 学习如何将Logstash与Grafana Loki集成，实现高效的日志收集、处理和存储。
+---
+
+# Logstash与Loki集成
+
+## 介绍
+
+在现代日志管理系统中，**Logstash** 是一个强大的数据处理工具，而 **Grafana Loki** 是一个轻量级的日志聚合系统。通过将两者集成，您可以利用Logstash的丰富插件生态系统来处理日志，然后将处理后的日志高效地发送到Loki进行存储和查询。本指南将介绍如何配置Logstash与Loki的集成，并提供实际案例和代码示例。
+
+## 为什么需要Logstash与Loki集成？
+
+Logstash擅长日志的**收集、解析和转换**，而Loki专注于**日志的存储和查询**。通过集成两者，您可以：
+- 使用Logstash的插件（如Grok、Mutate）预处理日志。
+- 将日志发送到Loki，利用其高效的索引和查询能力。
+- 在Grafana中统一可视化日志和指标。
+
+## 配置Logstash与Loki集成
+
+### 1. 安装Logstash Loki输出插件
+Logstash默认不包含Loki输出插件，需要手动安装：
+```bash
+bin/logstash-plugin install logstash-output-loki
+```
+
+### 2. 配置Logstash管道
+以下是一个完整的Logstash配置示例，从文件读取日志并发送到Loki：
+```ruby
+input {
+  file {
+    path => "/var/log/nginx/access.log"
+    start_position => "beginning"
+  }
+}
+
+filter {
+  grok {
+    match => { "message" => "%{COMBINEDAPACHELOG}" }
+  }
+  mutate {
+    add_field => {
+      "app" => "nginx"
+    }
+  }
+}
+
+output {
+  loki {
+    url => "http://localhost:3100/loki/api/v1/push"
+    batch_size => 102400
+    batch_wait => 10
+    labels => {
+      "app" => "%{app}",
+      "host" => "%{host}"
+    }
+  }
+}
+```
+
+:::note
+- `batch_size` 和 `batch_wait` 控制日志发送的批处理行为。
+- `labels` 是Loki中用于索引日志的关键字段，需谨慎选择。
+:::
+
+### 3. 日志标签设计
+Loki使用标签（labels）来索引日志。设计标签时需注意：
+- 标签应该是有限的、有界的值（如`app=nginx`，而不是`message=...`）。
+- 避免高基数标签（如用户ID、时间戳）。
+
+## 实际案例：Nginx日志收集
+
+### 场景描述
+假设您需要收集Nginx访问日志，解析字段（如状态码、请求路径），并将其发送到Loki。
+
+### Logstash配置
+```ruby
+filter {
+  grok {
+    match => { "message" => "%{COMBINEDAPACHELOG}" }
+  }
+  date {
+    match => [ "timestamp", "dd/MMM/yyyy:HH:mm:ss Z" ]
+  }
+  mutate {
+    add_field => {
+      "path" => "%{request}"
+      "status" => "%{response}"
+    }
+    remove_field => [ "timestamp" ]
+  }
+}
+
+output {
+  loki {
+    url => "http://loki:3100/loki/api/v1/push"
+    labels => {
+      "app" => "nginx",
+      "status" => "%{status}",
+      "path" => "%{path}"
+    }
+  }
+}
+```
+
+### 在Grafana中查询
+配置完成后，您可以在Grafana中使用LogQL查询：
+```
+{app="nginx"} |= "GET /api/v1/users"
+```
+
+## 高级配置
+
+### 处理多行日志
+对于堆栈跟踪或多行日志，使用`multiline`插件：
+```ruby
+input {
+  file {
+    path => "/var/log/java/app.log"
+    codec => multiline {
+      pattern => "^%{TIMESTAMP_ISO8601}"
+      negate => true
+      what => "previous"
+    }
+  }
+}
+```
+
+### 使用HTTP插件直接发送到Loki
+如果不需要复杂处理，可以用Loki的HTTP API直接发送日志：
+```bash
+curl -v -H "Content-Type: application/json" -XPOST -s "http://localhost:3100/loki/api/v1/push" \
+  --data-raw \
+  '{"streams": [{ "stream": { "app": "test" }, "values": [ [ "<timestamp>", "log line" ] ] }]}'
+```
+
+## 总结
+
+通过Logstash与Loki的集成，您可以：
+1. 利用Logstash的强大处理能力预处理日志。
+2. 使用Loki的高效存储和查询功能。
+3. 在Grafana中统一分析日志和指标。
+
+## 附加资源
+
+1. [Logstash Loki输出插件文档](https://github.com/imperfect-fourth/logstash-output-loki)
+2. [Loki HTTP API参考](https://grafana.com/docs/loki/latest/api/)
+3. 练习：尝试配置Logstash将Docker容器日志发送到Loki。
+
+:::tip
+调试时，可以先使用`stdout { codec => rubydebug }`输出到控制台，确保数据处理正确后再发送到Loki。
+:::

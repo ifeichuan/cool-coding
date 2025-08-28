@@ -1,0 +1,129 @@
+---
+title: Loki 组件扩展
+description: 学习如何通过扩展Loki组件来增强日志处理能力，包括自定义插件、集成外部系统等实践方法。
+---
+
+# Loki 组件扩展
+
+## 介绍
+
+Grafana Loki是一个高效的日志聚合系统，其组件化设计允许用户通过扩展来增强功能。组件扩展可以包括添加自定义插件、集成第三方服务或调整现有组件行为。本指南将介绍常见的扩展方式及其应用场景。
+
+---
+
+## 核心扩展方式
+
+### 1. 自定义日志处理插件
+
+Loki支持通过**Pipeline Stages**扩展日志处理逻辑。例如，添加一个自定义正则提取阶段：
+
+```go
+pipeline_stages:
+  - regex:
+      expression: '^(?P<ip>\\S+) (?P<ident>\\S+) (?P<user>\\S+) (?P<time>[\\w:/]+\\s[+\\-]\\d{4})'
+  - labels:
+      ip:
+      user:
+```
+
+**输入日志**:
+```
+192.168.1.1 - admin [10/Oct/2023:13:55:36 +0000]
+```
+
+**输出结果**:
+- 提取字段: `ip=192.168.1.1`, `user=admin`
+- 自动添加为标签
+
+:::tip
+使用 `- regex` 时建议先在 [RegEx 101](https://regex101.com/) 测试表达式
+:::
+
+---
+
+### 2. 集成外部存储后端
+
+通过修改 `loki.yaml` 配置可更换存储后端。以下示例配置AWS S3存储：
+
+```yaml
+schema_config:
+  configs:
+    - from: 2023-01-01
+      store: boltdb-shipper
+      object_store: aws
+      schema: v11
+storage_config:
+  aws:
+    s3: s3://access-key:secret-key@region/bucket-name
+  boltdb_shipper:
+    active_index_directory: /loki/index
+```
+
+---
+
+### 3. 使用微服务模式扩展
+
+Loki的微服务架构允许独立扩展组件。典型场景包括：
+
+```mermaid
+graph LR
+    A[Promtail] --> B[Distributor]
+    B --> C[Ingester]
+    C --> D[Query Frontend]
+    D --> E[Querier]
+    E --> F[存储后端]
+```
+
+:::note
+扩展建议：
+- 高写入负载：增加 **Ingester** 实例
+- 复杂查询：扩展 **Querier** 节点
+- 大量客户端：部署更多 **Distributor**
+:::
+
+---
+
+## 实际案例
+
+### 案例：添加IP地理位置插件
+
+1. 创建自定义处理阶段：
+
+```go
+pipeline_stages:
+  - docker: {}
+  - geoip:
+      db: "/GeoLite2-City.mmdb"
+      source: "ip_address"
+```
+
+2. 输出结果将包含地理位置字段：
+```json
+{
+  "geoip_country": "Canada",
+  "geoip_city": "Toronto"
+}
+```
+
+---
+
+## 总结
+
+| 扩展类型         | 适用场景                  | 工具/方法               |
+|------------------|-------------------------|------------------------|
+| 日志处理         | 字段提取/转换            | Pipeline Stages        |
+| 存储扩展         | 大数据量存储             | 修改storage_config     |
+| 服务横向扩展     | 高可用/高性能需求        | Kubernetes HPA         |
+
+**推荐练习**：
+1. 尝试为Nginx日志添加自定义标签
+2. 配置Loki使用MinIO作为存储后端
+3. 通过Helm Chart调整Ingester副本数
+
+---
+
+## 延伸阅读
+
+- [Loki官方插件文档](https://grafana.com/docs/loki/latest/plugins/)
+- 《可观测性工程》第5章(日志系统扩展)
+- Kubernetes Operator扩展模式

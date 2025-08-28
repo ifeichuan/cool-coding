@@ -1,0 +1,218 @@
+---
+title: C 语言进程控制
+description: 了解C语言中的进程控制，包括进程创建、终止、等待以及进程间通信的基本概念和实际应用。
+---
+
+# C 语言进程控制
+
+在操作系统中，**进程**是程序执行的实例。每个进程都有独立的内存空间和资源。C语言提供了丰富的系统调用和库函数，用于控制进程的创建、终止、等待以及进程间的通信。本文将逐步介绍这些概念，并通过代码示例帮助你理解如何在C语言中实现进程控制。
+
+## 1. 进程的基本概念
+
+进程是操作系统进行资源分配和调度的基本单位。每个进程都有一个唯一的进程ID（PID），用于标识该进程。在C语言中，我们可以使用系统调用来创建、终止和管理进程。
+
+### 1.1 进程的创建
+
+在C语言中，使用 `fork()` 系统调用可以创建一个新的进程。`fork()` 会创建一个与父进程几乎完全相同的子进程。子进程从 `fork()` 返回的地方开始执行，并且拥有自己的内存空间。
+
+```c
+#include <stdio.h>
+#include <unistd.h>
+
+int main() {
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // 子进程
+        printf("这是子进程，PID: %d\n", getpid());
+    } else if (pid > 0) {
+        // 父进程
+        printf("这是父进程，PID: %d, 子进程PID: %d\n", getpid(), pid);
+    } else {
+        // fork失败
+        perror("fork失败");
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+**输出示例：**
+```
+这是父进程，PID: 1234, 子进程PID: 1235
+这是子进程，PID: 1235
+```
+
+:::note
+`fork()` 调用后，父进程和子进程会同时执行。子进程的 `fork()` 返回值为0，而父进程的 `fork()` 返回值是子进程的PID。
+:::
+
+### 1.2 进程的终止
+
+进程可以通过调用 `exit()` 函数来终止。`exit()` 会终止当前进程，并返回一个状态码给父进程。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+int main() {
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // 子进程
+        printf("子进程即将退出\n");
+        exit(0);  // 子进程退出
+    } else if (pid > 0) {
+        // 父进程
+        printf("父进程等待子进程退出\n");
+        wait(NULL);  // 等待子进程退出
+        printf("子进程已退出\n");
+    } else {
+        perror("fork失败");
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+**输出示例：**
+```
+父进程等待子进程退出
+子进程即将退出
+子进程已退出
+```
+
+:::tip
+`wait()` 系统调用用于等待子进程退出。如果不调用 `wait()`，子进程可能会成为“僵尸进程”，占用系统资源。
+:::
+
+## 2. 进程间通信
+
+进程间通信（IPC）是多个进程之间交换数据和信息的方式。C语言提供了多种IPC机制，如管道、消息队列、共享内存等。
+
+### 2.1 管道（Pipe）
+
+管道是一种最简单的IPC机制，用于在父子进程之间传递数据。管道是单向的，数据只能从一个进程流向另一个进程。
+
+```c
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+
+int main() {
+    int pipefd[2];
+    char buffer[20];
+
+    if (pipe(pipefd) == -1) {
+        perror("pipe失败");
+        return 1;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        // 子进程
+        close(pipefd[1]);  // 关闭写端
+        read(pipefd[0], buffer, sizeof(buffer));
+        printf("子进程收到: %s\n", buffer);
+        close(pipefd[0]);
+    } else if (pid > 0) {
+        // 父进程
+        close(pipefd[0]);  // 关闭读端
+        write(pipefd[1], "Hello, Child!", 14);
+        close(pipefd[1]);
+    } else {
+        perror("fork失败");
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+**输出示例：**
+```
+子进程收到: Hello, Child!
+```
+
+:::caution
+管道是单向的，数据只能从一端流向另一端。如果需要双向通信，可以使用两个管道。
+:::
+
+## 3. 实际应用场景
+
+### 3.1 多进程并发服务器
+
+在多进程并发服务器中，父进程负责监听客户端连接，每当有新的连接时，父进程会创建一个子进程来处理该连接。这样可以同时处理多个客户端请求。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+void handle_client(int client_socket) {
+    char buffer[1024];
+    read(client_socket, buffer, sizeof(buffer));
+    printf("收到客户端消息: %s\n", buffer);
+    write(client_socket, "Hello, Client!", 15);
+    close(client_socket);
+}
+
+int main() {
+    int server_socket, client_socket;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(8080);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr));
+    listen(server_socket, 5);
+
+    while (1) {
+        client_socket = accept(server_socket, (struct sockaddr *)&client_addr, &client_len);
+        pid_t pid = fork();
+
+        if (pid == 0) {
+            // 子进程处理客户端请求
+            close(server_socket);
+            handle_client(client_socket);
+            exit(0);
+        } else if (pid > 0) {
+            // 父进程继续监听
+            close(client_socket);
+        } else {
+            perror("fork失败");
+            return 1;
+        }
+    }
+
+    close(server_socket);
+    return 0;
+}
+```
+
+:::warning
+在多进程服务器中，父进程需要关闭客户端套接字，子进程需要关闭服务器套接字，以避免资源泄漏。
+:::
+
+## 4. 总结
+
+通过本文，你学习了C语言中进程控制的基本概念，包括进程的创建、终止、等待以及进程间通信。我们还通过实际案例展示了如何在多进程并发服务器中使用这些概念。
+
+## 5. 附加资源与练习
+
+- **练习1**：修改管道示例代码，实现双向通信。
+- **练习2**：编写一个程序，使用 `exec()` 系列函数替换子进程的代码。
+- **附加资源**：
+  - [Linux 系统编程手册](https://man7.org/linux/man-pages/dir_section_2.html)
+  - [Advanced Programming in the UNIX Environment](https://www.amazon.com/Advanced-Programming-UNIX-Environment-3rd/dp/0321637739)
+
+希望本文能帮助你更好地理解C语言中的进程控制。继续练习和探索，你将掌握更多系统编程的技巧！

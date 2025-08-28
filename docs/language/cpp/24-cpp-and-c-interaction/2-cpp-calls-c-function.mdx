@@ -1,0 +1,283 @@
+---
+title: C++ 调用C函数
+description: 详细介绍如何在C++程序中调用C语言编写的函数，包括extern "C"的使用方法、名称修饰机制以及实际应用场景。
+---
+
+# C++ 调用C函数
+
+## 介绍
+
+在实际开发中，我们经常会遇到需要在C++代码中调用C语言编写的函数库的情况。虽然C++兼容大部分C语言的语法，但由于C++增加了许多新特性（如函数重载），两种语言之间的函数调用并不是直接就能实现的。本文将详细介绍如何在C++程序中正确地调用C语言函数，解释背后的原理，并提供实际的应用示例。
+
+## 为什么需要特殊处理？
+
+### 名称修饰（Name Mangling）
+
+C++和C语言在编译器处理函数名称时存在一个重要区别：**名称修饰**（Name Mangling）。
+
+- **C语言**：编译器通常直接使用函数的原始名称作为符号名。
+- **C++**：为了支持函数重载等特性，编译器会对函数名进行"修饰"，加入参数类型、命名空间等信息。
+
+例如，在C++中声明的函数：
+
+```cpp
+int add(int a, int b);
+```
+
+可能会被编译器修饰成类似 `_Z3addii` 这样的符号名。而在C语言中，同样的函数可能就直接是 `add`。
+
+这种差异导致了C++编译器无法直接找到C语言编译的函数符号，反之亦然。
+
+## extern "C" 关键字
+
+为了解决上述问题，C++提供了 `extern "C"` 声明，它告诉C++编译器："这个函数使用C语言的链接规范，不要对其名称进行C++式的修饰"。
+
+### 基本语法
+
+```cpp
+extern "C" {
+    // C函数声明
+    int add(int a, int b);
+    void print_hello();
+}
+```
+
+或者单个函数声明：
+
+```cpp
+extern "C" int add(int a, int b);
+```
+
+## 实际案例：C++调用C函数
+
+### 示例1：基本调用
+
+假设我们有以下C语言编写的函数文件 `math_lib.c`：
+
+```c
+// math_lib.c
+#include "math_lib.h"
+
+int add(int a, int b) {
+    return a + b;
+}
+
+double multiply(double a, double b) {
+    return a * b;
+}
+```
+
+对应的头文件 `math_lib.h`：
+
+```c
+// math_lib.h
+#ifndef MATH_LIB_H
+#define MATH_LIB_H
+
+/* 为了同时兼容C和C++编译器 */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int add(int a, int b);
+double multiply(double a, double b);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MATH_LIB_H */
+```
+
+然后在C++程序中使用：
+
+```cpp
+// main.cpp
+#include <iostream>
+#include "math_lib.h"
+
+int main() {
+    int sum = add(5, 3);
+    double product = multiply(2.5, 4.0);
+    
+    std::cout << "Sum: " << sum << std::endl;
+    std::cout << "Product: " << product << std::endl;
+    
+    return 0;
+}
+```
+
+输出：
+```
+Sum: 8
+Product: 10
+```
+
+:::tip
+注意头文件中的条件编译指令 `#ifdef __cplusplus`。这确保了头文件既可以被C编译器包含，也可以被C++编译器包含。C++编译器会定义 `__cplusplus` 宏，而C编译器则不会。
+:::
+
+### 示例2：调用C标准库
+
+虽然大多数C标准库函数可以在C++中直接使用，但这是因为C++标准库已经对它们进行了适当的声明。例如，当你包含 `<cstdio>` 时，实际上这个头文件内部已经使用了 `extern "C"`。
+
+如果你需要直接使用C标准库中的函数，可以这样做：
+
+```cpp
+// c_stdlib_demo.cpp
+#include <iostream>
+
+extern "C" {
+    #include <stdio.h>
+    #include <stdlib.h>
+}
+
+int main() {
+    printf("This is a message from C's printf function.\n");
+    
+    int* arr = (int*)malloc(5 * sizeof(int));
+    for (int i = 0; i < 5; i++) {
+        arr[i] = i * 10;
+    }
+    
+    std::cout << "Array elements: ";
+    for (int i = 0; i < 5; i++) {
+        std::cout << arr[i] << " ";
+    }
+    std::cout << std::endl;
+    
+    free(arr);
+    return 0;
+}
+```
+
+输出：
+```
+This is a message from C's printf function.
+Array elements: 0 10 20 30 40
+```
+
+## 实际应用场景
+
+### 1. 使用C语言编写的库
+
+许多成熟的库是用C语言编写的，例如：
+- OpenGL（图形库）
+- SQLite（数据库）
+- libcurl（网络请求库）
+
+在C++项目中使用这些库时，需要通过 `extern "C"` 来正确调用它们的函数。
+
+### 2. 跨平台和性能优化
+
+有时，出于性能考虑或特定平台需求，部分代码可能会使用C语言编写，而主程序使用C++。例如：
+- 嵌入式开发中的底层硬件操作
+- 某些需要极致性能优化的计算密集型模块
+
+### 3. 与现有C代码集成
+
+当需要将C++代码与已有的C代码库集成时，正确处理函数调用是必不可少的。
+
+## 进阶主题
+
+### 1. 在C++中包装C函数
+
+为了更好地整合C函数到C++代码中，通常会创建C++包装类：
+
+```cpp
+// c_wrapper_example.cpp
+extern "C" {
+    #include <sqlite3.h>
+}
+
+class DatabaseWrapper {
+private:
+    sqlite3* db;
+    
+public:
+    DatabaseWrapper(const char* filename) {
+        sqlite3_open(filename, &db);
+    }
+    
+    ~DatabaseWrapper() {
+        sqlite3_close(db);
+    }
+    
+    bool execute(const char* sql) {
+        char* errMsg = nullptr;
+        int rc = sqlite3_exec(db, sql, nullptr, nullptr, &errMsg);
+        if (rc != SQLITE_OK) {
+            // 处理错误...
+            sqlite3_free(errMsg);
+            return false;
+        }
+        return true;
+    }
+};
+```
+
+### 2. 回调函数
+
+当C库需要回调函数时，在C++中需要特别注意：
+
+```cpp
+// callback_example.cpp
+#include <iostream>
+
+extern "C" {
+    typedef void (*CallbackFunc)(int);
+    
+    // 假设这是C库中的函数，它接受一个回调
+    void register_callback(CallbackFunc func);
+}
+
+// C++回调函数需要使用extern "C"声明
+extern "C" void cpp_callback(int value) {
+    std::cout << "Callback received: " << value << std::endl;
+}
+
+int main() {
+    // 注册回调函数
+    register_callback(cpp_callback);
+    return 0;
+}
+```
+
+## 名称修饰的实际演示
+
+可以使用工具如 `nm` (Linux/MacOS) 或 `dumpbin` (Windows) 来查看编译后的符号名，以直观理解名称修饰的影响：
+
+```bash
+# 编译C文件
+gcc -c c_function.c
+# 查看符号
+nm c_function.o
+
+# 编译C++文件
+g++ -c cpp_function.cpp
+# 查看符号
+nm cpp_function.o
+```
+
+## 总结
+
+在C++程序中调用C函数时，关键点包括：
+
+1. 理解名称修饰（Name Mangling）机制的差异
+2. 正确使用 `extern "C"` 声明
+3. 适当设计头文件以兼容两种语言
+4. 处理回调函数时需要特别注意
+
+通过正确地处理C和C++之间的函数调用，你可以充分利用两种语言的优势，将现有C库与C++代码无缝集成，或者在需要时使用C语言实现特定的性能关键部分。
+
+## 练习
+
+1. 创建一个C语言编写的简单数学库（包含加、减、乘、除四个函数），然后在C++程序中调用这些函数。
+2. 尝试在不使用 `extern "C"` 的情况下编译并链接C和C++代码，观察错误信息，理解名称修饰带来的问题。
+3. 使用 `nm` 或类似工具查看编译后的符号名，比较C和C++编译的差异。
+
+## 附加资源
+
+1. C++标准文档关于链接规范的章节
+2. 《Effective C++》 by Scott Meyers - 了解更多C++最佳实践
+3. GCC和Clang文档关于名称修饰的部分

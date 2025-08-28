@@ -1,0 +1,231 @@
+---
+title: 告警模板配置
+description: 学习如何在Grafana Loki中配置告警模板，实现灵活且可读性强的告警通知。
+---
+
+# 告警模板配置
+
+告警模板是Grafana Loki告警系统的核心组成部分，它允许你自定义告警通知的格式和内容。通过告警模板，你可以将原始的告警数据转换为更易读、更具信息量的通知消息，适配邮件、Slack、Webhook等多种通知渠道。
+
+## 告警模板基础
+
+告警模板使用Go的模板语法（[text/template](https://pkg.go.dev/text/template)）来定义告警内容的呈现方式。一个告警模板通常包含以下部分：
+
+1. **告警标题**：简要描述告警的性质
+2. **告警详情**：提供更详细的信息，可能包括指标值、阈值、时间等
+3. **附加信息**：如链接、修复建议或相关文档
+
+### 基本模板示例
+
+```yaml
+templates:
+- name: 'high_error_rate'
+  template: |
+    {{ define "high_error_rate.title" }}服务错误率过高{{ end }}
+    
+    {{ define "high_error_rate.message" }}
+    服务 {{ .Labels.service }} 的错误率当前为 {{ .Value }}%，超过阈值 {{ .Annotations.threshold }}%。
+    时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+    详情请查看: {{ .GeneratorURL }}
+    {{ end }}
+```
+
+## 模板语法详解
+
+### 变量与函数
+
+告警模板中可以访问以下主要变量：
+
+- `.Labels`: 告警的标签集合
+- `.Annotations`: 告警的注释集合
+- `.Value`: 触发告警的值
+- `.StartsAt`: 告警开始时间
+- `.GeneratorURL`: 生成此告警的Grafana链接
+
+常用的模板函数包括：
+
+- `Format`: 格式化时间
+- `ToUpper`/`ToLower`: 大小写转换
+- `Trim`: 去除空格
+- `Replace`: 字符串替换
+
+### 条件判断
+
+```yaml
+{{ define "high_traffic.message" }}
+{{ if gt .Value 1000 }}
+警告！服务 {{ .Labels.service }} 流量异常高: {{ .Value }} 请求/秒
+{{ else }}
+注意：服务 {{ .Labels.service }} 流量偏高: {{ .Value }} 请求/秒
+{{ end }}
+{{ end }}
+```
+
+## 实际应用案例
+
+### 案例1：HTTP服务监控
+
+假设我们监控一个HTTP服务的错误率，配置如下告警规则：
+
+```yaml
+groups:
+- name: http-service-alerts
+  rules:
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High error rate on {{ $labels.service }}"
+      description: "{{ $labels.service }} has a {{ $value }}% 5xx error rate"
+      threshold: "5"
+```
+
+对应的告警模板：
+
+```yaml
+templates:
+- name: 'http_service'
+  template: |
+    {{ define "http_service.title" }}HTTP服务错误率告警{{ end }}
+    
+    {{ define "http_service.message" }}
+    ====== 服务异常 ======
+    服务名称: {{ .Labels.service }}
+    环境: {{ .Labels.env | default "production" }}
+    当前错误率: {{ printf "%.2f" .Value }}%
+    允许阈值: {{ .Annotations.threshold }}%
+    持续时间: 超过10分钟
+    告警级别: {{ .Labels.severity | toUpper }}
+    
+    建议操作:
+    1. 检查服务日志: kubectl logs -l app={{ .Labels.service }}
+    2. 查看监控面板: {{ .GeneratorURL }}
+    {{ end }}
+```
+
+### 案例2：资源使用监控
+
+监控Pod内存使用情况的告警模板：
+
+```yaml
+templates:
+- name: 'pod_memory'
+  template: |
+    {{ define "pod_memory.title" }}Pod内存使用告警{{ end }}
+    
+    {{ define "pod_memory.message" }}
+    Pod {{ .Labels.pod }} 内存使用超过限制！
+    
+    当前使用: {{ humanizePercentage .Value }}%
+    命名空间: {{ .Labels.namespace }}
+    节点: {{ .Labels.node }}
+    
+    发生时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+    
+    可能原因:
+    - 内存泄漏
+    - 配置的请求/限制过低
+    - 流量突增
+    
+    建议操作:
+    1. 检查Pod状态: kubectl describe pod {{ .Labels.pod }} -n {{ .Labels.namespace }}
+    2. 查看内存趋势: {{ .GeneratorURL }}
+    {{ end }}
+```
+
+## 高级模板技巧
+
+### 使用自定义函数
+
+在Loki的告警管理器配置中，可以添加自定义模板函数：
+
+```yaml
+template_files:
+  functions: |
+    {{- define "humanizePercentage" -}}
+    {{- if gt . 100 -}}
+    {{- printf "%d" . -}}
+    {{- else -}}
+    {{- printf "%.2f" . -}}
+    {{- end -}}%
+    {{- end -}}
+```
+
+然后在模板中使用：
+
+```yaml
+{{ define "cpu_usage.message" }}
+CPU使用率: {{ template "humanizePercentage" .Value }}
+{{ end }}
+```
+
+### 多通道适配
+
+为不同通知渠道创建不同模板：
+
+```yaml
+templates:
+- name: 'slack_notification'
+  template: |
+    {{ define "slack.title" }}*{{ .Labels.alertname }}*{{ end }}
+    {{ define "slack.message" }}
+    *服务*: {{ .Labels.service }}
+    *值*: {{ .Value }}
+    *时间*: {{ .StartsAt.Format "15:04:05" }}
+    {{ end }}
+
+- name: 'email_notification'
+  template: |
+    {{ define "email.subject" }}[ALERT] {{ .Labels.alertname }}{{ end }}
+    {{ define "email.html" }}
+    <h2>告警通知</h2>
+    <table>
+      <tr><td>服务:</td><td>{{ .Labels.service }}</td></tr>
+      <tr><td>值:</td><td>{{ .Value }}</td></tr>
+      <tr><td>时间:</td><td>{{ .StartsAt.Format "2006-01-02 15:04:05" }}</td></tr>
+    </table>
+    {{ end }}
+```
+
+## 测试与验证
+
+:::tip 测试提示
+在部署前，可以使用以下方法测试告警模板：
+
+1. 使用`amtool`命令行工具：
+```bash
+amtool check-config alertmanager.yml
+```
+
+2. 在Grafana的"Alerting"部分使用"Preview"功能
+:::
+
+## 总结
+
+告警模板配置是Grafana Loki监控系统中至关重要的一环，它能够：
+- 提高告警信息的可读性和实用性
+- 适配不同的通知渠道
+- 提供上下文信息和修复建议
+- 统一告警格式
+
+通过灵活的模板语法，你可以创建出既美观又实用的告警通知，帮助团队快速识别和解决问题。
+
+## 进一步学习
+
+1. [Grafana告警模板官方文档](https://grafana.com/docs/grafana/latest/alerting/contact-points/notifications/)
+2. [Go模板语言指南](https://pkg.go.dev/text/template)
+3. [Prometheus告警最佳实践](https://prometheus.io/docs/practices/alerting/)
+
+## 练习
+
+1. 为你的服务创建一个包含以下元素的告警模板：
+   - 服务名称
+   - 当前值和阈值
+   - 时间戳
+   - 相关文档链接
+
+2. 尝试为Slack和电子邮件创建不同格式的模板
+
+3. 添加条件逻辑，根据告警严重程度显示不同的建议

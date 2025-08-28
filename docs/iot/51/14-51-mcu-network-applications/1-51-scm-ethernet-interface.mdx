@@ -1,0 +1,152 @@
+---
+title: 51单片机以太网接口
+description: 本文详细介绍了51单片机如何通过以太网接口实现网络通信，包括硬件连接、协议栈配置以及实际应用案例。
+---
+
+# 51单片机以太网接口
+
+## 介绍
+
+51单片机（如STC89C52、AT89S52等）是一种广泛应用于嵌入式系统的微控制器。虽然51单片机本身并不直接支持以太网通信，但通过外接以太网控制器（如ENC28J60），我们可以为其添加网络功能。本文将逐步讲解如何为51单片机配置以太网接口，并实现基本的网络通信。
+
+## 硬件连接
+
+首先，我们需要将ENC28J60以太网控制器与51单片机连接。以下是典型的连接方式：
+
+- **SCK**（SPI时钟）：连接到51单片机的P1.5引脚。
+- **MISO**（主输入从输出）：连接到P1.6引脚。
+- **MOSI**（主输出从输入）：连接到P1.7引脚。
+- **CS**（片选）：连接到P1.4引脚。
+- **INT**（中断）：连接到P3.2引脚（外部中断0）。
+- **RESET**（复位）：连接到P1.3引脚。
+
+:::note
+确保51单片机和ENC28J60的电源和地线正确连接，并注意电平匹配。
+:::
+
+## 软件配置
+
+### 1. SPI通信
+
+51单片机通过SPI接口与ENC28J60通信。以下是SPI初始化的代码示例：
+
+```c
+#include <reg52.h>
+
+sbit SCK = P1^5;
+sbit MISO = P1^6;
+sbit MOSI = P1^7;
+sbit CS = P1^4;
+
+void SPI_Init() {
+    SCK = 0;  // 初始化时钟线
+    CS = 1;   // 禁用ENC28J60
+}
+
+unsigned char SPI_Transfer(unsigned char data) {
+    unsigned char i;
+    for (i = 0; i < 8; i++) {
+        MOSI = (data & 0x80) ? 1 : 0;  // 发送最高位
+        SCK = 1;
+        data <<= 1;
+        SCK = 0;
+    }
+    return data;
+}
+```
+
+### 2. ENC28J60初始化
+
+接下来，我们需要初始化ENC28J60。以下是一个简单的初始化函数：
+
+```c
+void ENC28J60_Init() {
+    CS = 0;  // 使能ENC28J60
+    SPI_Transfer(0xFF);  // 发送复位命令
+    CS = 1;  // 禁用ENC28J60
+    // 更多初始化代码...
+}
+```
+
+### 3. TCP/IP协议栈
+
+为了实现网络通信，我们需要在51单片机上运行一个轻量级的TCP/IP协议栈。常用的协议栈有uIP和lwIP。以下是使用uIP的简单示例：
+
+```c
+#include "uip.h"
+
+void uip_init() {
+    // 初始化uIP协议栈
+    uip_ipaddr_t ipaddr;
+    uip_ipaddr(ipaddr, 192, 168, 1, 100);
+    uip_sethostaddr(ipaddr);
+    // 更多初始化代码...
+}
+
+void main() {
+    SPI_Init();
+    ENC28J60_Init();
+    uip_init();
+    while (1) {
+        // 主循环
+    }
+}
+```
+
+## 实际应用案例
+
+### 1. 远程控制LED
+
+假设我们希望通过网络远程控制51单片机上的LED。我们可以通过以下步骤实现：
+
+1. **配置Web服务器**：在51单片机上运行一个简单的Web服务器，监听HTTP请求。
+2. **处理请求**：当收到控制LED的请求时，解析请求并控制LED状态。
+3. **发送响应**：返回HTTP响应，确认操作成功。
+
+```c
+void httpd_appcall(void) {
+    if (uip_connected()) {
+        // 处理连接
+    }
+    if (uip_newdata()) {
+        // 处理数据
+        if (strstr((char *)uip_appdata, "GET /led/on")) {
+            LED = 1;  // 打开LED
+        } else if (strstr((char *)uip_appdata, "GET /led/off")) {
+            LED = 0;  // 关闭LED
+        }
+        // 发送HTTP响应
+        uip_send("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nLED Control OK", 50);
+    }
+}
+```
+
+### 2. 数据采集与上传
+
+另一个常见的应用是数据采集与上传。例如，我们可以通过51单片机采集温度传感器的数据，并通过以太网接口将数据上传到服务器。
+
+```c
+void send_data_to_server(float temperature) {
+    char buffer[50];
+    sprintf(buffer, "Temperature: %.2f", temperature);
+    uip_connect(server_ip, 80);
+    uip_send(buffer, strlen(buffer));
+}
+```
+
+## 总结
+
+通过外接ENC28J60以太网控制器，我们可以为51单片机添加网络功能，实现远程控制和数据采集等应用。本文介绍了硬件连接、SPI通信、ENC28J60初始化以及TCP/IP协议栈的配置，并提供了两个实际应用案例。
+
+## 附加资源与练习
+
+- **资源**：
+  - [ENC28J60 Datasheet](https://www.microchip.com/en-us/product/ENC28J60)
+  - [uIP协议栈文档](https://www.icir.org/uip/)
+- **练习**：
+  1. 尝试修改代码，实现通过Web页面控制多个LED。
+  2. 扩展数据采集功能，将数据上传到云平台（如Thingspeak）。
+
+:::tip
+在调试过程中，使用串口调试工具可以帮助你更好地理解数据传输过程。
+:::

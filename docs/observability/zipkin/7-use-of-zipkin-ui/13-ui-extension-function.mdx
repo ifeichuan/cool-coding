@@ -1,0 +1,154 @@
+---
+title: Zipkin UI扩展功能
+description: "学习如何利用Zipkin UI的扩展功能增强分布式追踪的可视化与分析能力，适合初学者掌握高级使用技巧。"
+---
+
+# Zipkin UI扩展功能
+
+## 介绍
+
+Zipkin UI是Zipkin分布式追踪系统的可视化界面，默认提供基础的追踪数据展示功能。但通过**扩展功能**，你可以定制化UI行为、集成外部工具或增强数据分析能力。本章将介绍如何通过配置和插件扩展Zipkin UI的功能。
+
+:::note
+扩展功能通常需要修改Zipkin的部署配置或编写自定义代码，适合在开发或生产环境中需要深度定制时使用。
+:::
+
+---
+
+## 1. 自定义UI配置
+
+### 1.1 修改基础配置
+Zipkin UI的部分行为可以通过环境变量或配置文件调整。例如，修改默认的查询时间范围：
+
+```bash
+# 在启动Zipkin时设置环境变量
+ZIPKIN_UI_QUERY_LOOKBACK=86400000  # 设置为24小时（毫秒）
+```
+
+### 1.2 主题与样式覆盖
+通过覆盖CSS文件可自定义UI主题。创建一个自定义CSS文件并挂载到Zipkin容器中：
+
+```css
+/* custom.css */
+:root {
+  --primary-color: #4a148c; /* 将主题色改为紫色 */
+}
+```
+
+挂载配置示例（Docker）：
+```bash
+docker run -d \
+  -v ./custom.css:/zipkin-ui/static/css/custom.css \
+  openzipkin/zipkin
+```
+
+---
+
+## 2. 集成插件系统
+
+### 2.1 添加第三方插件
+Zipkin支持通过JavaScript插件扩展UI功能。例如，集成一个自定义的追踪分析插件：
+
+1. 创建插件文件 `my-plugin.js`：
+```javascript
+export function install({ registerExtension }) {
+  registerExtension({
+    component: 'TracePageExtra',
+    onMount: (props) => {
+      console.log('自定义插件已加载！', props.trace);
+    }
+  });
+}
+```
+
+2. 通过配置加载插件：
+```bash
+ZIPKIN_UI_EXTRA_PLUGINS=/plugins/my-plugin.js
+```
+
+---
+
+## 3. 实际案例：添加耗时统计面板
+
+### 场景需求
+在追踪详情页显示每个服务的平均耗时统计图表。
+
+### 实现步骤
+1. **编写插件代码**：
+```javascript
+export function install({ registerExtension }) {
+  registerExtension({
+    component: 'TracePageExtra',
+    onMount: ({ trace }) => {
+      const spansByService = {};
+      trace.spans.forEach(span => {
+        spansByService[span.localEndpoint.serviceName] = spansByService[span.localEndpoint.serviceName] || [];
+        spansByService[span.localEndpoint.serviceName].push(span.duration);
+      });
+
+      const stats = Object.entries(spansByService).map(([service, durations]) => ({
+        service,
+        avgDuration: durations.reduce((a, b) => a + b, 0) / durations.length
+      }));
+
+      // 渲染到UI（示例使用原生DOM操作）
+      const container = document.createElement('div');
+      container.innerHTML = `<h3>服务耗时统计</h3><pre>${JSON.stringify(stats, null, 2)}</pre>`;
+      document.getElementById('trace-page-extra').appendChild(container);
+    }
+  });
+}
+```
+
+2. **效果预览**：
+```plaintext
+服务耗时统计
+[
+  {
+    "service": "user-service",
+    "avgDuration": 45.2
+  },
+  {
+    "service": "order-service",
+    "avgDuration": 78.9
+  }
+]
+```
+
+---
+
+## 4. 高级功能：API集成
+
+### 动态加载外部数据
+通过Zipkin UI的JavaScript环境，可以调用外部API补充数据。例如从CMDB系统获取服务元数据：
+
+```javascript
+fetch('https://cmdb.example.com/api/services')
+  .then(response => response.json())
+  .then(data => {
+    console.log('CMDB数据加载完成', data);
+  });
+```
+
+:::caution
+确保跨域请求已正确配置CORS策略，生产环境建议通过Zipkin服务端代理请求。
+:::
+
+---
+
+## 总结
+
+| 功能类型       | 适用场景                     | 技术实现难度 |
+|----------------|----------------------------|-------------|
+| 配置调整       | 快速修改UI行为              | ⭐           |
+| CSS覆盖        | 品牌化定制                 | ⭐⭐         |
+| JavaScript插件 | 深度功能扩展               | ⭐⭐⭐       |
+
+## 后续练习
+1. 尝试修改Zipkin UI的默认时间范围为7天。
+2. 创建一个插件，在追踪列表页添加“耗时最长”排序按钮。
+3. （进阶）集成Prometheus API显示服务的实时QPS指标。
+
+## 扩展资源
+- [Zipkin插件开发文档](https://zipkin.io/plugins)
+- [Zipkin UI源码参考](https://github.com/openzipkin/zipkin-ui)

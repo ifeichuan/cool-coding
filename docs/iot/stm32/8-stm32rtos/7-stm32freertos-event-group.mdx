@@ -1,0 +1,176 @@
+---
+title: STM32 FreeRTOS事件组
+description: 了解如何在STM32中使用FreeRTOS事件组来实现任务间的同步与通信。本文将从基础概念入手，逐步讲解事件组的使用方法，并提供实际代码示例和应用场景。
+---
+
+## 介绍
+
+在嵌入式系统中，任务之间的同步和通信是非常重要的。FreeRTOS提供了多种机制来实现这些功能，其中之一就是**事件组（Event Group）**。事件组允许任务等待多个事件的发生，并在这些事件发生时被唤醒。这对于需要同时处理多个条件或事件的场景非常有用。
+
+在STM32中使用FreeRTOS事件组，可以有效地管理任务之间的同步，提高系统的响应速度和效率。
+
+## 什么是事件组？
+
+事件组是一个32位的变量，每一位代表一个事件。任务可以等待一个或多个事件的发生，并在这些事件发生时被唤醒。事件组的主要特点包括：
+
+- **多事件等待**：任务可以同时等待多个事件的发生。
+- **事件触发**：任务或中断可以设置事件组中的某一位或几位，从而触发等待这些事件的任务。
+- **事件清除**：任务可以清除事件组中的某一位或几位。
+
+## 事件组的基本操作
+
+在FreeRTOS中，事件组的基本操作包括创建事件组、设置事件、等待事件和清除事件。下面我们将逐步讲解这些操作。
+
+### 创建事件组
+
+首先，我们需要创建一个事件组。事件组的创建使用 `xEventGroupCreate()` 函数。
+
+```c
+EventGroupHandle_t xEventGroupCreate(void);
+```
+
+这个函数返回一个事件组句柄，用于后续的操作。
+
+```c
+EventGroupHandle_t xEventGroup = xEventGroupCreate();
+```
+
+### 设置事件
+
+任务或中断可以通过 `xEventGroupSetBits()` 函数来设置事件组中的某一位或几位。
+
+```c
+EventBits_t xEventGroupSetBits(EventGroupHandle_t xEventGroup, const EventBits_t uxBitsToSet);
+```
+
+- `xEventGroup`：事件组句柄。
+- `uxBitsToSet`：要设置的事件位。
+
+例如，设置事件组中的第0位和第1位：
+
+```c
+xEventGroupSetBits(xEventGroup, (1 << 0) | (1 << 1));
+```
+
+### 等待事件
+
+任务可以通过 `xEventGroupWaitBits()` 函数来等待事件组中的某一位或几位。
+
+```c
+EventBits_t xEventGroupWaitBits(
+    EventGroupHandle_t xEventGroup,
+    const EventBits_t uxBitsToWaitFor,
+    BaseType_t xClearOnExit,
+    BaseType_t xWaitForAllBits,
+    TickType_t xTicksToWait
+);
+```
+
+- `xEventGroup`：事件组句柄。
+- `uxBitsToWaitFor`：要等待的事件位。
+- `xClearOnExit`：如果为 `pdTRUE`，则在等待成功后清除这些事件位。
+- `xWaitForAllBits`：如果为 `pdTRUE`，则等待所有指定的事件位都被设置；否则，等待任意一个事件位被设置。
+- `xTicksToWait`：等待的超时时间。
+
+例如，等待事件组中的第0位和第1位，并在等待成功后清除这些事件位：
+
+```c
+EventBits_t uxBits = xEventGroupWaitBits(
+    xEventGroup,
+    (1 << 0) | (1 << 1),
+    pdTRUE,
+    pdTRUE,
+    portMAX_DELAY
+);
+```
+
+### 清除事件
+
+任务可以通过 `xEventGroupClearBits()` 函数来清除事件组中的某一位或几位。
+
+```c
+EventBits_t xEventGroupClearBits(EventGroupHandle_t xEventGroup, const EventBits_t uxBitsToClear);
+```
+
+- `xEventGroup`：事件组句柄。
+- `uxBitsToClear`：要清除的事件位。
+
+例如，清除事件组中的第0位：
+
+```c
+xEventGroupClearBits(xEventGroup, (1 << 0));
+```
+
+## 实际案例
+
+假设我们有一个STM32系统，其中有两个任务：`TaskA` 和 `TaskB`。`TaskA` 负责读取传感器数据，`TaskB` 负责处理这些数据。我们希望 `TaskB` 在 `TaskA` 完成数据读取后开始处理。
+
+我们可以使用事件组来实现这个同步机制。
+
+```c
+EventGroupHandle_t xEventGroup;
+
+void TaskA(void *pvParameters) {
+    while (1) {
+        // 读取传感器数据
+        // ...
+
+        // 设置事件组中的第0位，表示数据读取完成
+        xEventGroupSetBits(xEventGroup, (1 << 0));
+
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 模拟1秒的延迟
+    }
+}
+
+void TaskB(void *pvParameters) {
+    while (1) {
+        // 等待事件组中的第0位被设置
+        EventBits_t uxBits = xEventGroupWaitBits(
+            xEventGroup,
+            (1 << 0),
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        // 处理传感器数据
+        // ...
+    }
+}
+
+int main(void) {
+    // 创建事件组
+    xEventGroup = xEventGroupCreate();
+
+    // 创建任务
+    xTaskCreate(TaskA, "TaskA", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(TaskB, "TaskB", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    // 启动调度器
+    vTaskStartScheduler();
+
+    for (;;);
+}
+```
+
+在这个例子中，`TaskA` 每1秒读取一次传感器数据，并设置事件组中的第0位。`TaskB` 等待第0位被设置，然后开始处理数据。
+
+## 总结
+
+FreeRTOS事件组是一种强大的同步机制，适用于需要等待多个事件发生的场景。通过事件组，任务可以有效地同步和通信，从而提高系统的响应速度和效率。
+
+在实际应用中，事件组可以用于多种场景，例如任务间的同步、多任务协作等。掌握事件组的使用方法，对于开发复杂的嵌入式系统非常有帮助。
+
+## 附加资源
+
+- [FreeRTOS官方文档](https://www.freertos.org/)
+- [STM32CubeMX](https://www.st.com/en/development-tools/stm32cubemx.html)
+- [FreeRTOS事件组API参考](https://www.freertos.org/Event-Groups.html)
+
+## 练习
+
+1. 修改上面的例子，使 `TaskB` 同时等待第0位和第1位被设置，并在等待成功后清除这些事件位。
+2. 创建一个新的任务 `TaskC`，该任务在 `TaskA` 和 `TaskB` 都完成后才开始执行。
+3. 尝试在中断服务程序（ISR）中设置事件组，并观察任务的行为。
+
+通过完成这些练习，你将更深入地理解FreeRTOS事件组的使用方法。

@@ -1,0 +1,166 @@
+---
+title: 操作系统信号量
+description: 了解操作系统中的信号量机制，掌握其在并发编程中的作用与实现方式。
+---
+
+# 操作系统信号量
+
+在并发编程中，多个线程或进程可能会同时访问共享资源，从而导致竞争条件（Race Condition）。为了避免这种情况，操作系统引入了**信号量（Semaphore）**机制。信号量是一种用于控制多个线程或进程对共享资源访问的同步工具。
+
+## 什么是信号量？
+
+信号量是一个整型变量，通常用于管理对共享资源的访问。它支持两种基本操作：
+1. **P操作（等待操作）**：尝试获取资源，如果信号量的值大于0，则将其减1；否则，线程或进程会被阻塞，直到信号量的值大于0。
+2. **V操作（释放操作）**：释放资源，将信号量的值加1，并唤醒等待的线程或进程。
+
+信号量可以分为两种类型：
+- **二进制信号量**：值只能是0或1，通常用于实现互斥锁。
+- **计数信号量**：值可以是任意非负整数，用于控制多个资源的访问。
+
+## 信号量的工作原理
+
+信号量的核心思想是通过原子操作（不可分割的操作）来确保对共享资源的访问是线程安全的。以下是一个简单的信号量实现示例：
+
+```c
+#include <semaphore.h>
+#include <stdio.h>
+#include <pthread.h>
+
+sem_t semaphore;
+
+void* thread_func(void* arg) {
+    sem_wait(&semaphore); // P操作
+    printf("Thread %ld is accessing the shared resource.\n", (long)arg);
+    sleep(1); // 模拟资源使用
+    printf("Thread %ld is releasing the shared resource.\n", (long)arg);
+    sem_post(&semaphore); // V操作
+    return NULL;
+}
+
+int main() {
+    pthread_t threads[5];
+    sem_init(&semaphore, 0, 1); // 初始化信号量，初始值为1
+
+    for (long i = 0; i < 5; i++) {
+        pthread_create(&threads[i], NULL, thread_func, (void*)i);
+    }
+
+    for (int i = 0; i < 5; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    sem_destroy(&semaphore); // 销毁信号量
+    return 0;
+}
+```
+
+**输出示例：**
+```
+Thread 0 is accessing the shared resource.
+Thread 0 is releasing the shared resource.
+Thread 1 is accessing the shared resource.
+Thread 1 is releasing the shared resource.
+...
+```
+
+在这个例子中，信号量的初始值为1，表示只有一个线程可以访问共享资源。其他线程必须等待当前线程释放资源后才能继续。
+
+## 信号量的实际应用
+
+信号量在操作系统中有着广泛的应用，以下是几个常见的场景：
+
+1. **互斥锁的实现**：通过二进制信号量，可以确保同一时间只有一个线程访问临界区。
+2. **资源池管理**：通过计数信号量，可以管理有限数量的资源（如数据库连接池）。
+3. **生产者-消费者问题**：信号量可以用于协调生产者和消费者线程之间的同步。
+
+### 生产者-消费者问题示例
+
+以下是一个使用信号量解决生产者-消费者问题的示例：
+
+```c
+#include <semaphore.h>
+#include <stdio.h>
+#include <pthread.h>
+
+#define BUFFER_SIZE 5
+
+int buffer[BUFFER_SIZE];
+int count = 0;
+
+sem_t empty; // 表示空闲缓冲区数量
+sem_t full;  // 表示已占用缓冲区数量
+pthread_mutex_t mutex; // 互斥锁
+
+void* producer(void* arg) {
+    for (int i = 0; i < 10; i++) {
+        sem_wait(&empty); // 等待空闲缓冲区
+        pthread_mutex_lock(&mutex); // 进入临界区
+        buffer[count++] = i;
+        printf("Produced: %d\n", i);
+        pthread_mutex_unlock(&mutex); // 离开临界区
+        sem_post(&full); // 增加已占用缓冲区数量
+    }
+    return NULL;
+}
+
+void* consumer(void* arg) {
+    for (int i = 0; i < 10; i++) {
+        sem_wait(&full); // 等待已占用缓冲区
+        pthread_mutex_lock(&mutex); // 进入临界区
+        int item = buffer[--count];
+        printf("Consumed: %d\n", item);
+        pthread_mutex_unlock(&mutex); // 离开临界区
+        sem_post(&empty); // 增加空闲缓冲区数量
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t prod, cons;
+    sem_init(&empty, 0, BUFFER_SIZE);
+    sem_init(&full, 0, 0);
+    pthread_mutex_init(&mutex, NULL);
+
+    pthread_create(&prod, NULL, producer, NULL);
+    pthread_create(&cons, NULL, consumer, NULL);
+
+    pthread_join(prod, NULL);
+    pthread_join(cons, NULL);
+
+    sem_destroy(&empty);
+    sem_destroy(&full);
+    pthread_mutex_destroy(&mutex);
+    return 0;
+}
+```
+
+**输出示例：**
+```
+Produced: 0
+Consumed: 0
+Produced: 1
+Consumed: 1
+...
+```
+
+在这个例子中，`empty`信号量表示空闲缓冲区的数量，`full`信号量表示已占用缓冲区的数量。通过信号量的协调，生产者和消费者可以安全地共享缓冲区。
+
+## 总结
+
+信号量是操作系统中用于实现线程或进程同步的重要工具。通过P操作和V操作，信号量可以有效地管理对共享资源的访问，避免竞争条件。无论是实现互斥锁，还是解决生产者-消费者问题，信号量都发挥着关键作用。
+
+:::tip 提示
+在实际编程中，信号量的使用需要谨慎，避免死锁（Deadlock）和资源饥饿（Starvation）等问题。
+:::
+
+## 附加资源与练习
+
+1. **进一步学习**：
+   - 阅读操作系统教材中关于信号量的章节。
+   - 了解其他同步机制，如条件变量和屏障（Barrier）。
+
+2. **练习**：
+   - 修改生产者-消费者问题的代码，使其支持多个生产者和消费者。
+   - 尝试使用信号量实现一个简单的线程池。
+
+通过实践和深入学习，你将更好地掌握信号量的使用场景和实现原理。

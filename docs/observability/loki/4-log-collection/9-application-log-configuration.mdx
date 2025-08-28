@@ -1,0 +1,200 @@
+---
+title: 应用程序日志配置
+description: 学习如何为应用程序配置日志记录，以便与Grafana Loki集成并实现高效的日志收集。
+---
+
+## 介绍
+
+应用程序日志是开发者和运维人员了解系统运行状态的重要工具。通过合理配置日志，可以将应用程序的运行信息（如错误、警告、调试信息等）输出到指定位置，便于后续分析和监控。本文将介绍如何为应用程序配置日志记录，使其与Grafana Loki兼容，实现高效的日志收集。
+
+## 日志配置基础
+
+### 日志级别
+日志级别用于区分日志的重要性，常见的日志级别包括：
+- `DEBUG`：详细的调试信息。
+- `INFO`：常规的运行信息。
+- `WARN`：警告信息，表示潜在问题。
+- `ERROR`：错误信息，表示操作失败。
+- `FATAL`：严重错误，可能导致应用程序终止。
+
+### 日志格式
+日志格式定义了日志的输出结构，通常包括：
+- 时间戳
+- 日志级别
+- 线程/进程ID
+- 日志内容
+- 其他上下文信息（如请求ID）
+
+## 配置应用程序日志
+
+### 1. 使用标准输出（stdout）
+大多数现代应用程序推荐将日志输出到标准输出（stdout），然后由日志收集器（如Promtail）捕获并发送到Loki。
+
+#### Python示例
+```python
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("This is an info message")
+```
+
+#### 输出示例
+```
+2023-10-01 12:00:00,123 - INFO - This is an info message
+```
+
+### 2. 结构化日志（JSON格式）
+结构化日志（如JSON格式）更易于解析和分析，推荐用于生产环境。
+
+#### Python结构化日志示例
+```python
+import logging
+import json_log_formatter
+
+formatter = json_log_formatter.JSONFormatter()
+
+json_handler = logging.StreamHandler()
+json_handler.setFormatter(formatter)
+
+logger = logging.getLogger('my_app')
+logger.addHandler(json_handler)
+logger.setLevel(logging.INFO)
+
+logger.info("User logged in", extra={'user': 'alice', 'ip': '192.168.1.1'})
+```
+
+#### 输出示例
+```json
+{
+  "message": "User logged in",
+  "user": "alice",
+  "ip": "192.168.1.1",
+  "level": "INFO",
+  "timestamp": "2023-10-01T12:00:00.123Z"
+}
+```
+
+### 3. 日志文件轮转
+对于直接写入文件的日志，需要配置日志轮转以避免单个文件过大。
+
+#### Python日志轮转示例
+```python
+from logging.handlers import RotatingFileHandler
+
+handler = RotatingFileHandler(
+    'app.log',
+    maxBytes=5*1024*1024,  # 5MB
+    backupCount=3
+)
+logger.addHandler(handler)
+```
+
+## 实际案例：Web应用程序日志配置
+
+### 场景描述
+假设你有一个Flask Web应用程序，需要配置日志记录以下信息：
+1. 所有请求的访问日志
+2. 应用程序错误日志
+3. 数据库操作日志
+
+### 配置实现
+```python
+from flask import Flask
+import logging
+from logging.handlers import RotatingFileHandler
+
+app = Flask(__name__)
+
+# 配置根日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s %(name)s %(threadName)s : %(message)s'
+)
+
+# 请求日志过滤器
+class RequestFilter(logging.Filter):
+    def filter(self, record):
+        record.method = getattr(record, 'method', '')
+        record.path = getattr(record, 'path', '')
+        record.status = getattr(record, 'status', '')
+        return True
+
+# 访问日志配置
+access_handler = RotatingFileHandler(
+    'access.log',
+    maxBytes=5*1024*1024,
+    backupCount=3
+)
+access_handler.setFormatter(logging.Formatter(
+    '%(asctime)s %(levelname)s %(method)s %(path)s %(status)s : %(message)s'
+))
+access_handler.addFilter(RequestFilter())
+access_log = logging.getLogger('flask.access')
+access_log.addHandler(access_handler)
+
+# 错误日志配置
+error_handler = RotatingFileHandler(
+    'error.log',
+    maxBytes=5*1024*1024,
+    backupCount=3
+)
+error_handler.setLevel(logging.ERROR)
+app.logger.addHandler(error_handler)
+
+@app.route('/')
+def home():
+    app.logger.info('Home page accessed', extra={
+        'method': 'GET',
+        'path': '/',
+        'status': 200
+    })
+    return "Hello World"
+
+if __name__ == '__main__':
+    app.run()
+```
+
+## 与Grafana Loki集成
+
+### 最佳实践
+1. **使用标准输出**：让Promtail直接捕获容器/进程的stdout
+2. **结构化日志**：使用JSON格式便于Loki索引
+3. **添加标签**：在日志中包含有用的标签（如`app=myapp`）
+
+:::tip
+在Kubernetes环境中，可以添加以下注解让Promtail自动发现Pod日志：
+```yaml
+metadata:
+  annotations:
+    promtail.io/scrape: "true"
+    promtail.io/path: "/var/log/myapp/*.log"
+```
+:::
+
+## 总结
+
+配置应用程序日志是与Grafana Loki集成的重要第一步。通过：
+1. 选择合适的日志级别
+2. 使用结构化格式（如JSON）
+3. 合理配置日志输出位置
+4. 添加有意义的上下文信息
+
+你可以为日志分析打下良好基础。
+
+## 附加资源
+
+1. [Python logging官方文档](https://docs.python.org/3/library/logging.html)
+2. [Grafana Loki日志收集最佳实践](https://grafana.com/docs/loki/latest/best-practices/)
+3. [结构化日志指南](https://www.structlog.org/en/stable/)
+
+## 练习
+
+1. 为你的应用程序配置JSON格式的日志输出
+2. 添加自定义字段（如用户ID、请求ID）到日志中
+3. 尝试将日志同时输出到文件和标准输出

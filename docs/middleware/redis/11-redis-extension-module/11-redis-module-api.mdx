@@ -1,0 +1,174 @@
+---
+title: Redis 模块API
+description: 了解 Redis 模块API 的基本概念、使用方法以及实际应用场景，帮助初学者快速掌握 Redis 模块的开发。
+---
+
+# Redis 模块API
+
+Redis 是一个高性能的键值存储系统，广泛应用于缓存、消息队列、实时分析等场景。为了扩展 Redis 的功能，Redis 提供了模块API，允许开发者通过编写模块来添加新的数据类型、命令和功能。本文将详细介绍 Redis 模块API 的基本概念、使用方法以及实际应用场景。
+
+## 什么是 Redis 模块API？
+
+Redis 模块API 是一组用于扩展 Redis 功能的接口。通过使用这些接口，开发者可以编写自定义模块，添加新的数据类型、命令和功能。Redis 模块API 提供了丰富的功能，包括：
+
+- 创建新的数据类型
+- 定义新的命令
+- 访问和操作 Redis 数据
+- 处理客户端请求
+- 与其他模块交互
+
+## 如何编写 Redis 模块
+
+编写 Redis 模块需要使用 C 语言，并且需要包含 Redis 模块API 的头文件 `redismodule.h`。以下是一个简单的 Redis 模块示例，该模块定义了一个新的命令 `HELLO`，用于向客户端返回一条问候消息。
+
+```c
+#include "redismodule.h"
+
+int HelloCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    if (argc != 1) {
+        return RedisModule_WrongArity(ctx);
+    }
+    RedisModule_ReplyWithSimpleString(ctx, "Hello, Redis Module!");
+    return REDISMODULE_OK;
+}
+
+int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    if (RedisModule_Init(ctx, "hello", 1, REDISMODULE_APIVER_1) == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "hello", HelloCommand, "readonly", 1, 1, 1) == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    return REDISMODULE_OK;
+}
+```
+
+### 代码解析
+
+1. **包含头文件**：`#include "redismodule.h"` 包含了 Redis 模块API 的头文件。
+2. **定义命令处理函数**：`HelloCommand` 函数处理 `HELLO` 命令，向客户端返回一条问候消息。
+3. **模块加载函数**：`RedisModule_OnLoad` 是模块的入口函数，在模块加载时被调用。该函数初始化模块并注册 `HELLO` 命令。
+
+### 编译和加载模块
+
+要编译上述模块，可以使用以下命令：
+
+```bash
+gcc -fPIC -shared -o hello.so hello.c
+```
+
+编译完成后，可以通过以下命令加载模块：
+
+```bash
+redis-server --loadmodule ./hello.so
+```
+
+加载模块后，可以在 Redis 客户端中使用 `HELLO` 命令：
+
+```bash
+127.0.0.1:6379> HELLO
+"Hello, Redis Module!"
+```
+
+## 实际应用场景
+
+Redis 模块API 可以用于多种实际应用场景，例如：
+
+1. **自定义数据类型**：通过 Redis 模块API，可以创建新的数据类型，如地理空间索引、图数据库等。
+2. **扩展命令**：可以定义新的命令，用于处理特定的业务逻辑。
+3. **性能优化**：通过编写高效的模块，可以优化 Redis 的性能，满足特定的性能需求。
+
+### 示例：自定义计数器
+
+以下是一个自定义计数器的示例，该计数器支持增加和减少操作。
+
+```c
+#include "redismodule.h"
+
+int CounterIncrCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    if (argc != 2) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    long long value;
+    if (RedisModule_ModuleTypeGetType(key) == NULL) {
+        value = 0;
+    } else {
+        value = RedisModule_StringToLongLong(RedisModule_ModuleTypeGetValue(key));
+    }
+    value++;
+    RedisModule_ModuleTypeSetValue(key, RedisModule_CreateStringFromLongLong(ctx, value));
+    RedisModule_ReplyWithLongLong(ctx, value);
+    RedisModule_CloseKey(key);
+    return REDISMODULE_OK;
+}
+
+int CounterDecrCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    if (argc != 2) {
+        return RedisModule_WrongArity(ctx);
+    }
+
+    RedisModuleKey *key = RedisModule_OpenKey(ctx, argv[1], REDISMODULE_READ | REDISMODULE_WRITE);
+    long long value;
+    if (RedisModule_ModuleTypeGetType(key) == NULL) {
+        value = 0;
+    } else {
+        value = RedisModule_StringToLongLong(RedisModule_ModuleTypeGetValue(key));
+    }
+    value--;
+    RedisModule_ModuleTypeSetValue(key, RedisModule_CreateStringFromLongLong(ctx, value));
+    RedisModule_ReplyWithLongLong(ctx, value);
+    RedisModule_CloseKey(key);
+    return REDISMODULE_OK;
+}
+
+int RedisModule_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc) {
+    if (RedisModule_Init(ctx, "counter", 1, REDISMODULE_APIVER_1) == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "counter.incr", CounterIncrCommand, "write", 1, 1, 1) == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    if (RedisModule_CreateCommand(ctx, "counter.decr", CounterDecrCommand, "write", 1, 1, 1) == REDISMODULE_ERR) {
+        return REDISMODULE_ERR;
+    }
+
+    return REDISMODULE_OK;
+}
+```
+
+### 使用自定义计数器
+
+加载模块后，可以在 Redis 客户端中使用 `counter.incr` 和 `counter.decr` 命令：
+
+```bash
+127.0.0.1:6379> counter.incr mycounter
+(integer) 1
+127.0.0.1:6379> counter.incr mycounter
+(integer) 2
+127.0.0.1:6379> counter.decr mycounter
+(integer) 1
+```
+
+## 总结
+
+Redis 模块API 提供了强大的功能，允许开发者通过编写模块来扩展 Redis 的功能。本文介绍了 Redis 模块API 的基本概念、编写和加载模块的方法，并通过实际示例展示了如何创建自定义命令和数据类型。通过掌握 Redis 模块API，开发者可以更好地满足特定的业务需求，并优化 Redis 的性能。
+
+## 附加资源
+
+- [Redis 模块API 官方文档](https://redis.io/topics/modules-intro)
+- [Redis 模块开发指南](https://redis.io/topics/modules-api)
+- [Redis 模块示例代码](https://github.com/redis/redis-modules-examples)
+
+## 练习
+
+1. 编写一个 Redis 模块，实现一个简单的键值对存储，支持设置和获取操作。
+2. 扩展上述计数器模块，支持重置计数器的功能。
+3. 尝试编写一个模块，实现一个简单的消息队列功能。
+
+通过完成这些练习，你将更深入地理解 Redis 模块API 的使用方法，并能够编写更复杂的模块。

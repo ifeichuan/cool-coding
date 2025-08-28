@@ -1,0 +1,136 @@
+---
+title: Swift 任务取消
+description: 了解如何在Swift并发编程中取消任务，掌握任务取消的原理、实现方式以及实际应用场景。
+---
+
+# Swift 任务取消
+
+在Swift并发编程中，任务取消（Task Cancellation）是一个非常重要的概念。它允许我们在任务执行过程中，根据需要中断任务的执行，从而避免不必要的资源浪费或处理不再需要的结果。本文将详细介绍Swift中的任务取消机制，并通过代码示例和实际案例帮助你理解其工作原理和应用场景。
+
+## 什么是任务取消？
+
+在并发编程中，任务（Task）是一个独立的工作单元，可以在后台执行。有时，我们可能需要在任务完成之前中断它，例如用户取消了操作，或者任务的结果已经不再需要。Swift提供了内置的任务取消机制，允许我们优雅地处理这种情况。
+
+任务取消的核心思想是**协作式取消**。这意味着任务需要主动检查取消状态，并在适当的时候停止执行。Swift通过`Task`的`isCancelled`属性和`checkCancellation()`方法来实现这一点。
+
+## 任务取消的基本用法
+
+### 检查任务是否被取消
+
+在任务执行过程中，我们可以通过`Task.isCancelled`属性来检查任务是否被取消。如果任务被取消，我们可以选择停止执行并清理资源。
+
+```swift
+let task = Task {
+    for i in 1...10 {
+        if Task.isCancelled {
+            print("任务被取消，停止执行")
+            return
+        }
+        print("正在执行任务 \(i)")
+        try await Task.sleep(nanoseconds: 1_000_000_000) // 模拟耗时操作
+    }
+}
+
+// 取消任务
+task.cancel()
+```
+
+在上面的代码中，任务会每秒打印一次当前执行的次数。如果任务被取消，它会检测到`Task.isCancelled`为`true`，并停止执行。
+
+### 使用`checkCancellation()`方法
+
+Swift还提供了一个更方便的方法`checkCancellation()`，它会在任务被取消时抛出一个`CancellationError`。我们可以使用`try`来捕获这个错误，并处理取消逻辑。
+
+```swift
+let task = Task {
+    do {
+        for i in 1...10 {
+            try Task.checkCancellation()
+            print("正在执行任务 \(i)")
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+    } catch {
+        print("任务被取消: \(error)")
+    }
+}
+
+// 取消任务
+task.cancel()
+```
+
+在这个例子中，如果任务被取消，`checkCancellation()`会抛出`CancellationError`，我们可以在`catch`块中处理取消逻辑。
+
+## 任务取消的实际应用场景
+
+### 用户取消操作
+
+假设我们正在开发一个图片下载应用，用户可以在下载过程中取消操作。我们可以使用任务取消机制来实现这一功能。
+
+```swift
+func downloadImage(from url: URL) async throws -> Data {
+    let task = Task {
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return data
+    }
+
+    // 模拟用户取消操作
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+        task.cancel()
+    }
+
+    return try await task.value
+}
+
+Task {
+    do {
+        let imageData = try await downloadImage(from: URL(string: "https://example.com/image.jpg")!)
+        print("图片下载成功")
+    } catch {
+        print("图片下载失败: \(error)")
+    }
+}
+```
+
+在这个例子中，如果用户在2秒内取消了下载操作，任务会被取消，并且`downloadImage`函数会抛出`CancellationError`。
+
+### 超时取消
+
+有时，我们可能希望任务在超时后自动取消。我们可以结合`Task.sleep`和任务取消机制来实现这一点。
+
+```swift
+func performTaskWithTimeout() async throws -> String {
+    let task = Task {
+        try await Task.sleep(nanoseconds: 5_000_000_000) // 模拟耗时操作
+        return "任务完成"
+    }
+
+    // 设置超时时间为3秒
+    try await Task.sleep(nanoseconds: 3_000_000_000)
+    task.cancel()
+
+    return try await task.value
+}
+
+Task {
+    do {
+        let result = try await performTaskWithTimeout()
+        print(result)
+    } catch {
+        print("任务超时取消: \(error)")
+    }
+}
+```
+
+在这个例子中，如果任务在3秒内没有完成，它会被取消，并抛出`CancellationError`。
+
+## 总结
+
+任务取消是Swift并发编程中的一个重要概念，它允许我们在任务执行过程中中断任务，从而避免不必要的资源浪费。通过`Task.isCancelled`和`checkCancellation()`，我们可以轻松实现任务取消功能。在实际应用中，任务取消可以用于处理用户取消操作、超时取消等场景。
+
+## 附加资源与练习
+
+- **练习1**：尝试在一个并发任务中实现多个子任务的取消逻辑。
+- **练习2**：编写一个模拟网络请求的函数，并在请求过程中实现任务取消。
+- **进一步阅读**：查阅Swift官方文档中关于[Task Cancellation](https://developer.apple.com/documentation/swift/task/cancellation)的更多内容。
+
+通过本文的学习，你应该已经掌握了Swift任务取消的基本概念和实现方法。希望你能在实际项目中灵活运用这些知识，编写出更加健壮和高效的并发代码！

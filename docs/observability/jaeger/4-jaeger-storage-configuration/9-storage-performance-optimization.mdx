@@ -1,0 +1,120 @@
+---
+title: 存储性能优化
+description: 学习如何优化Jaeger的存储配置以提高查询和写入性能，涵盖索引设计、批量操作和缓存策略等关键技术。
+---
+
+# 存储性能优化
+
+## 介绍
+
+在分布式追踪系统中，存储性能直接影响查询速度和系统稳定性。Jaeger支持多种后端存储（如Cassandra、Elasticsearch），但不当的配置可能导致性能瓶颈。本文将介绍如何通过索引优化、批量操作和缓存策略提升Jaeger存储性能。
+
+:::note 目标读者
+- 刚接触Jaeger存储配置的开发者
+- 希望了解基础性能优化原则的初学者
+:::
+
+## 核心优化策略
+
+### 1. 索引设计优化
+
+Jaeger依赖存储后端的索引加速查询。例如在Elasticsearch中：
+
+```json
+PUT /jaeger-span-2023-11-15
+{
+  "mappings": {
+    "properties": {
+      "traceID": { "type": "keyword" },
+      "operationName": { "type": "text", "fields": { "keyword": { "type": "keyword" } } },
+      "duration": { "type": "long" }
+    }
+  }
+}
+```
+
+:::tip 索引设计原则
+- 高频查询字段应设为`keyword`类型
+- 数值范围查询字段用`long`/`integer`
+- 避免过多索引增加写入负担
+:::
+
+### 2. 批量写入操作
+
+Jaeger Collector支持批量写入，调整`--collector.queue-size`和`--collector.num-workers`参数：
+
+```bash
+jaeger-collector \
+  --collector.queue-size=2000 \
+  --collector.num-workers=50
+```
+
+配置效果对比：
+
+```mermaid
+barChart
+    title 写入吞吐量对比(span/sec)
+    x-axis 配置
+    y-axis 吞吐量
+    series "默认配置"
+    series "优化配置"
+    Default: 500
+    Optimized: 1200
+```
+
+### 3. 缓存策略
+
+启用Redis缓存查询结果：
+
+```yaml
+# jaeger-query配置
+query:
+  cache:
+    type: redis
+    host: "redis:6379"
+    ttl: "1h"
+```
+
+缓存命中率提升示例：
+- 无缓存：平均查询耗时 450ms
+- 有缓存：高频查询平均耗时 120ms
+
+## 实际案例
+
+### 电商平台追踪优化
+
+**问题场景**：
+- 每日产生20亿条span数据
+- 查询99分位延迟超过5秒
+
+**优化措施**：
+1. 将Elasticsearch分片数从5增加到10
+2. 调整Collector批量大小为500条
+3. 对`userID`和`orderID`添加复合索引
+
+**结果**：
+- 写入吞吐量提升3倍
+- P99查询延迟降至1.2秒
+
+## 总结
+
+关键优化手段：
+1. 根据查询模式设计针对性索引
+2. 合理配置批量写入参数
+3. 利用缓存减少重复计算
+
+:::warning 注意事项
+- 监控存储负载变化，避免过度优化
+- 生产环境应先进行性能测试
+:::
+
+## 扩展学习
+
+推荐练习：
+1. 使用`jaeger-query`的`/metrics`端点收集性能数据
+2. 对比不同批量大小下的CPU/内存使用率
+3. 尝试为你的业务字段创建定制化索引
+
+附加资源：
+- Jaeger官方文档《Storage Backends》
+- 《Elasticsearch性能调优指南》

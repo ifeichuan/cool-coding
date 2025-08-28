@@ -1,0 +1,422 @@
+---
+title: C++ 11可变参数模板
+description: 深入了解C++11引入的可变参数模板特性，掌握如何处理任意数量和类型的函数参数
+---
+
+# C++ 11可变参数模板
+
+## 什么是可变参数模板？
+
+**可变参数模板**是C++11引入的一项强大特性，允许函数和类接受可变数量和类型的参数。在C++11之前，处理不确定数量参数比较麻烦，通常需要采用特殊技巧或依赖宏来实现。可变参数模板使这项工作变得更加直观、类型安全且高效。
+
+:::note 核心概念
+可变参数模板使用了**模板参数包**（template parameter pack）概念，允许开发者以类型安全的方式处理任意数量的参数。
+:::
+
+## 基础语法
+
+可变参数模板的核心语法是使用省略号(`...`)来表示参数包：
+
+```cpp
+// 可变参数模板函数
+template<typename... Args>
+void function(Args... args) {
+    // 函数体
+}
+
+// 可变参数模板类
+template<typename... Args>
+class MyClass {
+    // 类定义
+};
+```
+
+其中：
+- `typename... Args` 表示一个**类型参数包**
+- `Args... args` 表示一个**函数参数包**
+- `...` 是参数包展开操作符
+
+## 参数包展开
+
+要使用参数包中的参数，需要进行**参数包展开**。这通常通过递归或者折叠表达式(C++17)来实现。
+
+### 递归方式展开
+
+最常见的展开方式是通过递归终止条件和递归调用：
+
+```cpp
+#include <iostream>
+
+// 递归终止函数
+void print() {
+    std::cout << "递归结束" << std::endl;
+}
+
+// 可变参数模板函数
+template<typename T, typename... Args>
+void print(T first, Args... rest) {
+    std::cout << first << " ";  // 处理第一个参数
+    print(rest...);             // 递归处理剩余参数
+}
+
+int main() {
+    print(1, 2.5, "hello", 'c');
+    return 0;
+}
+```
+
+输出结果：
+```
+1 2.5 hello c 递归结束
+```
+
+### 使用逗号表达式展开
+
+另一种常见的展开方式是使用逗号表达式和初始化列表：
+
+```cpp
+#include <iostream>
+
+template<typename... Args>
+void printAll(Args... args) {
+    // 使用初始化列表和逗号表达式展开
+    int dummy[] = { 0, (std::cout << args << " ", 0)... };
+    (void)dummy; // 避免未使用变量警告
+    std::cout << std::endl;
+}
+
+int main() {
+    printAll(10, "C++11", 3.14, 'A');
+    return 0;
+}
+```
+
+输出结果：
+```
+10 C++11 3.14 A 
+```
+
+## 可变参数模板类
+
+可变参数模板不仅可用于函数，也可用于类：
+
+```cpp
+#include <iostream>
+#include <tuple>
+
+// 可变参数模板类
+template<typename... Types>
+class Tuple {
+public:
+    // 构造函数也可以是可变参数模板
+    template<typename... Args>
+    Tuple(Args&&... args) {
+        std::cout << "构造了一个Tuple，包含" << sizeof...(Types) << "个元素" << std::endl;
+    }
+    
+    // sizeof... 操作符用于获取参数包大小
+    static constexpr size_t size = sizeof...(Types);
+};
+
+int main() {
+    Tuple<int, double, char> t1(1, 2.5, 'a');
+    Tuple<std::string, bool> t2("hello", true);
+    
+    std::cout << "t1大小: " << decltype(t1)::size << std::endl;
+    std::cout << "t2大小: " << decltype(t2)::size << std::endl;
+    
+    return 0;
+}
+```
+
+输出结果：
+```
+构造了一个Tuple，包含3个元素
+构造了一个Tuple，包含2个元素
+t1大小: 3
+t2大小: 2
+```
+
+## 实际应用场景
+
+### 1. 实现一个通用的printf风格函数
+
+```cpp
+#include <iostream>
+#include <string>
+
+void formatAndPrint(const char* format) {
+    while (*format) {
+        if (*format == '%' && *(format + 1) != '%') {
+            throw std::runtime_error("格式化字符串中存在多余的占位符");
+        }
+        std::cout << *format++;
+    }
+}
+
+template<typename T, typename... Args>
+void formatAndPrint(const char* format, T value, Args... args) {
+    while (*format) {
+        if (*format == '%' && *(format + 1) != '%') {
+            std::cout << value;
+            formatAndPrint(format + 1, args...);
+            return;
+        }
+        std::cout << *format++;
+    }
+    throw std::runtime_error("参数过多，格式化字符串中缺少占位符");
+}
+
+int main() {
+    formatAndPrint("Hello, %! Today is % and the temperature is % degrees.\n", 
+                  "world", "Monday", 25);
+    return 0;
+}
+```
+
+输出结果：
+```
+Hello, world! Today is Monday and the temperature is 25 degrees.
+```
+
+### 2. 实现一个简单的元组类
+
+```cpp
+#include <iostream>
+
+// 空元组作为递归终止条件
+template<typename... T>
+struct SimpleTuple {};
+
+// 特化版本，处理至少有一个元素的元组
+template<typename Head, typename... Tail>
+struct SimpleTuple<Head, Tail...> {
+    Head head;
+    SimpleTuple<Tail...> tail;
+    
+    SimpleTuple(Head h, Tail... t) : head(h), tail(t...) {}
+    
+    Head getHead() const { return head; }
+    
+    template<size_t N>
+    auto get() const {
+        if constexpr (N == 0)
+            return head;
+        else
+            return tail.template get<N-1>();
+    }
+};
+
+int main() {
+    SimpleTuple<int, double, std::string> tuple(1, 2.5, "hello");
+    
+    std::cout << "第0个元素: " << tuple.get<0>() << std::endl;
+    std::cout << "第1个元素: " << tuple.get<1>() << std::endl;
+    std::cout << "第2个元素: " << tuple.get<2>() << std::endl;
+    
+    return 0;
+}
+```
+
+输出结果：
+```
+第0个元素: 1
+第1个元素: 2.5
+第2个元素: hello
+```
+
+### 3. 通用工厂模式实现
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <functional>
+
+// 产品基类
+class Product {
+public:
+    virtual ~Product() = default;
+    virtual void use() const = 0;
+};
+
+// 具体产品类
+class ConcreteProduct1 : public Product {
+    std::string name;
+public:
+    ConcreteProduct1(std::string n) : name(std::move(n)) {}
+    void use() const override {
+        std::cout << "使用产品1: " << name << std::endl;
+    }
+};
+
+class ConcreteProduct2 : public Product {
+    int value;
+public:
+    ConcreteProduct2(int v) : value(v) {}
+    void use() const override {
+        std::cout << "使用产品2: " << value << std::endl;
+    }
+};
+
+// 通用工厂类
+class Factory {
+    using Creator = std::function<std::unique_ptr<Product>()>;
+    std::unordered_map<std::string, Creator> creators_;
+
+public:
+    template<typename ProductType, typename... Args>
+    void registerProduct(const std::string& type, Args... args) {
+        creators_[type] = [=]() {
+            return std::make_unique<ProductType>(args...);
+        };
+    }
+
+    std::unique_ptr<Product> createProduct(const std::string& type) {
+        auto it = creators_.find(type);
+        if (it != creators_.end()) {
+            return it->second();
+        }
+        return nullptr;
+    }
+};
+
+int main() {
+    Factory factory;
+    
+    // 注册不同类型的产品
+    factory.registerProduct<ConcreteProduct1>("product1", "高级产品");
+    factory.registerProduct<ConcreteProduct2>("product2", 42);
+    
+    // 创建产品并使用
+    auto p1 = factory.createProduct("product1");
+    auto p2 = factory.createProduct("product2");
+    
+    if (p1) p1->use();
+    if (p2) p2->use();
+    
+    return 0;
+}
+```
+
+输出结果：
+```
+使用产品1: 高级产品
+使用产品2: 42
+```
+
+## 高级技巧
+
+### 参数包中的类型推导
+
+```cpp
+#include <iostream>
+#include <type_traits>
+
+template<typename T>
+void printType() {
+    if constexpr (std::is_same_v<T, int>) {
+        std::cout << "int类型" << std::endl;
+    } else if constexpr (std::is_same_v<T, double>) {
+        std::cout << "double类型" << std::endl;
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        std::cout << "string类型" << std::endl;
+    } else {
+        std::cout << "其他类型" << std::endl;
+    }
+}
+
+template<typename... Args>
+void printTypes() {
+    (printType<Args>(), ...); // C++17折叠表达式
+}
+
+int main() {
+    printTypes<int, double, std::string, char>();
+    return 0;
+}
+```
+
+输出结果：
+```
+int类型
+double类型
+string类型
+其他类型
+```
+
+### 完美转发参数包
+
+```cpp
+#include <iostream>
+#include <utility>
+#include <string>
+
+class MyClass {
+public:
+    template<typename... Args>
+    static void createAndProcess(Args&&... args) {
+        // 完美转发所有参数
+        process(std::forward<Args>(args)...);
+    }
+    
+private:
+    static void process() {
+        std::cout << "处理完成" << std::endl;
+    }
+    
+    template<typename T, typename... Rest>
+    static void process(T&& first, Rest&&... rest) {
+        std::cout << "处理: " << std::forward<T>(first) << std::endl;
+        process(std::forward<Rest>(rest)...);
+    }
+};
+
+int main() {
+    std::string str = "world";
+    MyClass::createAndProcess(42, 3.14, "hello", str);
+    return 0;
+}
+```
+
+输出结果：
+```
+处理: 42
+处理: 3.14
+处理: hello
+处理: world
+处理完成
+```
+
+## 注意事项与局限性
+
+:::caution 注意
+1. 可变参数模板递归展开可能导致编译时间增加
+2. 过度使用可能会导致代码难以理解和维护
+3. 调试可变参数模板代码可能比常规代码更困难
+:::
+
+## 实践练习
+
+1. 实现一个`sum`函数，可以计算任意数量数值的总和
+2. 创建一个打印容器元素的函数模板，支持任何标准容器
+3. 实现一个简化版的`std::make_unique`函数，支持完美转发任意数量的参数
+
+## 总结
+
+C++11的可变参数模板为C++带来了更强大的元编程能力，特别在以下方面提供了显著优势：
+
+- **灵活性**：可以处理任意数量、任意类型的参数
+- **类型安全**：相比于C风格的可变参数函数，模板可变参数具有完整的类型检查
+- **高效性**：可以实现零开销抽象
+- **通用性**：可以创建更通用的组件和库
+
+可变参数模板是现代C++中不可或缺的一部分，广泛应用于标准库(如`std::tuple`, `std::make_shared`, `std::make_unique`等)和许多高级框架中。掌握这一特性将大大提升你的C++编程能力和代码质量。
+
+## 进一步学习资源
+
+- C++标准库中的`<tuple>`和`<utility>`提供了可变参数模板的实际应用
+- 尝试阅读标准库实现中的可变参数模板代码
+- 研究折叠表达式(C++17)如何简化可变参数模板代码
+- 探索可变参数模板与其他C++11特性(如完美转发、移动语义)的结合使用

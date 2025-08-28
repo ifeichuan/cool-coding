@@ -1,0 +1,111 @@
+---
+title: OpenTelemetry Collector架构
+description: 初学者指南：了解OpenTelemetry Collector的核心组件、数据流处理流程及实际应用场景
+---
+
+## 介绍
+
+OpenTelemetry Collector是一个用于接收、处理和导出遥测数据（如指标、日志和追踪）的代理服务。它作为OpenTelemetry生态系统的核心组件，帮助开发者将应用程序的观测数据统一发送到多种后端系统（如Prometheus、Jaeger等）。<br />
+本指南将逐步解析其架构设计，适合刚接触可观测性工具的开发者。
+
+## 核心架构
+
+OpenTelemetry Collector采用**模块化设计**，主要由三个核心组件构成：
+
+```mermaid
+graph LR
+    A[Receivers] --> B[Processors]
+    B --> C[Exporters]
+```
+
+1. **Receivers（接收器）**  
+   负责从应用程序或其他数据源接收数据，支持多种协议：
+   - `otlp` (OpenTelemetry Protocol)
+   - `jaeger`
+   - `prometheus`
+
+2. **Processors（处理器）**  
+   对数据进行过滤、转换或增强：
+   - 批量处理（`batch`）
+   - 添加属性（`attributes`）
+   - 采样（`sampling`）
+
+3. **Exporters（导出器）**  
+   将处理后的数据发送到目标系统：
+   - 日志分析平台（如`Loki`）
+   - 监控系统（如`Prometheus`）
+   - 分布式追踪系统（如`Zipkin`）
+
+:::tip 数据流向
+数据始终按 `Receivers → Processors → Exporters` 的顺序流动，不可逆。
+:::
+
+## 配置文件示例
+
+以下是一个基础的Collector配置（`otel-collector-config.yaml`），展示如何组合这些组件：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+    timeout: 10s
+  attributes:
+    actions:
+      - key: environment
+        value: production
+        action: insert
+
+exporters:
+  logging:
+    logLevel: debug
+  prometheus:
+    endpoint: "localhost:9090"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, attributes]
+      exporters: [logging, prometheus]
+```
+
+**关键字段说明**：
+- `receivers` 定义数据输入来源（此处使用OTLP协议）
+- `processors` 添加环境标签并批量处理
+- `exporters` 将数据输出到控制台日志和Prometheus
+
+## 实际应用场景
+
+### 场景1：微服务追踪
+假设有一个由多个服务组成的电商系统：
+1. Collector接收各服务的追踪数据（通过`otlp`接收器）
+2. 使用`tail_sampling`处理器仅保留错误率高的请求链路
+3. 导出到Jaeger进行可视化分析
+
+### 场景2：统一指标收集
+1. 从不同服务（如Node.js、Java）接收Prometheus格式指标
+2. 通过`resource`处理器添加服务名称标签
+3. 批量处理后导出到时序数据库
+
+## 总结
+
+OpenTelemetry Collector的核心价值在于：
+- **解耦应用与后端系统**：应用只需发送数据到Collector，无需关心后端变化
+- **灵活的数据处理**：通过处理器链实现数据标准化
+- **多协议支持**：兼容主流观测数据格式
+
+## 延伸学习
+
+1. [官方文档](https://opentelemetry.io/docs/collector/)：深入了解高级配置项
+2. 动手练习：尝试部署一个Collector，将数据从Demo应用发送到控制台
+3. 扩展思考：如何设计一个处理错误日志的专用Pipeline？
+
+:::note 常见问题
+**Q：Collector需要单独部署吗？**  
+A：可以独立部署为服务，也可以作为Sidecar与应用共存，取决于规模需求。
+:::

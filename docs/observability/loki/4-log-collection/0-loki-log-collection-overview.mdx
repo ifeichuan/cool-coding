@@ -1,0 +1,119 @@
+---
+title: Loki 日志收集概述
+description: 了解Grafana Loki日志收集的基本原理、架构和核心概念，适合初学者入门分布式日志系统。
+---
+
+## 引言
+
+日志收集是现代系统监控和故障排查的核心环节。Grafana Loki是一个开源的日志聚合系统，专为高效率和低成本设计，特别适合云原生环境。与传统的ELK（Elasticsearch、Logstash、Kibana）栈相比，Loki通过索引日志元数据而非内容本身，大幅降低了存储和计算开销。
+
+## Loki 日志收集的核心概念
+
+### 1. 日志收集流程
+Loki的日志收集分为三个阶段：
+1. **采集（Scraping）**：从目标系统（如容器、虚拟机）拉取日志。
+2. **处理（Processing）**：通过Pipeline对日志进行过滤、格式转换。
+3. **存储（Storing）**：将日志和元数据分别存入对象存储（如S3）和索引存储（如BoltDB）。
+
+```mermaid
+flowchart LR
+    A[日志源] -->|Promtail采集| B(Loki)
+    B --> C[存储后端]
+    C --> D[Grafana可视化]
+```
+
+### 2. 关键组件
+- **Promtail**：Loki的官方日志采集代理，负责发现目标并推送日志。
+- **Loki**：主服务，处理查询和存储。
+- **Grafana**：用于日志查询和可视化。
+
+:::note
+Loki不解析日志内容，而是通过标签（Labels）快速定位日志流，这使得它的存储效率比全文索引系统高10倍以上。
+:::
+
+---
+
+## 实际案例：收集Docker容器日志
+
+### 步骤1：配置Promtail
+以下是一个简单的Promtail配置示例，用于收集Docker容器的日志：
+
+```yaml
+# promtail-config.yaml
+server:
+  http_listen_port: 9080
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+- job_name: docker
+  docker_sd_configs:
+    - host: unix:///var/run/docker.sock
+  relabel_configs:
+    - source_labels: ['__meta_docker_container_name']
+      target_label: 'container'
+```
+
+### 步骤2：启动Loki和Promtail
+使用Docker Compose快速启动服务：
+
+```yaml
+# docker-compose.yaml
+version: '3'
+services:
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./promtail-config.yaml:/etc/promtail/config.yaml"
+```
+
+### 步骤3：在Grafana中查询日志
+启动后，在Grafana的Explore界面输入LogQL查询：
+```logql
+{container="my-app"} |= "error"
+```
+这将显示所有包含"error"的日志行。
+
+---
+
+## 高级特性：日志处理Pipeline
+
+Loki支持在客户端（Promtail）或服务端对日志进行加工。例如，提取JSON字段作为标签：
+
+```yaml
+pipeline_stages:
+  - json:
+      expressions:
+        level: log_level
+  - labels:
+      level:
+```
+
+输入日志：
+```json
+{"log_level": "error", "message": "Failed to connect"}
+```
+输出结果：自动添加标签 `level="error"`。
+
+---
+
+## 总结
+
+Loki的日志收集通过轻量级设计解决了传统方案的成本问题，尤其适合：
+- 云原生环境（Kubernetes、Docker）
+- 需要长期存储但预算有限的场景
+- 与Prometheus、Grafana集成的监控体系
+
+### 延伸资源
+1. [官方文档：LogQL查询语言](https://grafana.com/docs/loki/latest/logql/)
+2. 练习：尝试在本地用Docker部署Loki，并收集Nginx访问日志。
+
+:::tip
+调试技巧：使用 `curl -G -s "http://loki:3100/ready"` 验证Loki服务状态。
+:::

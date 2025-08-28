@@ -1,0 +1,156 @@
+---
+title: CentOS 集群存储
+description: 了解如何在CentOS高可用集群中配置和管理存储，确保数据的高可用性和可靠性。
+---
+
+# CentOS 集群存储
+
+在构建高可用性（HA）集群时，存储是一个至关重要的组件。CentOS集群存储不仅需要确保数据的高可用性，还需要提供一致性和性能。本文将逐步介绍如何在CentOS集群中配置和管理存储，帮助初学者理解相关概念并掌握实际操作。
+
+## 什么是CentOS集群存储？
+
+CentOS集群存储是指在多个节点之间共享的存储系统，这些节点可以是物理服务器或虚拟机。通过共享存储，集群中的每个节点都可以访问相同的数据，从而实现高可用性和负载均衡。常见的集群存储解决方案包括NFS（网络文件系统）、iSCSI（Internet小型计算机系统接口）和分布式文件系统（如GlusterFS和Ceph）。
+
+## 配置NFS共享存储
+
+NFS是一种常见的网络文件系统，允许多个节点通过网络访问共享的存储。以下是如何在CentOS集群中配置NFS共享存储的步骤。
+
+### 1. 安装NFS服务器
+
+首先，在主节点上安装NFS服务器软件包：
+
+```bash
+sudo yum install nfs-utils
+```
+
+### 2. 配置NFS共享目录
+
+编辑`/etc/exports`文件，添加要共享的目录和访问权限。例如，共享`/data`目录并允许所有节点访问：
+
+```bash
+/data *(rw,sync,no_root_squash)
+```
+
+### 3. 启动NFS服务
+
+启动并启用NFS服务：
+
+```bash
+sudo systemctl start nfs-server
+sudo systemctl enable nfs-server
+```
+
+### 4. 在客户端挂载NFS共享
+
+在集群的其他节点上，安装NFS客户端并挂载共享目录：
+
+```bash
+sudo yum install nfs-utils
+sudo mount -t nfs <主节点IP>:/data /mnt/data
+```
+
+:::note
+确保防火墙允许NFS流量通过，通常需要开放`2049`端口。
+:::
+
+## 使用iSCSI进行块存储共享
+
+iSCSI是一种基于IP的存储网络协议，允许将远程存储设备作为本地块设备使用。以下是配置iSCSI存储的步骤。
+
+### 1. 安装iSCSI目标服务器
+
+在主节点上安装iSCSI目标服务器软件包：
+
+```bash
+sudo yum install targetcli
+```
+
+### 2. 配置iSCSI目标
+
+使用`targetcli`工具创建iSCSI目标：
+
+```bash
+sudo targetcli
+/> backstores/block create name=disk1 dev=/dev/sdb
+/> iscsi/ create iqn.2023-10.com.example:storage.target00
+/> iscsi/iqn.2023-10.com.example:storage.target00/tpg1/luns/ create /backstores/block/disk1
+/> iscsi/iqn.2023-10.com.example:storage.target00/tpg1/acls/ create iqn.2023-10.com.example:client.node01
+/> exit
+```
+
+### 3. 在客户端连接iSCSI目标
+
+在客户端节点上，安装iSCSI启动器并连接目标：
+
+```bash
+sudo yum install iscsi-initiator-utils
+sudo iscsiadm -m discovery -t sendtargets -p <主节点IP>
+sudo iscsiadm -m node -T iqn.2023-10.com.example:storage.target00 -p <主节点IP> -l
+```
+
+:::tip
+使用`lsblk`命令查看挂载的iSCSI设备。
+:::
+
+## 分布式文件系统：GlusterFS
+
+GlusterFS是一种分布式文件系统，适用于大规模数据存储和高可用性需求。以下是配置GlusterFS的步骤。
+
+### 1. 安装GlusterFS
+
+在所有节点上安装GlusterFS：
+
+```bash
+sudo yum install glusterfs-server
+sudo systemctl start glusterd
+sudo systemctl enable glusterd
+```
+
+### 2. 创建GlusterFS卷
+
+在主节点上，创建GlusterFS卷：
+
+```bash
+sudo gluster volume create gv0 replica 2 node1:/data/brick1 node2:/data/brick2
+sudo gluster volume start gv0
+```
+
+### 3. 挂载GlusterFS卷
+
+在客户端节点上，挂载GlusterFS卷：
+
+```bash
+sudo mount -t glusterfs node1:/gv0 /mnt/glusterfs
+```
+
+:::caution
+确保所有节点的防火墙允许GlusterFS流量通过，通常需要开放`24007`和`49152-49251`端口。
+:::
+
+## 实际案例：高可用Web服务器集群
+
+假设我们有一个高可用Web服务器集群，使用NFS共享存储来存储Web内容。以下是配置步骤：
+
+1. 在主节点上配置NFS共享`/var/www/html`目录。
+2. 在所有Web服务器节点上挂载NFS共享目录。
+3. 配置负载均衡器（如HAProxy）以分发流量到各个Web服务器节点。
+
+通过这种方式，即使某个Web服务器节点发生故障，其他节点仍然可以访问相同的Web内容，确保服务的高可用性。
+
+## 总结
+
+CentOS集群存储是实现高可用性和数据一致性的关键组件。通过NFS、iSCSI和GlusterFS等解决方案，可以有效地管理和共享存储资源。本文介绍了这些技术的配置步骤，并通过实际案例展示了它们在真实场景中的应用。
+
+## 附加资源
+
+- [NFS官方文档](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/storage_administration_guide/ch-nfs)
+- [iSCSI配置指南](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/storage_administration_guide/ch-iscsi)
+- [GlusterFS官方文档](https://docs.gluster.org/en/latest/)
+
+## 练习
+
+1. 在一个双节点CentOS集群中配置NFS共享存储，并验证数据的高可用性。
+2. 使用iSCSI配置块存储，并在客户端节点上挂载和使用该存储。
+3. 在三节点集群中配置GlusterFS卷，并测试数据的冗余和一致性。
+
+通过这些练习，您将更好地理解CentOS集群存储的配置和管理。

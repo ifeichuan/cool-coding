@@ -1,0 +1,198 @@
+---
+title: Spring HATEOAS
+description: "了解如何在 Spring REST 应用中使用 HATEOAS（超媒体作为应用状态引擎）来构建可发现和自描述的 API。"
+---
+
+# Spring HATEOAS
+
+## 介绍
+
+HATEOAS（Hypermedia as the Engine of Application State，超媒体作为应用状态引擎）是 REST 架构风格的一个重要原则。它允许客户端通过 API 返回的超媒体链接动态发现和导航资源，而无需预先了解 API 的结构。Spring HATEOAS 是 Spring 生态系统中的一个模块，用于简化在 RESTful Web 服务中实现 HATEOAS。
+
+通过使用 Spring HATEOAS，您可以为 API 添加自描述性，使客户端能够通过链接动态探索 API 的功能，从而提高 API 的可发现性和灵活性。
+
+## 为什么使用 HATEOAS？
+
+在传统的 REST API 中，客户端通常需要预先了解 API 的结构和资源的位置。这种方式存在以下问题：
+
+1. **紧耦合**：客户端与 API 的结构紧密耦合，API 的任何更改都可能破坏客户端的功能。
+2. **缺乏可发现性**：客户端无法动态发现 API 的功能，必须依赖文档或硬编码的 URL。
+
+HATEOAS 通过在每个响应中包含相关资源的链接来解决这些问题。客户端只需知道初始入口点，然后通过链接动态导航到其他资源。
+
+## Spring HATEOAS 的核心概念
+
+### 1. `RepresentationModel`
+
+`RepresentationModel` 是 Spring HATEOAS 中的一个基类，用于表示资源模型。它包含了一组链接（`Link`），这些链接指向与该资源相关的其他资源。
+
+### 2. `Link`
+
+`Link` 类表示一个超媒体链接，包含 `href`（链接的目标 URL）和 `rel`（链接的关系类型）。
+
+### 3. `EntityModel`
+
+`EntityModel` 是 `RepresentationModel` 的一个子类，用于包装单个实体对象，并为其添加链接。
+
+### 4. `CollectionModel`
+
+`CollectionModel` 是 `RepresentationModel` 的另一个子类，用于包装一组实体对象，并为整个集合添加链接。
+
+## 示例：使用 Spring HATEOAS 构建 REST API
+
+以下是一个简单的示例，展示如何在 Spring Boot 应用中使用 Spring HATEOAS。
+
+### 1. 添加依赖
+
+首先，在 `pom.xml` 中添加 Spring HATEOAS 依赖：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-hateoas</artifactId>
+</dependency>
+```
+
+### 2. 创建实体类
+
+假设我们有一个 `Book` 实体类：
+
+```java
+public class Book {
+    private Long id;
+    private String title;
+    private String author;
+
+    // 构造函数、getter 和 setter 省略
+}
+```
+
+### 3. 创建控制器
+
+接下来，创建一个 REST 控制器，并使用 Spring HATEOAS 为响应添加链接：
+
+```java
+import org.springframework.hateoas.CollectionModel;
+import org.springframework.hateoas.EntityModel;
+import org.springframework.hateoas.server.mvc.WebMvcLinkBuilder;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@RestController
+@RequestMapping("/books")
+public class BookController {
+
+    private final List<Book> books = List.of(
+        new Book(1L, "Spring in Action", "Craig Walls"),
+        new Book(2L, "Clean Code", "Robert C. Martin")
+    );
+
+    @GetMapping("/{id}")
+    public EntityModel<Book> getBookById(@PathVariable Long id) {
+        Book book = books.stream()
+            .filter(b -> b.getId().equals(id))
+            .findFirst()
+            .orElseThrow(() -> new RuntimeException("Book not found"));
+
+        return EntityModel.of(book,
+            WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(BookController.class).getBookById(id)).withSelfRel(),
+            WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(BookController.class).getAllBooks()).withRel("books"));
+    }
+
+    @GetMapping
+    public CollectionModel<EntityModel<Book>> getAllBooks() {
+        List<EntityModel<Book>> bookModels = books.stream()
+            .map(book -> EntityModel.of(book,
+                WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(BookController.class).getBookById(book.getId())).withSelfRel()))
+            .collect(Collectors.toList());
+
+        return CollectionModel.of(bookModels,
+            WebMvcLinkBuilder.linkTo(WebMvcLinkBuilder.methodOn(BookController.class).getAllBooks()).withSelfRel());
+    }
+}
+```
+
+### 4. 测试 API
+
+启动应用后，访问 `http://localhost:8080/books`，您将看到类似以下的响应：
+
+```json
+{
+  "_embedded": {
+    "bookList": [
+      {
+        "id": 1,
+        "title": "Spring in Action",
+        "author": "Craig Walls",
+        "_links": {
+          "self": {
+            "href": "http://localhost:8080/books/1"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Clean Code",
+        "author": "Robert C. Martin",
+        "_links": {
+          "self": {
+            "href": "http://localhost:8080/books/2"
+          }
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/books"
+    }
+  }
+}
+```
+
+访问 `http://localhost:8080/books/1`，您将看到类似以下的响应：
+
+```json
+{
+  "id": 1,
+  "title": "Spring in Action",
+  "author": "Craig Walls",
+  "_links": {
+    "self": {
+      "href": "http://localhost:8080/books/1"
+    },
+    "books": {
+      "href": "http://localhost:8080/books"
+    }
+  }
+}
+```
+
+## 实际应用场景
+
+HATEOAS 在以下场景中特别有用：
+
+1. **API 版本控制**：通过链接动态指向不同版本的资源，客户端无需硬编码版本号。
+2. **分页和排序**：在分页结果中提供“下一页”和“上一页”的链接。
+3. **资源导航**：客户端可以通过链接动态发现相关资源，而无需预先了解 API 的结构。
+
+## 总结
+
+Spring HATEOAS 是一个强大的工具，可以帮助您构建自描述和可发现的 RESTful API。通过在每个响应中添加超媒体链接，客户端可以动态导航和探索 API 的功能，从而减少与 API 的紧耦合。
+
+## 附加资源
+
+- [Spring HATEOAS 官方文档](https://docs.spring.io/spring-hateoas/docs/current/reference/html/)
+- [RESTful Web Services with Spring](https://spring.io/guides/gs/rest-hateoas/)
+
+## 练习
+
+1. 扩展上面的示例，为 `Book` 资源添加分页功能，并在响应中提供“下一页”和“上一页”的链接。
+2. 尝试为 `Book` 资源添加一个“购买”链接，指向一个模拟的购买端点。
+
+通过完成这些练习，您将更深入地理解 Spring HATEOAS 的使用场景和优势。

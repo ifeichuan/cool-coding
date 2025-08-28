@@ -1,0 +1,414 @@
+---
+title: C++ 用于数组的智能指针
+description: "了解如何在C++中使用智能指针管理动态数组，包括std::unique_ptr和std::shared_ptr以及适当的删除器配置"
+---
+
+# C++ 用于数组的智能指针
+
+在C++编程中，动态内存管理是一个关键但也容易出错的部分。特别是当处理动态数组时，内存泄漏和悬挂指针等问题会更加常见。为解决这些问题，C++11引入了智能指针，它们不仅可以管理单个对象，还可以安全地管理动态数组。本文将详细探讨如何使用智能指针管理数组。
+
+## 为什么需要用于数组的智能指针？
+
+在了解如何使用智能指针管理数组之前，让我们先明确为什么这是必要的：
+
+1. **自动内存管理**：智能指针自动处理内存释放，防止内存泄漏。
+2. **避免手动delete[]**：当使用普通指针管理数组时，必须记得使用`delete[]`而不是`delete`，这是常见的错误源。
+3. **安全共享**：某些情况下，多个代码部分可能需要访问同一个动态数组。
+
+## 标准库中用于数组的智能指针
+
+C++标准库提供了几种智能指针，但主要有两种可以用于管理数组：
+
+1. `std::unique_ptr<T[]>`
+2. `std::shared_ptr<T[]>` (C++17起完全支持数组)
+
+:::note
+`std::weak_ptr`不直接用于资源管理，而是作为`std::shared_ptr`的辅助，所以我们不会在本文中详细讨论它用于数组的情况。
+:::
+
+## 使用std::unique_ptr管理数组
+
+`std::unique_ptr`是最轻量级且高效的智能指针，它遵循独占所有权模型 - 一次只有一个`unique_ptr`可以拥有特定资源。
+
+### 基本语法
+
+```cpp
+#include <iostream>
+#include <memory>
+
+int main() {
+    // 创建管理10个整数的数组
+    std::unique_ptr<int[]> arr = std::make_unique<int[]>(10);
+    
+    // 使用数组
+    for (int i = 0; i < 10; i++) {
+        arr[i] = i * 10;
+    }
+    
+    // 访问数组元素
+    for (int i = 0; i < 10; i++) {
+        std::cout << "arr[" << i << "] = " << arr[i] << std::endl;
+    }
+    
+    // 自动释放内存，不需要调用delete[]
+    return 0;
+}
+```
+
+**输出：**
+```
+arr[0] = 0
+arr[1] = 10
+arr[2] = 20
+arr[3] = 30
+arr[4] = 40
+arr[5] = 50
+arr[6] = 60
+arr[7] = 70
+arr[8] = 80
+arr[9] = 90
+```
+
+### 关键点解析
+
+1. **数组语法**：注意类型参数中的方括号 `int[]`，这告诉编译器这是一个数组。
+2. **make_unique**：C++14引入了`std::make_unique`函数，这是创建`unique_ptr`的推荐方式。如果你使用C++11，可以直接使用构造函数：
+   ```cpp
+   std::unique_ptr<int[]> arr(new int[10]);
+   ```
+3. **访问元素**：与普通数组一样，使用`[]`操作符访问元素。
+4. **自动析构**：当`arr`离开作用域时，它会自动调用正确的数组删除器（`delete[]`）。
+
+## 使用std::shared_ptr管理数组
+
+`std::shared_ptr`允许多个指针共享同一资源的所有权。当最后一个拥有该资源的`shared_ptr`被销毁时，资源会被释放。
+
+### 在C++17之前
+
+在C++17之前，`std::shared_ptr`需要自定义删除器来正确管理数组：
+
+```cpp
+#include <iostream>
+#include <memory>
+
+int main() {
+    // 使用自定义删除器创建管理数组的shared_ptr
+    std::shared_ptr<int> arr(new int[10], std::default_delete<int[]>());
+    
+    // 使用数组（注意：没有[]操作符重载，需要使用指针算术）
+    for (int i = 0; i < 10; i++) {
+        arr.get()[i] = i * 10;
+    }
+    
+    // 访问数组元素
+    for (int i = 0; i < 10; i++) {
+        std::cout << "arr[" << i << "] = " << arr.get()[i] << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+### 在C++17及之后
+
+C++17为`std::shared_ptr`添加了对数组的特化支持：
+
+```cpp
+#include <iostream>
+#include <memory>
+
+int main() {
+    // C++17语法
+    std::shared_ptr<int[]> arr = std::make_shared<int[]>(10);
+    
+    // 使用数组
+    for (int i = 0; i < 10; i++) {
+        arr[i] = i * 10;
+    }
+    
+    // 访问数组元素
+    for (int i = 0; i < 10; i++) {
+        std::cout << "arr[" << i << "] = " << arr[i] << std::endl;
+    }
+    
+    // 创建指向同一数组的另一个shared_ptr
+    std::shared_ptr<int[]> arr2 = arr;
+    
+    // 修改通过arr2
+    arr2[0] = 100;
+    
+    // 通过arr查看变化
+    std::cout << "arr[0] after modification: " << arr[0] << std::endl;
+    
+    // 打印引用计数
+    std::cout << "Reference count: " << arr.use_count() << std::endl;
+    
+    return 0;
+}
+```
+
+**输出：**
+```
+arr[0] = 0
+arr[1] = 10
+...
+arr[9] = 90
+arr[0] after modification: 100
+Reference count: 2
+```
+
+## 自定义类型数组的智能指针
+
+智能指针同样可以管理自定义类型的数组，这对于跟踪对象创建和销毁特别有用：
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+
+class Person {
+public:
+    std::string name;
+    int age;
+    
+    Person() : name("Unknown"), age(0) {
+        std::cout << "Person created: " << name << std::endl;
+    }
+    
+    Person(std::string n, int a) : name(n), age(a) {
+        std::cout << "Person created: " << name << std::endl;
+    }
+    
+    ~Person() {
+        std::cout << "Person destroyed: " << name << std::endl;
+    }
+};
+
+int main() {
+    // 创建Person对象数组
+    std::unique_ptr<Person[]> people = std::make_unique<Person[]>(3);
+    
+    // 初始化对象
+    people[0] = Person("Alice", 25);
+    people[1] = Person("Bob", 30);
+    people[2] = Person("Charlie", 35);
+    
+    // 访问对象
+    for (int i = 0; i < 3; i++) {
+        std::cout << "Person " << i << ": " << people[i].name 
+                  << ", " << people[i].age << " years old" << std::endl;
+    }
+    
+    // unique_ptr离开作用域时，会自动销毁数组中的所有Person对象
+    return 0;
+}
+```
+
+**输出示例：**
+```
+Person created: Unknown
+Person created: Unknown
+Person created: Unknown
+Person created: Alice
+Person destroyed: Unknown
+Person created: Bob
+Person destroyed: Unknown
+Person created: Charlie
+Person destroyed: Unknown
+Person 0: Alice, 25 years old
+Person 1: Bob, 30 years old
+Person 2: Charlie, 35 years old
+Person destroyed: Charlie
+Person destroyed: Bob
+Person destroyed: Alice
+```
+
+:::caution
+注意上面的代码中，我们看到了额外的构造和析构调用。这是因为`std::make_unique<Person[]>(3)`首先创建了3个默认构造的Person对象，然后我们通过赋值操作替换了它们。这可能不是最高效的初始化方式。
+:::
+
+## 实际应用案例
+
+### 案例1：动态矩阵处理
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <iomanip>
+
+// 矩阵乘法函数
+void matrixMultiply(const int* a, const int* b, int* result, int n) {
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            result[i*n + j] = 0;
+            for (int k = 0; k < n; k++) {
+                result[i*n + j] += a[i*n + k] * b[k*n + j];
+            }
+        }
+    }
+}
+
+int main() {
+    int n = 3; // 3x3矩阵
+    
+    // 创建矩阵A、B和结果矩阵
+    auto matrixA = std::make_unique<int[]>(n * n);
+    auto matrixB = std::make_unique<int[]>(n * n);
+    auto resultMatrix = std::make_unique<int[]>(n * n);
+    
+    // 初始化矩阵A
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            matrixA[i*n + j] = i + j + 1;
+        }
+    }
+    
+    // 初始化矩阵B
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            matrixB[i*n + j] = i * j + 1;
+        }
+    }
+    
+    // 执行矩阵乘法
+    matrixMultiply(matrixA.get(), matrixB.get(), resultMatrix.get(), n);
+    
+    // 打印结果矩阵
+    std::cout << "结果矩阵：" << std::endl;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            std::cout << std::setw(4) << resultMatrix[i*n + j] << " ";
+        }
+        std::cout << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+### 案例2：图像处理模拟
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <random>
+
+class Image {
+private:
+    std::unique_ptr<uint8_t[]> data;
+    int width;
+    int height;
+    
+public:
+    Image(int w, int h) : width(w), height(h) {
+        data = std::make_unique<uint8_t[]>(width * height);
+        std::cout << "Image created with dimensions: " << width << "x" << height << std::endl;
+    }
+    
+    void randomize() {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> distrib(0, 255);
+        
+        for (int i = 0; i < width * height; i++) {
+            data[i] = distrib(gen);
+        }
+    }
+    
+    void applyThreshold(uint8_t threshold) {
+        for (int i = 0; i < width * height; i++) {
+            data[i] = data[i] > threshold ? 255 : 0;
+        }
+    }
+    
+    void printPreview(int previewSize = 5) {
+        int size = std::min(previewSize, std::min(width, height));
+        std::cout << "Image preview (" << size << "x" << size << "):" << std::endl;
+        
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int value = static_cast<int>(data[y * width + x]);
+                // 使用字符表示灰度值
+                char symbol;
+                if (value < 50) symbol = ' ';
+                else if (value < 100) symbol = '.';
+                else if (value < 150) symbol = '+';
+                else if (value < 200) symbol = '*';
+                else symbol = '#';
+                
+                std::cout << symbol << " ";
+            }
+            std::cout << std::endl;
+        }
+    }
+};
+
+int main() {
+    // 创建1000x1000的图像
+    Image img(1000, 1000);
+    
+    // 用随机数据填充图像
+    std::cout << "Randomizing image..." << std::endl;
+    img.randomize();
+    
+    // 显示处理前的预览
+    std::cout << "Before threshold:" << std::endl;
+    img.printPreview();
+    
+    // 应用阈值操作
+    std::cout << "Applying threshold..." << std::endl;
+    img.applyThreshold(128);
+    
+    // 显示处理后的预览
+    std::cout << "After threshold:" << std::endl;
+    img.printPreview();
+    
+    std::cout << "Image processing completed." << std::endl;
+    
+    return 0;
+}
+```
+
+## 智能指针数组的注意事项
+
+使用智能指针管理数组时，需要注意以下几点：
+
+1. **正确的模板参数**：对于数组，必须使用`T[]`而不是`T`作为模板参数。
+
+2. **在C++17之前的shared_ptr**：如果使用C++17之前的标准，`std::shared_ptr`需要自定义删除器来正确管理数组。
+
+3. **没有部分删除**：智能指针不支持部分删除数组。整个数组要么被拥有，要么被释放。
+
+4. **访问越界检查**：智能指针不会检测数组的访问越界，所以你仍然需要确保索引在有效范围内。
+
+5. **性能考虑**：`std::unique_ptr`几乎没有性能开销，`std::shared_ptr`则因为引用计数而有一些额外开销。
+
+## 总结
+
+智能指针为C++中的动态数组管理带来了安全性和便利性：
+
+- `std::unique_ptr<T[]>`是管理不共享的动态数组的首选。
+- `std::shared_ptr<T[]>`（在C++17及以后）适用于需要共享所有权的场景。
+- 智能指针能够显著减少内存泄漏和使用已释放内存的风险。
+- 它们遵循RAII原则，确保资源在不再需要时被正确释放。
+
+随着对智能指针的熟练使用，你将能够编写更安全、更易于维护的C++代码，同时还能保持高性能。
+
+## 练习
+
+为了加深对用于数组的智能指针的理解，请尝试以下练习：
+
+1. 创建一个函数，它接受一个整数n并返回一个包含n个随机整数的`std::unique_ptr<int[]>`。
+
+2. 实现一个简单的动态字符串类，使用`std::unique_ptr<char[]>`来存储字符数据。
+
+3. 创建一个小型的图像处理程序，使用`std::shared_ptr<uint8_t[]>`存储图像数据，并实现至少两个不同的图像处理函数（如模糊、锐化等）。
+
+4. 比较使用智能指针和原始指针管理大型数组的性能差异。
+
+## 进一步阅读资源
+
+- C++ Core Guidelines关于智能指针的建议
+- C++17标准中关于`std::shared_ptr<T[]>`的更新
+- Effective Modern C++ by Scott Meyers，特别是关于智能指针的章节

@@ -1,0 +1,320 @@
+---
+title: C 语言多路复用
+description: 了解C语言中的多路复用技术，掌握如何使用select、poll和epoll实现高效的I/O操作。
+---
+
+# C 语言多路复用
+
+## 介绍
+
+在C语言网络编程中，多路复用（Multiplexing）是一种高效处理多个I/O操作的技术。它允许程序同时监控多个文件描述符（如套接字），并在其中任何一个准备好进行I/O操作时通知程序。多路复用技术可以显著提高程序的性能和响应速度，尤其是在处理大量并发连接时。
+
+常见的多路复用技术包括 `select`、`poll` 和 `epoll`。本文将逐步介绍这些技术，并通过代码示例和实际案例帮助你理解它们的应用。
+
+## 多路复用的基本原理
+
+多路复用的核心思想是使用一个系统调用来监控多个文件描述符的状态。当某个文件描述符准备好进行读、写或异常处理时，系统调用会返回，程序可以立即处理这些事件，而不需要为每个文件描述符单独创建线程或进程。
+
+### 1. `select` 函数
+
+`select` 是最早的多路复用技术之一。它允许程序监控多个文件描述符，直到其中一个或多个文件描述符准备好进行I/O操作。
+
+#### 函数原型
+```c
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
+```
+
+- `nfds`: 监控的文件描述符的最大值加1。
+- `readfds`: 监控读操作的文件描述符集合。
+- `writefds`: 监控写操作的文件描述符集合。
+- `exceptfds`: 监控异常条件的文件描述符集合。
+- `timeout`: 超时时间，设置为 `NULL` 表示无限等待。
+
+#### 示例代码
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/select.h>
+#include <unistd.h>
+
+int main() {
+    fd_set read_fds;
+    struct timeval timeout;
+
+    // 清空文件描述符集合
+    FD_ZERO(&read_fds);
+    // 将标准输入（文件描述符0）加入集合
+    FD_SET(0, &read_fds);
+
+    // 设置超时时间为5秒
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+
+    printf("等待输入...\n");
+    int ret = select(1, &read_fds, NULL, NULL, &timeout);
+
+    if (ret == -1) {
+        perror("select error");
+    } else if (ret == 0) {
+        printf("超时，没有输入\n");
+    } else {
+        if (FD_ISSET(0, &read_fds)) {
+            printf("有输入\n");
+        }
+    }
+
+    return 0;
+}
+```
+
+#### 输出
+```
+等待输入...
+（5秒内输入）
+有输入
+```
+
+### 2. `poll` 函数
+
+`poll` 是 `select` 的改进版本，它使用一个结构体数组来监控文件描述符，避免了 `select` 中文件描述符集合大小的限制。
+
+#### 函数原型
+```c
+int poll(struct pollfd *fds, nfds_t nfds, int timeout);
+```
+
+- `fds`: 指向 `pollfd` 结构体数组的指针。
+- `nfds`: 数组中的元素个数。
+- `timeout`: 超时时间，单位为毫秒。
+
+#### 示例代码
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <poll.h>
+#include <unistd.h>
+
+int main() {
+    struct pollfd fds[1];
+    fds[0].fd = 0; // 标准输入
+    fds[0].events = POLLIN; // 监控读事件
+
+    printf("等待输入...\n");
+    int ret = poll(fds, 1, 5000); // 5秒超时
+
+    if (ret == -1) {
+        perror("poll error");
+    } else if (ret == 0) {
+        printf("超时，没有输入\n");
+    } else {
+        if (fds[0].revents & POLLIN) {
+            printf("有输入\n");
+        }
+    }
+
+    return 0;
+}
+```
+
+#### 输出
+```
+等待输入...
+（5秒内输入）
+有输入
+```
+
+### 3. `epoll` 函数
+
+`epoll` 是Linux特有的多路复用技术，适用于处理大量并发连接。它比 `select` 和 `poll` 更高效，因为它使用事件驱动的方式，避免了每次调用时都需要遍历所有文件描述符。
+
+#### 函数原型
+```c
+int epoll_create(int size);
+int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
+int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
+```
+
+- `epoll_create`: 创建一个epoll实例。
+- `epoll_ctl`: 向epoll实例中添加、修改或删除文件描述符。
+- `epoll_wait`: 等待事件发生。
+
+#### 示例代码
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/epoll.h>
+#include <unistd.h>
+
+int main() {
+    int epfd = epoll_create(1);
+    if (epfd == -1) {
+        perror("epoll_create error");
+        return 1;
+    }
+
+    struct epoll_event event;
+    event.events = EPOLLIN;
+    event.data.fd = 0; // 标准输入
+
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &event) == -1) {
+        perror("epoll_ctl error");
+        return 1;
+    }
+
+    printf("等待输入...\n");
+    struct epoll_event events[1];
+    int ret = epoll_wait(epfd, events, 1, 5000); // 5秒超时
+
+    if (ret == -1) {
+        perror("epoll_wait error");
+    } else if (ret == 0) {
+        printf("超时，没有输入\n");
+    } else {
+        if (events[0].events & EPOLLIN) {
+            printf("有输入\n");
+        }
+    }
+
+    close(epfd);
+    return 0;
+}
+```
+
+#### 输出
+```
+等待输入...
+（5秒内输入）
+有输入
+```
+
+## 实际应用场景
+
+多路复用技术广泛应用于网络服务器中，尤其是需要处理大量并发连接的场景。例如，Web服务器、聊天服务器和实时通信系统都会使用多路复用来提高性能和响应速度。
+
+### 案例：简单的聊天服务器
+
+以下是一个使用 `epoll` 实现的简单聊天服务器的示例。该服务器可以同时处理多个客户端的连接，并将接收到的消息广播给所有客户端。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/epoll.h>
+
+#define MAX_EVENTS 10
+#define BUFFER_SIZE 1024
+
+int main() {
+    int server_fd, client_fd, epfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[BUFFER_SIZE];
+    struct epoll_event ev, events[MAX_EVENTS];
+
+    // 创建服务器套接字
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("socket error");
+        return 1;
+    }
+
+    // 绑定服务器地址
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(8080);
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1) {
+        perror("bind error");
+        return 1;
+    }
+
+    // 监听连接
+    if (listen(server_fd, 5) == -1) {
+        perror("listen error");
+        return 1;
+    }
+
+    // 创建epoll实例
+    epfd = epoll_create1(0);
+    if (epfd == -1) {
+        perror("epoll_create1 error");
+        return 1;
+    }
+
+    // 添加服务器套接字到epoll
+    ev.events = EPOLLIN;
+    ev.data.fd = server_fd;
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &ev) == -1) {
+        perror("epoll_ctl error");
+        return 1;
+    }
+
+    printf("服务器启动，等待连接...\n");
+
+    while (1) {
+        int nfds = epoll_wait(epfd, events, MAX_EVENTS, -1);
+        if (nfds == -1) {
+            perror("epoll_wait error");
+            return 1;
+        }
+
+        for (int i = 0; i < nfds; i++) {
+            if (events[i].data.fd == server_fd) {
+                // 接受新连接
+                client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+                if (client_fd == -1) {
+                    perror("accept error");
+                    continue;
+                }
+
+                printf("新客户端连接: %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+
+                // 添加新客户端到epoll
+                ev.events = EPOLLIN;
+                ev.data.fd = client_fd;
+                if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &ev) == -1) {
+                    perror("epoll_ctl error");
+                    return 1;
+                }
+            } else {
+                // 处理客户端消息
+                int n = read(events[i].data.fd, buffer, BUFFER_SIZE);
+                if (n <= 0) {
+                    // 客户端断开连接
+                    close(events[i].data.fd);
+                    printf("客户端断开连接\n");
+                } else {
+                    // 广播消息给所有客户端
+                    buffer[n] = '\0';
+                    printf("收到消息: %s", buffer);
+                    for (int j = 0; j < MAX_EVENTS; j++) {
+                        if (events[j].data.fd != server_fd && events[j].data.fd != events[i].data.fd) {
+                            write(events[j].data.fd, buffer, n);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    close(server_fd);
+    return 0;
+}
+```
+
+## 总结
+
+多路复用是C语言网络编程中非常重要的技术，它可以帮助我们高效地处理多个I/O操作。本文介绍了 `select`、`poll` 和 `epoll` 三种多路复用技术，并通过代码示例和实际案例展示了它们的应用。
+
+:::tip
+在实际开发中，建议优先使用 `epoll`，尤其是在需要处理大量并发连接的场景下。`epoll` 的性能优于 `select` 和 `poll`，并且更加灵活。
+:::
+
+## 附加资源与练习
+
+- **练习1**: 修改聊天服务器代码，使其支持私聊功能，即客户端可以指定接收消息的目标客户端。
+- **练习2**: 使用 `poll` 实现一个简单的文件传输服务器，支持多个客户端同时上传文件。
+- **资源**: 阅读Linux手册页，深入了解 `select`、`poll` 和 `epoll` 的更多细节。
+
+通过不断练习和探索，你将能够熟练掌握多路复用技术，并将其应用到实际的网络编程项目中。

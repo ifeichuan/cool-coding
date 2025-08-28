@@ -1,0 +1,121 @@
+---
+title: 商品分类系统
+description: 学习如何使用 Spark 构建一个商品分类系统，帮助初学者理解大数据处理中的分类任务。
+---
+
+# 商品分类系统
+
+## 介绍
+
+商品分类系统是电子商务平台中常见的功能之一。它通过对商品进行分类，帮助用户快速找到所需商品，同时也能为商家提供更好的商品管理和推荐服务。在大数据场景下，商品分类系统需要处理海量的商品数据，因此使用分布式计算框架如 Apache Spark 是非常合适的。
+
+在本教程中，我们将使用 Spark 构建一个简单的商品分类系统。我们将从数据预处理开始，逐步讲解如何训练分类模型，并对新商品进行分类预测。
+
+## 数据预处理
+
+在构建商品分类系统之前，我们需要对商品数据进行预处理。假设我们有一个包含商品信息的 CSV 文件，其中包含以下字段：
+
+- `product_id`: 商品唯一标识
+- `product_name`: 商品名称
+- `category`: 商品类别
+- `description`: 商品描述
+
+首先，我们需要加载数据并进行清洗：
+
+```python
+from pyspark.sql import SparkSession
+
+# 创建 SparkSession
+spark = SparkSession.builder.appName("ProductClassification").getOrCreate()
+
+# 加载数据
+df = spark.read.csv("products.csv", header=True, inferSchema=True)
+
+# 查看数据
+df.show()
+```
+
+:::note
+在实际应用中，数据可能包含缺失值或噪声，因此需要进行数据清洗。例如，我们可以使用 `dropna()` 方法删除包含缺失值的行。
+:::
+
+## 特征提取
+
+为了训练分类模型，我们需要将文本数据转换为数值特征。常用的方法是使用 TF-IDF（词频-逆文档频率）来提取文本特征。
+
+```python
+from pyspark.ml.feature import HashingTF, IDF, Tokenizer
+
+# 分词
+tokenizer = Tokenizer(inputCol="description", outputCol="words")
+wordsData = tokenizer.transform(df)
+
+# 计算 TF
+hashingTF = HashingTF(inputCol="words", outputCol="rawFeatures", numFeatures=20)
+featurizedData = hashingTF.transform(wordsData)
+
+# 计算 IDF
+idf = IDF(inputCol="rawFeatures", outputCol="features")
+idfModel = idf.fit(featurizedData)
+rescaledData = idfModel.transform(featurizedData)
+
+# 查看特征
+rescaledData.select("features", "category").show()
+```
+
+## 训练分类模型
+
+接下来，我们使用提取的特征来训练一个分类模型。这里我们选择使用逻辑回归模型。
+
+```python
+from pyspark.ml.classification import LogisticRegression
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# 划分训练集和测试集
+(trainingData, testData) = rescaledData.randomSplit([0.8, 0.2])
+
+# 训练模型
+lr = LogisticRegression(featuresCol="features", labelCol="category")
+lrModel = lr.fit(trainingData)
+
+# 预测
+predictions = lrModel.transform(testData)
+predictions.select("product_name", "prediction").show()
+```
+
+## 模型评估
+
+为了评估模型的性能，我们可以使用准确率、精确率、召回率等指标。
+
+```python
+evaluator = MulticlassClassificationEvaluator(labelCol="category", predictionCol="prediction", metricName="accuracy")
+accuracy = evaluator.evaluate(predictions)
+print(f"Test Accuracy = {accuracy}")
+```
+
+:::tip
+在实际应用中，模型性能可能需要进一步优化。可以尝试使用交叉验证、网格搜索等方法来调整模型参数。
+:::
+
+## 实际案例
+
+假设我们有一个电子商务平台，每天有数百万的商品需要分类。使用 Spark 构建的商品分类系统可以高效地处理这些数据，并实时更新分类结果。例如，当用户上传新商品时，系统可以自动预测其类别，并将其归类到相应的目录中。
+
+## 总结
+
+在本教程中，我们学习了如何使用 Spark 构建一个商品分类系统。我们从数据预处理开始，逐步讲解了特征提取、模型训练和评估的过程。通过这个案例，你可以了解到如何在大数据场景下处理分类任务。
+
+## 附加资源
+
+- [Apache Spark 官方文档](https://spark.apache.org/docs/latest/)
+- [机器学习实战](https://www.oreilly.com/library/view/machine-learning-with/9781491916216/)
+
+## 练习
+
+1. 尝试使用不同的分类算法（如决策树、随机森林）来训练模型，并比较它们的性能。
+2. 修改特征提取方法，例如使用 Word2Vec 来生成词向量，看看是否能提高模型性能。
+3. 在实际数据集上运行本教程中的代码，并记录结果。
+
+:::caution
+在实际应用中，数据量可能非常大，因此需要确保 Spark 集群的资源配置足够。如果遇到性能问题，可以尝试调整 Spark 的配置参数。
+:::

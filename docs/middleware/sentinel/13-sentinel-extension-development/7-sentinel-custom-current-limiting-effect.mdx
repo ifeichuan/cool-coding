@@ -1,0 +1,174 @@
+---
+title: Sentinel 自定义限流效果
+description: 了解如何在Sentinel中实现自定义限流效果，并通过实际案例展示其应用场景。
+---
+
+# Sentinel 自定义限流效果
+
+Sentinel是阿里巴巴开源的一款轻量级流量控制组件，广泛应用于微服务架构中。它提供了丰富的限流策略，如QPS限流、线程数限流等。然而，在某些场景下，默认的限流效果可能无法满足需求。这时，我们可以通过自定义限流效果来实现更灵活的流量控制。
+
+## 什么是自定义限流效果？
+
+自定义限流效果是指开发者可以根据业务需求，定义在触发限流时的处理逻辑。Sentinel默认的限流效果是直接拒绝请求（`RuleConstant.CONTROL_BEHAVIOR_DEFAULT`），但我们可以通过实现`TrafficShapingController`接口来自定义限流后的行为，例如延迟处理、排队等待等。
+
+## 如何实现自定义限流效果？
+
+### 1. 实现`TrafficShapingController`接口
+
+首先，我们需要创建一个类并实现`TrafficShapingController`接口。该接口的核心方法是`canPass`，用于判断当前请求是否可以通过限流检查。
+
+```java
+public class CustomTrafficShapingController implements TrafficShapingController {
+
+    private double count;
+    private int grade;
+
+    public CustomTrafficShapingController(double count, int grade) {
+        this.count = count;
+        this.grade = grade;
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+        // 自定义限流逻辑
+        if (node.passQps() > count) {
+            // 触发限流时的处理逻辑
+            return false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount) {
+        return canPass(node, acquireCount, false);
+    }
+}
+```
+
+### 2. 注册自定义限流效果
+
+在Sentinel中，我们可以通过`FlowRuleManager`来注册自定义的限流效果。
+
+```java
+FlowRule rule = new FlowRule();
+rule.setResource("myResource");
+rule.setGrade(RuleConstant.FLOW_GRADE_QPS);
+rule.setCount(10);
+rule.setControlBehavior(RuleConstant.CONTROL_BEHAVIOR_CUSTOM);
+rule.setTrafficShapingController(new CustomTrafficShapingController(10, RuleConstant.FLOW_GRADE_QPS));
+
+FlowRuleManager.loadRules(Collections.singletonList(rule));
+```
+
+### 3. 测试自定义限流效果
+
+假设我们设置了一个QPS为10的限流规则，当请求超过10次时，自定义的限流效果将被触发。
+
+```java
+for (int i = 0; i < 15; i++) {
+    if (SphU.entry("myResource")) {
+        System.out.println("请求通过");
+    } else {
+        System.out.println("请求被限流");
+    }
+}
+```
+
+**输出结果：**
+```
+请求通过
+请求通过
+...
+请求被限流
+请求被限流
+```
+
+## 实际应用场景
+
+### 场景1：延迟处理
+
+在某些高并发场景下，直接拒绝请求可能会导致用户体验下降。我们可以通过自定义限流效果，将请求延迟处理，而不是直接拒绝。
+
+```java
+public class DelayTrafficShapingController implements TrafficShapingController {
+
+    private double count;
+    private int grade;
+    private long delayMillis;
+
+    public DelayTrafficShapingController(double count, int grade, long delayMillis) {
+        this.count = count;
+        this.grade = grade;
+        this.delayMillis = delayMillis;
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+        if (node.passQps() > count) {
+            try {
+                Thread.sleep(delayMillis);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return true;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount) {
+        return canPass(node, acquireCount, false);
+    }
+}
+```
+
+### 场景2：排队等待
+
+在秒杀活动中，我们可以通过自定义限流效果，让请求排队等待，而不是直接拒绝。
+
+```java
+public class QueueTrafficShapingController implements TrafficShapingController {
+
+    private double count;
+    private int grade;
+    private BlockingQueue<Runnable> queue;
+
+    public QueueTrafficShapingController(double count, int grade, int queueSize) {
+        this.count = count;
+        this.grade = grade;
+        this.queue = new LinkedBlockingQueue<>(queueSize);
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+        if (node.passQps() > count) {
+            return queue.offer(() -> {
+                // 处理请求
+            });
+        }
+        return true;
+    }
+
+    @Override
+    public boolean canPass(Node node, int acquireCount) {
+        return canPass(node, acquireCount, false);
+    }
+}
+```
+
+## 总结
+
+通过自定义限流效果，我们可以根据业务需求灵活地控制流量，提升系统的稳定性和用户体验。Sentinel提供了强大的扩展能力，开发者可以根据实际场景实现各种限流策略。
+
+:::tip
+在实际开发中，建议结合监控系统（如Prometheus）来实时观察限流效果，并根据业务需求调整限流策略。
+:::
+
+## 附加资源与练习
+
+- **练习1**：尝试实现一个自定义限流效果，当请求超过限流阈值时，返回一个自定义的错误信息。
+- **练习2**：结合Sentinel的熔断功能，实现一个完整的流量控制方案。
+
+:::note
+更多关于Sentinel的详细文档，请参考[Sentinel官方文档](https://sentinelguard.io/)。
+:::

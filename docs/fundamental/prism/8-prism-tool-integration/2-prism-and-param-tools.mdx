@@ -1,0 +1,106 @@
+---
+title: PRISM 与PARAM工具
+description: 学习PRISM概率模型检测器与PARAM参数化模型分析工具的集成使用方法和应用场景
+---
+
+## 概述
+
+PRISM（Probabilistic Symbolic Model Checker）和PARAM（Parameterized Model Analyzer）是两种互补的概率模型分析工具。PRISM专注于离散概率模型的验证，而PARAM擅长处理**参数化模型**（即含未定参数的模型）。本章将介绍二者的协同工作方式。
+
+:::note 核心区别
+- PRISM：验证具体概率值模型（如 `P≥0.5 [F "success"]`）
+- PARAM：分析带参数的公式（如 `P≥λ [F "success"]` 中λ的范围）
+:::
+
+## 工具集成原理
+
+### 数据流架构
+```mermaid
+graph LR
+    A[PRISM模型文件] --> B{参数化部分?}
+    B -- 是 --> C[PARAM处理]
+    B -- 否 --> D[PRISM标准验证]
+    C --> E[参数约束结果]
+```
+
+### 典型工作流程
+1. 在PRISM中构建`.prism`模型文件
+2. 使用特殊注释标记参数化部分（示例见下文）
+3. 通过PRISM命令行调用PARAM引擎
+4. 解析PARAM输出的参数约束条件
+
+## 代码示例
+
+### 参数化模型定义
+```prism
+// 文件: parametric_model.prism
+// 定义参数化概率
+const double p; // 未确定的参数
+
+module System
+    state : [0..1] init 0;
+    [] state=0 -> p : (state'=1) + (1-p) : (state'=0);
+endmodule
+```
+
+### PARAM调用命令
+```bash
+prism parametric_model.prism --param "p in [0,1]" \
+    --prop "P=? [F state=1]"
+```
+
+### 输出示例
+```text
+Result (exact rational):
+p in [0,1] -> P=? [F state=1] = p/(1-(1-p)) = p/p = 1
+```
+
+## 实际应用案例
+
+### 案例：网络协议可靠性分析
+分析无线网络协议在不同丢包率（参数`p_loss`）下的消息送达概率：
+
+1. **PRISM模型片段**：
+```prism
+const double p_loss;
+module Sender
+    [] send -> (1-p_loss): msg_sent'=true + p_loss: msg_sent'=false;
+endmodule
+```
+
+2. **PARAM查询**：
+```bash
+prism protocol.prism --param "p_loss in (0,0.3)" \
+    --prop "P>=0.9 [F msg_sent]"
+```
+
+3. **输出解析**：
+```text
+满足P>=0.9的条件为：p_loss < 0.1
+```
+
+## 常见问题解决
+
+:::caution 参数收敛问题
+当PARAM返回`UNKNOWN`结果时：
+1. 检查参数范围是否合理（如改为`(0,1)`而非`[0,1]`）
+2. 简化模型中的非线性表达式
+3. 尝试分区间分析（如`[0,0.5]`和`[0.5,1]`分段处理）
+:::
+
+## 总结与扩展
+
+### 关键优势
+- **符号计算**：PARAM使用代数方法而非数值模拟
+- **精确解**：提供参数约束的数学闭式解
+- **无缝集成**：通过PRISM统一接口调用
+
+### 推荐练习
+1. 尝试将PRISM教程中的DTMC模型改为参数化版本
+2. 对`N`个节点的环形网络建模，分析参数化故障概率
+3. 比较PARAM结果与PRISM蒙特卡洛模拟的差异
+
+### 延伸阅读
+- PARAM官方文档中的多项式方程求解章节
+- PRISM手册中关于`--param`参数的详细说明
+- 学术论文《Parameter Synthesis for Probabilistic Systems》

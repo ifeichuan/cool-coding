@@ -1,0 +1,138 @@
+---
+title: Go 条件变量
+description: 了解Go语言中的条件变量（Condition Variable），掌握如何使用它们实现高效的并发编程。
+---
+
+# Go 条件变量
+
+## 介绍
+
+在Go语言中，条件变量（Condition Variable）是一种用于协调多个goroutine之间同步的机制。它们通常与互斥锁（Mutex）一起使用，以确保在共享资源的状态发生变化时，goroutine能够正确地等待或继续执行。
+
+条件变量的核心思想是：当某个条件不满足时，goroutine可以进入等待状态，直到其他goroutine改变了条件并通知它继续执行。这种机制非常适合用于实现生产者-消费者模型、任务调度等并发场景。
+
+## 条件变量的基本用法
+
+在Go中，条件变量是通过`sync.Cond`类型来实现的。`sync.Cond`需要与一个互斥锁（`sync.Mutex`或`sync.RWMutex`）一起使用，以确保在等待和通知时的线程安全。
+
+### 创建条件变量
+
+要创建一个条件变量，首先需要初始化一个互斥锁，然后使用`sync.NewCond`函数来创建条件变量：
+
+```go
+var mu sync.Mutex
+cond := sync.NewCond(&mu)
+```
+
+### 等待条件
+
+当一个goroutine需要等待某个条件时，它可以调用`cond.Wait()`方法。这个方法会释放互斥锁，并将goroutine挂起，直到其他goroutine调用`cond.Signal()`或`cond.Broadcast()`来唤醒它。
+
+```go
+mu.Lock()
+for !condition {
+    cond.Wait()
+}
+// 条件满足，继续执行
+mu.Unlock()
+```
+
+:::note
+注意：`cond.Wait()`必须在持有互斥锁的情况下调用，并且在返回时会重新获取锁。
+:::
+
+### 通知条件
+
+当一个goroutine改变了共享资源的状态，并且希望唤醒等待的goroutine时，可以调用`cond.Signal()`或`cond.Broadcast()`。
+
+- `cond.Signal()`：唤醒一个等待的goroutine。
+- `cond.Broadcast()`：唤醒所有等待的goroutine。
+
+```go
+mu.Lock()
+// 改变条件
+condition = true
+cond.Signal() // 或者 cond.Broadcast()
+mu.Unlock()
+```
+
+## 代码示例：生产者-消费者模型
+
+下面是一个使用条件变量实现的生产者-消费者模型的示例：
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+    "time"
+)
+
+func main() {
+    var mu sync.Mutex
+    cond := sync.NewCond(&mu)
+    queue := make([]int, 0)
+
+    // 生产者
+    go func() {
+        for i := 0; i < 10; i++ {
+            mu.Lock()
+            queue = append(queue, i)
+            fmt.Printf("Produced: %d\n", i)
+            cond.Signal() // 通知消费者
+            mu.Unlock()
+            time.Sleep(100 * time.Millisecond)
+        }
+    }()
+
+    // 消费者
+    go func() {
+        for {
+            mu.Lock()
+            for len(queue) == 0 {
+                cond.Wait() // 等待生产者
+            }
+            item := queue[0]
+            queue = queue[1:]
+            fmt.Printf("Consumed: %d\n", item)
+            mu.Unlock()
+        }
+    }()
+
+    time.Sleep(2 * time.Second)
+}
+```
+
+### 输出
+
+```
+Produced: 0
+Consumed: 0
+Produced: 1
+Consumed: 1
+Produced: 2
+Consumed: 2
+...
+```
+
+在这个示例中，生产者goroutine不断地向队列中添加数据，并在每次添加后通知消费者goroutine。消费者goroutine在队列为空时进入等待状态，直到生产者通知它继续执行。
+
+## 实际应用场景
+
+条件变量在以下场景中非常有用：
+
+1. **任务队列**：当多个worker goroutine从任务队列中获取任务时，可以使用条件变量来协调任务的分配。
+2. **资源池**：在资源池中，当资源被占用时，goroutine可以等待直到资源可用。
+3. **事件驱动编程**：在事件驱动的系统中，条件变量可以用于等待特定事件的发生。
+
+## 总结
+
+条件变量是Go语言中实现高效并发编程的重要工具。它们允许goroutine在条件不满足时进入等待状态，并在条件满足时被唤醒。通过合理使用条件变量，可以避免忙等待（busy-waiting），从而提高程序的性能和资源利用率。
+
+## 附加资源与练习
+
+- **练习**：尝试修改上面的生产者-消费者模型，使其支持多个生产者和多个消费者。
+- **进一步阅读**：阅读Go官方文档中关于`sync.Cond`的更多细节：[Go sync.Cond](https://pkg.go.dev/sync#Cond)
+
+通过掌握条件变量，你将能够更好地处理复杂的并发场景，并编写出高效、可靠的Go程序。

@@ -1,0 +1,152 @@
+---
+title: SkyWalking 存储备份恢复
+description: "学习如何对SkyWalking的后端存储进行备份和恢复操作，保障监控数据安全。"
+---
+
+# SkyWalking 存储备份恢复
+
+## 介绍
+
+在分布式系统的监控场景中，SkyWalking收集的链路追踪和指标数据是重要的运维资产。存储备份恢复功能能帮助您在以下场景中保护数据：
+- 硬件故障导致数据丢失
+- 误操作删除关键数据
+- 系统迁移或升级需求
+
+:::note
+SkyWalking支持多种存储后端（如Elasticsearch/H2/MySQL等），本文以Elasticsearch为例演示备份恢复流程，其他存储方案原理类似。
+:::
+
+## 核心概念
+
+### 1. 备份类型
+- **冷备份**：停止服务后进行的完整数据拷贝
+- **热备份**：服务运行时的增量数据备份
+- **快照备份**：利用存储引擎的快照功能（如Elasticsearch Snapshot）
+
+### 2. 恢复策略
+- **全量恢复**：完全替换现有数据
+- **部分恢复**：选择性恢复特定时间段/服务的数据
+
+## 备份实战（Elasticsearch为例）
+
+### 1. 创建备份仓库
+
+```bash
+# 在Elasticsearch中创建共享文件系统仓库
+PUT /_snapshot/sw_backup
+{
+  "type": "fs",
+  "settings": {
+    "location": "/mnt/backups/skywalking",
+    "compress": true
+  }
+}
+```
+
+### 2. 执行备份
+
+```bash
+# 备份所有SkyWalking索引（假设使用默认索引前缀）
+PUT /_snapshot/sw_backup/snapshot_20230701?wait_for_completion=true
+{
+  "indices": "sw_*",
+  "ignore_unavailable": true,
+  "include_global_state": false
+}
+```
+
+### 3. 验证备份
+
+```bash
+GET /_snapshot/sw_backup/snapshot_20230701/_status
+```
+
+典型成功响应：
+```json
+{
+  "snapshots": [{
+    "state": "SUCCESS",
+    "stats": {
+      "number_of_files": 42,
+      "processed_files": 42,
+      "total_size_in_bytes": 10485760
+    }
+  }]
+}
+```
+
+## 恢复流程
+
+### 1. 关闭写入（可选）
+
+```bash
+# 关闭SkyWalking写入（通过OAP REST API）
+POST http://oap-server:12800/management/stop
+```
+
+### 2. 执行恢复
+
+```bash
+POST /_snapshot/sw_backup/snapshot_20230701/_restore
+{
+  "indices": "sw_service*",
+  "rename_pattern": "sw_(.+)",
+  "rename_replacement": "restored_sw_$1"
+}
+```
+
+### 3. 重建索引（如需要）
+
+```bash
+# 使用SkyWalking的索引管理接口
+POST http://oap-server:12800/management/forceUpdate
+```
+
+## 实际案例
+
+**场景**：某电商公司在618大促前需要备份监控数据
+
+1. **需求分析**：
+   - 保留最近30天的全量数据
+   - 保证备份过程不影响线上监控
+   - 能在1小时内完成恢复
+
+2. **实施方案**：
+   ```mermaid
+   flowchart TD
+     A[创建ES快照仓库] --> B[每日凌晨2点执行增量备份]
+     B --> C[每周日全量备份]
+     D[验证备份完整性] --> E[异地存储备份]
+   ```
+
+3. **恢复测试结果**：
+   - 全量数据恢复时间：42分钟
+   - 单个服务恢复时间：8分钟
+
+## 最佳实践
+
+:::tip
+1. 定期验证备份可恢复性（建议每季度至少一次）
+2. 对于生产环境，建议采用「3-2-1」原则：
+   - 至少3份拷贝
+   - 存储在2种不同介质
+   - 1份异地备份
+3. 监控备份任务状态，设置失败告警
+:::
+
+## 总结
+
+通过本文您已经学习到：
+- SkyWalking存储备份的必要性和基本原理
+- 使用Elasticsearch快照的具体操作步骤
+- 实际业务场景中的备份恢复策略
+
+## 扩展学习
+
+1. **进阶练习**：
+   - 编写自动化备份脚本，包含完整性校验
+   - 测试在不同网络延迟下的恢复性能
+
+2. **相关资源**：
+   - [Elasticsearch官方快照文档](https://www.elastic.co/guide/en/elasticsearch/reference/current/snapshots-take-snapshot.html)
+   - [SkyWalking数据存储设计](https://skywalking.apache.org/docs/main/latest/en/concepts-and-designs/backend-storage/)

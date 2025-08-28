@@ -1,0 +1,421 @@
+---
+title: JavaScript 函数记忆化
+description: 学习JavaScript函数记忆化技术，通过缓存计算结果提高性能，掌握实现方式和实际应用场景。
+---
+
+# JavaScript 函数记忆化
+
+## 什么是函数记忆化？
+
+函数记忆化（Memoization）是一种优化技术，主要用于提高程序的性能。其核心思想是**缓存函数的计算结果**，当下次以相同的参数调用该函数时，直接返回缓存的结果，而不必再次执行整个函数体的运算过程。
+
+记忆化特别适用于：
+- 计算量大的函数
+- 具有相同输入多次调用的函数
+- 纯函数（相同输入总是产生相同输出，无副作用）
+
+:::note
+"记忆化"这个术语来源于"记忆"一词，表示函数"记住"了之前计算过的结果。
+:::
+
+## 记忆化的基本实现
+
+让我们从一个简单的例子开始理解记忆化的原理：
+
+```javascript
+// 没有记忆化的函数
+function fibonacci(n) {
+  if (n <= 1) return n;
+  return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+// 使用记忆化的fibonacci函数
+function memoizedFibonacci() {
+  // 创建缓存对象
+  const cache = {};
+  
+  // 返回接受参数的内部函数
+  return function(n) {
+    // 如果结果已经缓存，直接返回
+    if (n in cache) {
+      console.log(`从缓存获取fibonacci(${n})`);
+      return cache[n];
+    }
+    
+    // 否则计算结果并缓存
+    console.log(`计算fibonacci(${n})`);
+    let result;
+    if (n <= 1) {
+      result = n;
+    } else {
+      result = this(n - 1) + this(n - 2);
+    }
+    
+    cache[n] = result;
+    return result;
+  };
+}
+
+// 创建记忆化fibonacci函数实例
+const fib = memoizedFibonacci();
+
+console.log(fib(5)); // 首次计算
+console.log(fib(5)); // 从缓存获取
+```
+
+**输出结果：**
+
+```
+计算fibonacci(5)
+计算fibonacci(4)
+计算fibonacci(3)
+计算fibonacci(2)
+计算fibonacci(1)
+计算fibonacci(0)
+计算fibonacci(1)
+计算fibonacci(2)
+计算fibonacci(3)
+5
+从缓存获取fibonacci(5)
+5
+```
+
+## 通用记忆化函数
+
+我们可以创建一个通用的记忆化高阶函数，用于包装任何需要记忆化的函数：
+
+```javascript
+function memoize(fn) {
+  const cache = {};
+  
+  return function(...args) {
+    // 使用参数作为缓存键
+    const key = JSON.stringify(args);
+    
+    if (key in cache) {
+      return cache[key];
+    }
+    
+    const result = fn.apply(this, args);
+    cache[key] = result;
+    return result;
+  };
+}
+
+// 使用示例
+function slowAdd(a, b) {
+  console.log('执行复杂计算...');
+  // 模拟耗时计算
+  const start = Date.now();
+  while (Date.now() - start < 100) { /* 等待100毫秒 */ }
+  return a + b;
+}
+
+const fastAdd = memoize(slowAdd);
+
+console.log(fastAdd(1, 2)); // 首次调用，执行slowAdd
+console.log(fastAdd(1, 2)); // 从缓存获取结果
+```
+
+**输出结果：**
+```
+执行复杂计算...
+3
+3
+```
+
+## 函数记忆化的适用场景
+
+### 1. 递归函数优化
+
+递归函数如斐波那契数列计算、阶乘计算等，通过记忆化可以避免重复计算子问题。
+
+```javascript
+// 记忆化阶乘函数
+const factorial = memoize(function(n) {
+  console.log(`计算factorial(${n})`);
+  if (n === 0 || n === 1) return 1;
+  return n * factorial(n - 1);
+});
+
+console.log(factorial(5));
+console.log(factorial(6)); // 只需额外计算6*factorial(5)
+```
+
+### 2. API请求缓存
+
+当需要多次获取相同资源时，可以用记忆化避免重复网络请求：
+
+```javascript
+const fetchUserData = memoize(async function(userId) {
+  console.log(`Fetching data for user ${userId}...`);
+  const response = await fetch(`https://api.example.com/users/${userId}`);
+  return response.json();
+});
+
+// 首次调用会发起请求，后续相同参数调用将使用缓存
+fetchUserData(123).then(data => console.log("First call"));
+fetchUserData(123).then(data => console.log("Second call (from cache)"));
+```
+
+### 3. 计算密集型操作
+
+例如，图像处理、复杂数学计算等：
+
+```javascript
+const processImage = memoize(function(imageData, filterType) {
+  console.log(`应用${filterType}滤镜...`);
+  // 计算密集型图像处理...
+  return /* 处理后的图像数据 */;
+});
+```
+
+## 记忆化的注意事项和限制
+
+虽然函数记忆化非常有用，但需要注意以下几点：
+
+:::caution
+1. **内存使用**：缓存会占用内存，对于大量不同输入值的函数，可能导致内存问题。
+2. **非纯函数**：依赖外部状态或有副作用的函数不适合记忆化。
+3. **复杂参数**：使用对象作为参数时，需要确保正确生成缓存键。
+:::
+
+### 带有过期时间的记忆化
+
+有时我们需要让缓存在一定时间后失效：
+
+```javascript
+function memoizeWithExpiration(fn, maxAge) {
+  const cache = {};
+  
+  return function(...args) {
+    const key = JSON.stringify(args);
+    
+    const currentTime = Date.now();
+    if (key in cache && currentTime - cache[key].timestamp < maxAge) {
+      return cache[key].value;
+    }
+    
+    const result = fn.apply(this, args);
+    cache[key] = {
+      value: result,
+      timestamp: currentTime
+    };
+    return result;
+  };
+}
+
+// 缓存结果，有效期10秒
+const fetchDataWithCache = memoizeWithExpiration(fetchData, 10 * 1000);
+```
+
+## 高级记忆化技术
+
+### 使用Map或WeakMap
+
+使用`Map`可以允许任何类型的键，而`WeakMap`则提供了更好的垃圾回收支持：
+
+```javascript
+function memoizeWithMap(fn) {
+  const cache = new Map();
+  
+  return function(...args) {
+    // 使用第一个参数作为键（适用于单参数函数）
+    const key = args[0];
+    
+    if (cache.has(key)) {
+      return cache.get(key);
+    }
+    
+    const result = fn.apply(this, args);
+    cache.set(key, result);
+    return result;
+  };
+}
+```
+
+### LRU缓存策略
+
+当内存是个问题时，可以实现最近最少使用（LRU）缓存策略，限制缓存大小：
+
+```javascript
+function memoizeWithLRU(fn, capacity = 100) {
+  const cache = new Map();
+  
+  return function(...args) {
+    const key = JSON.stringify(args);
+    
+    if (cache.has(key)) {
+      // 更新位置（删除后重新添加到最新位置）
+      const value = cache.get(key);
+      cache.delete(key);
+      cache.set(key, value);
+      return value;
+    }
+    
+    const result = fn.apply(this, args);
+    
+    // 如果超出容量，删除最早的项目
+    if (cache.size >= capacity) {
+      const oldestKey = cache.keys().next().value;
+      cache.delete(oldestKey);
+    }
+    
+    cache.set(key, result);
+    return result;
+  };
+}
+```
+
+## 实际应用案例
+
+### 案例1：优化网站搜索功能
+
+```javascript
+// 搜索函数
+function searchProducts(query, filters) {
+  // 复杂搜索逻辑...
+  console.log('执行搜索，查询:', query, '过滤:', filters);
+  
+  // 模拟搜索耗时
+  return new Promise(resolve => {
+    setTimeout(() => {
+      resolve([
+        { id: 1, name: `产品 ${query}-1` },
+        { id: 2, name: `产品 ${query}-2` }
+      ]);
+    }, 500);
+  });
+}
+
+// 记忆化搜索函数
+const memoizedSearch = memoize(searchProducts);
+
+// 用户多次搜索相同内容时，只会执行一次实际搜索
+async function handleUserSearch() {
+  console.time('首次搜索');
+  await memoizedSearch('手机', { price: 'high' });
+  console.timeEnd('首次搜索');
+  
+  console.time('重复搜索');
+  await memoizedSearch('手机', { price: 'high' });
+  console.timeEnd('重复搜索');
+}
+
+// 在用户界面调用这个函数
+handleUserSearch();
+```
+
+### 案例2：图表计算优化
+
+```javascript
+// 图表数据处理函数
+function processChartData(rawData) {
+  console.log('处理图表数据...');
+  
+  // 假设这是一个复杂的数据转换过程
+  const results = rawData.map(item => {
+    // 复杂计算...
+    return {
+      label: item.name,
+      value: item.value * 1.5,
+      percentage: (item.value / 1000) * 100
+    };
+  });
+  
+  return results;
+}
+
+// 记忆化处理函数
+const memoizedProcessChart = memoize(processChartData);
+
+// 在图表组件中使用
+function renderChart(data) {
+  // 每次渲染图表时都调用数据处理函数
+  const processedData = memoizedProcessChart(data);
+  
+  // 使用处理后的数据绘制图表...
+  console.log('图表已绘制:', processedData.length, '个数据点');
+}
+
+// 多次使用相同数据渲染图表
+const sampleData = [
+  { name: 'A', value: 300 },
+  { name: 'B', value: 500 },
+  { name: 'C', value: 200 }
+];
+
+renderChart(sampleData); // 首次处理数据
+renderChart(sampleData); // 使用缓存结果
+```
+
+## 记忆化与现代JavaScript
+
+在现代JavaScript应用中，还可以结合记忆化与其他模式：
+
+### 结合React hooks
+
+```javascript
+// React自定义hook中使用记忆化
+function useMemoizedFetch() {
+  const cache = React.useRef({});
+  
+  return React.useCallback(async (url) => {
+    if (cache.current[url]) {
+      return cache.current[url];
+    }
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    cache.current[url] = data;
+    return data;
+  }, []);
+}
+
+// 在组件中使用
+function ProductList() {
+  const fetchData = useMemoizedFetch();
+  // ...
+}
+```
+
+### 结合工具库
+
+许多流行的JavaScript库提供内置的记忆化功能：
+
+```javascript
+// 使用Lodash的memoize函数
+import { memoize } from 'lodash';
+
+const memoizedCalc = memoize(expensiveCalculation);
+```
+
+## 总结
+
+函数记忆化是一种强大的性能优化技术，通过缓存函数调用结果来避免重复计算。主要优点包括：
+
+- 减少重复计算，提高性能
+- 特别适用于纯函数和计算密集型操作
+- 可以显著提升递归函数性能
+
+主要注意事项：
+
+- 内存使用增加
+- 仅适用于纯函数
+- 需要正确处理复杂参数和缓存键
+
+记忆化是JavaScript高级优化技术之一，掌握它可以帮助你编写更高效的代码，特别是在处理计算密集型应用或需要频繁重复计算的场景中。
+
+## 练习与扩展
+
+1. **基础练习**：实现一个记忆化的求平方根函数。
+2. **中级练习**：创建一个带有最大缓存项数限制的记忆化函数。
+3. **高级练习**：实现记忆化版本的深度优先搜索算法，用于解决迷宫问题。
+
+:::tip 延伸阅读
+- 《JavaScript设计模式》中的缓存模式
+- 研究Lodash或Ramda库中的记忆化实现
+- 探索不同缓存策略（LRU、FIFO等）的性能比较
+:::
+
+通过这些练习和深入学习，你将能够自信地在项目中应用记忆化技术，提高应用性能。

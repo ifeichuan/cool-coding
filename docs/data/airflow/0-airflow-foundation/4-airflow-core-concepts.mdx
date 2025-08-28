@@ -1,0 +1,183 @@
+---
+title: Airflow 核心概念
+description: 了解 Apache Airflow 的核心概念，包括 DAG、Task、Operator 和 Scheduler 等，帮助初学者快速掌握 Airflow 的基础知识。
+---
+
+## 介绍
+
+Apache Airflow 是一个用于编排、调度和监控工作流的开源平台。它通过定义有向无环图（DAG）来管理任务之间的依赖关系，并提供了丰富的工具来监控和管理任务的执行。本文将详细介绍 Airflow 的核心概念，帮助你理解其工作原理并开始使用。
+
+## 核心概念
+
+### 1. DAG（有向无环图）
+
+DAG 是 Airflow 中最核心的概念之一。它代表了一个工作流，由一组任务（Task）组成，任务之间通过依赖关系连接。DAG 是一个有向无环图，意味着任务之间的依赖关系不能形成循环。
+
+```python
+from airflow import DAG
+from airflow.operators.dummy_operator import DummyOperator
+from datetime import datetime
+
+dag = DAG(
+    'example_dag',
+    description='一个简单的 DAG 示例',
+    schedule_interval='@daily',
+    start_date=datetime(2023, 1, 1),
+    catchup=False
+)
+
+start = DummyOperator(task_id='start', dag=dag)
+end = DummyOperator(task_id='end', dag=dag)
+
+start >> end
+```
+
+在这个示例中，我们定义了一个简单的 DAG，包含两个任务：`start` 和 `end`。`start` 任务完成后，`end` 任务才会开始。
+
+### 2. Task（任务）
+
+Task 是 DAG 中的一个节点，代表一个具体的工作单元。每个 Task 通常由一个 Operator 定义，Operator 决定了 Task 的具体行为。
+
+```python
+from airflow.operators.bash_operator import BashOperator
+
+task = BashOperator(
+    task_id='print_date',
+    bash_command='date',
+    dag=dag
+)
+```
+
+在这个示例中，我们定义了一个 BashOperator 任务，它会执行 `date` 命令并输出当前日期。
+
+### 3. Operator（操作符）
+
+Operator 是 Airflow 中用于定义 Task 的类。每个 Operator 代表一种特定类型的任务，例如 BashOperator 用于执行 Bash 命令，PythonOperator 用于执行 Python 函数。
+
+```python
+from airflow.operators.python_operator import PythonOperator
+
+def print_hello():
+    print('Hello, Airflow!')
+
+task = PythonOperator(
+    task_id='print_hello',
+    python_callable=print_hello,
+    dag=dag
+)
+```
+
+在这个示例中，我们定义了一个 PythonOperator 任务，它会调用 `print_hello` 函数并输出 "Hello, Airflow!"。
+
+### 4. Scheduler（调度器）
+
+Scheduler 是 Airflow 的核心组件之一，负责解析 DAG 文件并根据调度计划触发任务的执行。Scheduler 会定期检查 DAG 文件的变化，并根据任务的依赖关系和时间安排来调度任务。
+
+### 5. Executor（执行器）
+
+Executor 是 Airflow 中负责执行任务的组件。它决定了任务在何处以及如何执行。常见的 Executor 包括 LocalExecutor、CeleryExecutor 和 KubernetesExecutor。
+
+### 6. XCom（跨任务通信）
+
+XCom 是 Airflow 中用于在任务之间传递数据的机制。它允许一个任务将数据存储在数据库中，另一个任务可以从数据库中读取这些数据。
+
+```python
+from airflow.operators.python_operator import PythonOperator
+
+def push_data(**kwargs):
+    kwargs['ti'].xcom_push(key='my_key', value='my_value')
+
+def pull_data(**kwargs):
+    value = kwargs['ti'].xcom_pull(key='my_key')
+    print(f'Received value: {value}')
+
+push_task = PythonOperator(
+    task_id='push_task',
+    python_callable=push_data,
+    provide_context=True,
+    dag=dag
+)
+
+pull_task = PythonOperator(
+    task_id='pull_task',
+    python_callable=pull_data,
+    provide_context=True,
+    dag=dag
+)
+
+push_task >> pull_task
+```
+
+在这个示例中，`push_task` 任务将数据推送到 XCom，`pull_task` 任务从 XCom 中拉取数据并打印。
+
+## 实际案例
+
+假设我们需要每天从数据库中提取数据，进行一些处理，然后将结果存储到另一个数据库中。我们可以使用 Airflow 来实现这个工作流。
+
+```python
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime
+
+def extract_data():
+    # 模拟从数据库中提取数据
+    return [1, 2, 3, 4, 5]
+
+def process_data(**kwargs):
+    data = kwargs['ti'].xcom_pull(task_ids='extract_data')
+    processed_data = [x * 2 for x in data]
+    return processed_data
+
+def load_data(**kwargs):
+    processed_data = kwargs['ti'].xcom_pull(task_ids='process_data')
+    # 模拟将数据存储到数据库中
+    print(f'Storing data: {processed_data}')
+
+dag = DAG(
+    'data_pipeline',
+    description='一个简单的数据处理管道',
+    schedule_interval='@daily',
+    start_date=datetime(2023, 1, 1),
+    catchup=False
+)
+
+extract_task = PythonOperator(
+    task_id='extract_data',
+    python_callable=extract_data,
+    dag=dag
+)
+
+process_task = PythonOperator(
+    task_id='process_data',
+    python_callable=process_data,
+    provide_context=True,
+    dag=dag
+)
+
+load_task = PythonOperator(
+    task_id='load_data',
+    python_callable=load_data,
+    provide_context=True,
+    dag=dag
+)
+
+extract_task >> process_task >> load_task
+```
+
+在这个案例中，我们定义了一个数据处理管道，包含三个任务：`extract_data`、`process_data` 和 `load_data`。每个任务都通过 XCom 传递数据。
+
+## 总结
+
+通过本文，我们了解了 Airflow 的核心概念，包括 DAG、Task、Operator、Scheduler、Executor 和 XCom。这些概念是理解和使用 Airflow 的基础。希望你能通过这些知识开始构建自己的数据管道。
+
+## 附加资源
+
+- [Airflow 官方文档](https://airflow.apache.org/docs/)
+- [Airflow GitHub 仓库](https://github.com/apache/airflow)
+- [Airflow 教程](https://airflow.apache.org/docs/apache-airflow/stable/tutorial.html)
+
+## 练习
+
+1. 创建一个包含三个任务的 DAG，任务之间通过依赖关系连接。
+2. 使用 PythonOperator 定义一个任务，该任务调用一个 Python 函数并返回一个值。
+3. 使用 XCom 在两个任务之间传递数据，并在第二个任务中打印传递的数据。

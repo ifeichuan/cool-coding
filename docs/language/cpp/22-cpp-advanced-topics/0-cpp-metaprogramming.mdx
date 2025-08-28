@@ -1,0 +1,521 @@
+---
+title: C++ 元编程
+description: 了解C++元编程的基础概念、技术及实际应用，包括模板元编程、类型特性、SFINAE等高级特性
+---
+
+# C++ 元编程
+
+## 什么是元编程？
+
+元编程是一种编程范式，它允许程序在编译时而非运行时操作和计算数据。在C++中，元编程主要通过模板系统实现，因此也常被称为**模板元编程**（Template Metaprogramming，简称TMP）。
+
+:::note 元编程的特点
+- 在**编译期**而不是运行期执行
+- 使用**模板**作为主要工具
+- 可以生成高效、类型安全的代码
+- 没有运行时开销
+:::
+
+## 为什么要学习元编程？
+
+尽管元编程看起来复杂，但它有许多实际优势：
+
+1. **性能优化**：编译期计算可以减少运行时开销
+2. **类型安全**：在编译期捕获错误而不是运行时
+3. **代码生成**：减少重复代码，提高抽象能力
+4. **库设计**：许多现代C++库（如STL、Boost）大量使用元编程技术
+
+## 元编程基础
+
+### 模板基础回顾
+
+在深入元编程之前，让我们简单回顾一下C++模板：
+
+```cpp
+// 函数模板
+template <typename T>
+T add(T a, T b) {
+    return a + b;
+}
+
+// 类模板
+template <typename T>
+class Vector {
+private:
+    T* data;
+    size_t size;
+public:
+    // 实现省略
+};
+```
+
+### 模板特化
+
+特化允许为特定类型提供自定义实现：
+
+```cpp
+// 泛型模板
+template <typename T>
+struct TypeInfo {
+    static constexpr const char* name = "unknown";
+};
+
+// 特化版本
+template <>
+struct TypeInfo<int> {
+    static constexpr const char* name = "int";
+};
+
+template <>
+struct TypeInfo<double> {
+    static constexpr const char* name = "double";
+};
+```
+
+使用示例：
+
+```cpp
+#include <iostream>
+
+int main() {
+    std::cout << TypeInfo<int>::name << std::endl;    // 输出：int
+    std::cout << TypeInfo<double>::name << std::endl; // 输出：double
+    std::cout << TypeInfo<char>::name << std::endl;   // 输出：unknown
+    return 0;
+}
+```
+
+## 编译期计算
+
+### 使用模板进行编译期计算
+
+一个经典的例子是编译期计算斐波那契数列：
+
+```cpp
+template <int N>
+struct Fibonacci {
+    static constexpr int value = Fibonacci<N-1>::value + Fibonacci<N-2>::value;
+};
+
+// 边界条件
+template <>
+struct Fibonacci<0> {
+    static constexpr int value = 0;
+};
+
+template <>
+struct Fibonacci<1> {
+    static constexpr int value = 1;
+};
+```
+
+使用方法：
+
+```cpp
+#include <iostream>
+
+int main() {
+    // 编译期计算斐波那契数列的第10项
+    constexpr int fib10 = Fibonacci<10>::value;
+    std::cout << "Fibonacci(10) = " << fib10 << std::endl; // 输出：Fibonacci(10) = 55
+    
+    // 下面的代码在C++11及以上版本中有效
+    static_assert(Fibonacci<10>::value == 55, "Fibonacci calculation is wrong!");
+    
+    return 0;
+}
+```
+
+:::caution 注意
+大量的递归模板实例化可能导致编译时间显著增加，甚至引发编译器递归深度限制错误。
+:::
+
+### 使用constexpr
+
+从C++11开始，我们也可以使用`constexpr`实现编译期计算：
+
+```cpp
+constexpr int fibonacci(int n) {
+    return (n <= 1) ? n : fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+int main() {
+    constexpr int result = fibonacci(10); // 编译期计算
+    std::cout << "Fibonacci(10) = " << result << std::endl; // 输出：Fibonacci(10) = 55
+    return 0;
+}
+```
+
+## 类型特性(Type Traits)
+
+类型特性是C++元编程中的重要工具，它们提供了在编译期检查和修改类型的能力。
+
+### 基本类型特性
+
+C++标准库在`<type_traits>`头文件中提供了丰富的类型特性：
+
+```cpp
+#include <iostream>
+#include <type_traits>
+
+int main() {
+    // 检查类型是否为整数
+    std::cout << std::boolalpha;
+    std::cout << "int is integral: " << std::is_integral<int>::value << std::endl;  // 输出：true
+    std::cout << "float is integral: " << std::is_integral<float>::value << std::endl;  // 输出：false
+    
+    // C++17语法更简洁
+    std::cout << "int is integral: " << std::is_integral_v<int> << std::endl;  // 输出：true
+    
+    return 0;
+}
+```
+
+### 自定义类型特性
+
+我们也可以创建自己的类型特性：
+
+```cpp
+template <typename T>
+struct is_pointer_to_const {
+    static constexpr bool value = false;
+};
+
+template <typename T>
+struct is_pointer_to_const<const T*> {
+    static constexpr bool value = true;
+};
+
+// C++17写法
+template <typename T>
+inline constexpr bool is_pointer_to_const_v = is_pointer_to_const<T>::value;
+```
+
+使用示例：
+
+```cpp
+int main() {
+    int* p1 = nullptr;
+    const int* p2 = nullptr;
+    
+    std::cout << "p1 points to const: " << is_pointer_to_const<decltype(p1)>::value << std::endl; // 输出：false
+    std::cout << "p2 points to const: " << is_pointer_to_const<decltype(p2)>::value << std::endl; // 输出：true
+    
+    return 0;
+}
+```
+
+## SFINAE (Substitution Failure Is Not An Error)
+
+SFINAE是C++模板编程中的一个重要概念，它允许编译器在函数模板实例化失败时继续查找其他可能匹配的模板，而不是报错。
+
+### SFINAE基础
+
+一个简单的SFINAE示例：
+
+```cpp
+#include <iostream>
+#include <type_traits>
+
+// 仅当T有size()方法时此函数模板才有效
+template <typename T>
+auto get_size(const T& container) -> decltype(container.size(), size_t()) {
+    return container.size();
+}
+
+// 对于没有size()方法的类型使用此重载
+template <typename T>
+size_t get_size(...) {
+    return 0;
+}
+
+int main() {
+    std::string str = "Hello";
+    int arr[10];
+    
+    std::cout << "String size: " << get_size(str) << std::endl; // 调用第一个函数，输出：5
+    std::cout << "Array size: " << get_size(arr) << std::endl;  // 调用第二个函数，输出：0
+    
+    return 0;
+}
+```
+
+### enable_if的使用
+
+C++标准库提供了`std::enable_if`来简化SFINAE模式：
+
+```cpp
+#include <iostream>
+#include <type_traits>
+#include <vector>
+
+// 仅对整数类型启用此函数
+template <typename T, 
+          typename = std::enable_if_t<std::is_integral_v<T>>>
+void print_number(T value) {
+    std::cout << "Integer: " << value << std::endl;
+}
+
+// 仅对浮点类型启用此函数
+template <typename T,
+          typename = std::enable_if_t<std::is_floating_point_v<T>>,
+          typename = void> // 需要添加额外参数以避免签名冲突
+void print_number(T value) {
+    std::cout << "Float: " << value << std::endl;
+}
+
+int main() {
+    print_number(42);    // 输出：Integer: 42
+    print_number(3.14);  // 输出：Float: 3.14
+    // print_number("hello"); // 编译错误：没有匹配的函数
+    
+    return 0;
+}
+```
+
+## C++ 17的if constexpr
+
+C++17引入了`if constexpr`，这是编译期条件分支语句，简化了许多元编程场景：
+
+```cpp
+#include <iostream>
+#include <type_traits>
+
+template <typename T>
+auto get_value(T t) {
+    if constexpr (std::is_pointer_v<T>) {
+        return *t; // 只在T是指针类型时编译这行代码
+    }
+    else {
+        return t;  // 只在T不是指针类型时编译这行代码
+    }
+}
+
+int main() {
+    int x = 10;
+    int* px = &x;
+    
+    std::cout << get_value(x) << std::endl;  // 输出：10
+    std::cout << get_value(px) << std::endl; // 输出：10
+    
+    return 0;
+}
+```
+
+## 可变参数模板
+
+可变参数模板允许模板接受任意数量的类型参数，这是元编程的另一个强大工具：
+
+```cpp
+#include <iostream>
+
+// 递归终止
+void print() {
+    std::cout << std::endl;
+}
+
+// 可变参数模板函数
+template <typename T, typename... Args>
+void print(T first, Args... args) {
+    std::cout << first << ' ';
+    print(args...); // 递归处理剩余参数
+}
+
+int main() {
+    print(1, 2.5, "hello", 'c'); // 输出：1 2.5 hello c
+    return 0;
+}
+```
+
+## 实际应用案例
+
+### 案例1：类型安全的异构容器
+
+使用元编程创建一个可以存储不同类型对象的容器：
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <typeindex>
+#include <any>
+
+class AnyContainer {
+private:
+    std::unordered_map<std::string, std::any> data;
+    
+public:
+    template<typename T>
+    void set(const std::string& key, T value) {
+        data[key] = value;
+    }
+    
+    template<typename T>
+    T get(const std::string& key) {
+        if (data.find(key) == data.end()) {
+            throw std::runtime_error("Key not found");
+        }
+        return std::any_cast<T>(data[key]);
+    }
+    
+    bool has(const std::string& key) const {
+        return data.find(key) != data.end();
+    }
+};
+
+int main() {
+    AnyContainer container;
+    
+    // 存储不同类型的数据
+    container.set("name", std::string("Alice"));
+    container.set("age", 30);
+    container.set("height", 1.75);
+    
+    // 获取数据
+    std::cout << "Name: " << container.get<std::string>("name") << std::endl;
+    std::cout << "Age: " << container.get<int>("age") << std::endl;
+    std::cout << "Height: " << container.get<double>("height") << std::endl;
+    
+    // 类型安全
+    try {
+        // 错误：尝试以错误的类型获取数据
+        int wrongType = container.get<int>("name");
+    }
+    catch (const std::bad_any_cast& e) {
+        std::cout << "Type error caught: " << e.what() << std::endl;
+    }
+    
+    return 0;
+}
+```
+
+### 案例2：编译期状态机
+
+使用元编程实现一个编译期状态机：
+
+```cpp
+#include <iostream>
+#include <type_traits>
+
+// 状态定义
+struct StateA {};
+struct StateB {};
+struct StateC {};
+
+// 事件定义
+struct Event1 {};
+struct Event2 {};
+struct Event3 {};
+
+// 默认转换（无效转换）
+template <typename CurrentState, typename Event>
+struct Transition {
+    using NextState = CurrentState; // 默认保持当前状态
+    static constexpr bool is_valid = false;
+};
+
+// 特化有效转换
+template <>
+struct Transition<StateA, Event1> {
+    using NextState = StateB;
+    static constexpr bool is_valid = true;
+};
+
+template <>
+struct Transition<StateB, Event2> {
+    using NextState = StateC;
+    static constexpr bool is_valid = true;
+};
+
+template <>
+struct Transition<StateC, Event3> {
+    using NextState = StateA;
+    static constexpr bool is_valid = true;
+};
+
+// 状态机实现
+template <typename CurrentState>
+class StateMachine {
+public:
+    template <typename Event>
+    auto processEvent() {
+        using TransitionT = Transition<CurrentState, Event>;
+        
+        // 编译期检查转换是否有效
+        static_assert(TransitionT::is_valid, "Invalid state transition");
+        
+        // 返回新的状态机实例
+        return StateMachine<typename TransitionT::NextState>{};
+    }
+    
+    void printState() const {
+        if constexpr (std::is_same_v<CurrentState, StateA>) {
+            std::cout << "Current state: StateA" << std::endl;
+        } 
+        else if constexpr (std::is_same_v<CurrentState, StateB>) {
+            std::cout << "Current state: StateB" << std::endl;
+        }
+        else if constexpr (std::is_same_v<CurrentState, StateC>) {
+            std::cout << "Current state: StateC" << std::endl;
+        }
+    }
+};
+
+int main() {
+    // 初始状态是StateA
+    StateMachine<StateA> sm;
+    sm.printState(); // 输出：Current state: StateA
+    
+    // 有效转换：StateA + Event1 -> StateB
+    auto sm2 = sm.processEvent<Event1>();
+    sm2.printState(); // 输出：Current state: StateB
+    
+    // 有效转换：StateB + Event2 -> StateC
+    auto sm3 = sm2.processEvent<Event2>();
+    sm3.printState(); // 输出：Current state: StateC
+    
+    // 有效转换：StateC + Event3 -> StateA
+    auto sm4 = sm3.processEvent<Event3>();
+    sm4.printState(); // 输出：Current state: StateA
+    
+    // 无效转换会在编译期报错
+    // auto invalid = sm.processEvent<Event2>(); // 编译错误
+    
+    return 0;
+}
+```
+
+## 总结
+
+C++元编程是一个强大但复杂的工具：
+
+1. **基于模板系统**：利用模板特化、递归模板实例化进行编译期计算
+2. **类型特性**：提供丰富的类型信息和类型操作工具
+3. **SFINAE模式**：实现编译期函数选择
+4. **C++17的if constexpr**：简化编译期条件分支
+5. **可变参数模板**：处理任意数量的类型参数
+
+元编程可以帮助你写出更加通用、高效且类型安全的代码，尽管其语法可能看起来有些晦涩，但掌握这些技术将大大拓展你的C++编程能力。
+
+:::tip 学习建议
+元编程是高级话题，在掌握基础C++后再深入学习。从简单的例子开始，逐步理解更复杂的概念。
+:::
+
+## 练习
+
+1. 使用模板元编程计算编译期的阶乘。
+2. 创建一个类型特性，检查类型是否有特定的成员函数（如`begin()`和`end()`）。
+3. 使用SFINAE实现一个函数，对容器类型返回其大小，对其他类型返回0。
+4. 使用if constexpr实现一个通用打印函数，可根据参数类型选择不同的打印方式。
+5. 实现一个元编程版本的编译期排序算法。
+
+## 资源推荐
+
+- 《C++ Templates: The Complete Guide》 by David Vandevoorde
+- 《Modern C++ Design》 by Andrei Alexandrescu
+- [C++ Template Metaprogramming on cppreference.com](https://en.cppreference.com/w/cpp/language/template_metaprogramming)
+- Boost MPL (Metaprogramming Library)
+- CppCon会议中的元编程相关演讲
+
+Happy Coding!

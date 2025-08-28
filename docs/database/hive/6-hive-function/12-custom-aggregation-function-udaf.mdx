@@ -1,0 +1,134 @@
+---
+title: 自定义聚合函数(UDAF)
+description: 了解如何在 Hive 中创建和使用自定义聚合函数（UDAF），并掌握其在实际场景中的应用。
+---
+
+# 自定义聚合函数(UDAF)
+
+## 介绍
+
+在 Hive 中，聚合函数用于对一组值进行计算并返回单个结果。常见的聚合函数包括 `SUM`、`AVG`、`COUNT` 等。然而，有时我们需要执行更复杂的聚合操作，这时就需要使用**自定义聚合函数（UDAF，User-Defined Aggregation Function）**。
+
+UDAF 允许我们定义自己的聚合逻辑，以满足特定的业务需求。本文将逐步介绍如何创建和使用 UDAF，并通过实际案例展示其应用场景。
+
+## UDAF 的基本概念
+
+UDAF 的核心思想是将一组输入值聚合为一个单一的输出值。与普通的 UDF（User-Defined Function）不同，UDAF 需要处理多行数据，并在处理过程中维护一个中间状态。
+
+UDAF 的实现通常包括以下几个步骤：
+
+1. **初始化**：设置初始状态。
+2. **迭代**：逐行处理输入数据，并更新中间状态。
+3. **合并**：将多个中间状态合并为一个。
+4. **终止**：生成最终结果。
+
+## 实现一个简单的 UDAF
+
+让我们通过一个简单的例子来理解如何实现一个 UDAF。假设我们需要计算一组数值的**加权平均值**，其中每个数值都有一个对应的权重。
+
+### 1. 定义 UDAF 类
+
+首先，我们需要创建一个 Java 类来实现 UDAF。以下是一个简单的实现：
+
+```java
+import org.apache.hadoop.hive.ql.exec.UDAF;
+import org.apache.hadoop.hive.ql.exec.UDAFEvaluator;
+import org.apache.hadoop.io.DoubleWritable;
+
+public class WeightedAverageUDAF extends UDAF {
+
+    public static class WeightedAverageUDAFEvaluator implements UDAFEvaluator {
+
+        public static class PartialResult {
+            double sum = 0;
+            double totalWeight = 0;
+        }
+
+        private PartialResult partial;
+
+        public void init() {
+            partial = null;
+        }
+
+        public boolean iterate(DoubleWritable value, DoubleWritable weight) {
+            if (value == null || weight == null) {
+                return true;
+            }
+            if (partial == null) {
+                partial = new PartialResult();
+            }
+            partial.sum += value.get() * weight.get();
+            partial.totalWeight += weight.get();
+            return true;
+        }
+
+        public PartialResult terminatePartial() {
+            return partial;
+        }
+
+        public boolean merge(PartialResult other) {
+            if (other == null) {
+                return true;
+            }
+            if (partial == null) {
+                partial = new PartialResult();
+            }
+            partial.sum += other.sum;
+            partial.totalWeight += other.totalWeight;
+            return true;
+        }
+
+        public DoubleWritable terminate() {
+            if (partial == null || partial.totalWeight == 0) {
+                return null;
+            }
+            return new DoubleWritable(partial.sum / partial.totalWeight);
+        }
+    }
+}
+```
+
+### 2. 注册 UDAF
+
+在 Hive 中注册 UDAF：
+
+```sql
+ADD JAR /path/to/your/udaf.jar;
+CREATE TEMPORARY FUNCTION weighted_avg AS 'com.example.WeightedAverageUDAF';
+```
+
+### 3. 使用 UDAF
+
+现在，我们可以在 Hive 查询中使用这个 UDAF：
+
+```sql
+SELECT weighted_avg(value, weight) FROM your_table;
+```
+
+## 实际案例
+
+假设我们有一个销售数据表 `sales`，其中包含每个销售员的销售额和对应的权重（例如，销售额的置信度）。我们可以使用上述 UDAF 来计算加权平均销售额：
+
+```sql
+SELECT salesperson, weighted_avg(sales_amount, confidence) AS weighted_avg_sales
+FROM sales
+GROUP BY salesperson;
+```
+
+## 总结
+
+自定义聚合函数（UDAF）是 Hive 中非常强大的工具，允许我们实现复杂的聚合逻辑。通过本文的学习，你应该已经掌握了如何创建和使用 UDAF，并了解了其在实际场景中的应用。
+
+## 附加资源
+
+- [Hive 官方文档](https://cwiki.apache.org/confluence/display/Hive/LanguageManual+UDF)
+- [Hive UDF 开发指南](https://cwiki.apache.org/confluence/display/Hive/HivePlugins)
+
+## 练习
+
+1. 尝试实现一个 UDAF，计算一组数值的**中位数**。
+2. 修改上述加权平均值的 UDAF，使其能够处理负数权重的情况。
+
+:::tip
+在实现 UDAF 时，务必考虑边界情况和异常处理，以确保函数的健壮性。
+:::

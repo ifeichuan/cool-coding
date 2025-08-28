@@ -1,0 +1,136 @@
+---
+title: OpenTelemetry Go实现
+description: "学习如何使用Go语言实现OpenTelemetry，包括基础概念、代码示例和实际应用场景。"
+---
+
+## 介绍
+
+OpenTelemetry 是一个开源的观测性框架，用于生成、收集和导出遥测数据（如指标、日志和追踪）。它帮助开发者监控和调试分布式系统的性能问题。Go语言因其简洁和高性能的特性，成为实现OpenTelemetry的热门选择之一。
+
+本文将介绍如何在Go中使用OpenTelemetry，包括安装、基础配置、代码示例和实际应用场景。
+
+## 安装与设置
+
+首先，确保你已经安装了Go（版本1.16或更高）。然后，使用以下命令安装OpenTelemetry的核心库和导出器：
+
+```go
+go get go.opentelemetry.io/otel \
+       go.opentelemetry.io/otel/trace \
+       go.opentelemetry.io/otel/sdk \
+       go.opentelemetry.io/otel/exporters/jaeger
+```
+
+## 基础配置
+
+以下是一个简单的配置示例，展示如何初始化OpenTelemetry的追踪（Tracing）功能：
+
+```go
+package main
+
+import (
+	"context"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+)
+
+func initTracer() (*sdktrace.TracerProvider, error) {
+	// 创建一个Jaeger导出器
+	exporter, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint("http://localhost:14268/api/traces")))
+	if err != nil {
+		return nil, err
+	}
+
+	// 配置追踪提供器
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("my-service"),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+	return tp, nil
+}
+
+func main() {
+	tp, err := initTracer()
+	if err != nil {
+		panic(err)
+	}
+	defer tp.Shutdown(context.Background())
+
+	// 使用OpenTelemetry的追踪功能
+	tracer := otel.Tracer("example-tracer")
+	ctx, span := tracer.Start(context.Background(), "my-span")
+	defer span.End()
+
+	// 你的业务逻辑
+}
+```
+
+### 输入与输出
+- **输入**：运行上述代码时，确保Jaeger服务已启动并监听 `http://localhost:14268`。
+- **输出**：代码会将追踪数据发送到Jaeger，你可以在Jaeger UI中查看这些数据。
+
+## 核心概念
+
+### 1. 追踪（Tracing）
+追踪用于记录请求在系统中的流动。每个请求会生成一个唯一的追踪ID，并包含多个跨度（Span）。
+
+### 2. 跨度（Span）
+跨度代表一个操作或一个工作单元。例如，一个HTTP请求或数据库查询可以是一个跨度。
+
+### 3. 上下文传播（Context Propagation）
+OpenTelemetry通过上下文（Context）在服务之间传递追踪信息。这对于分布式系统尤为重要。
+
+## 实际案例
+
+假设你有一个微服务架构，包含两个服务：`ServiceA` 和 `ServiceB`。`ServiceA` 调用 `ServiceB` 的HTTP接口。以下是使用OpenTelemetry追踪的示例：
+
+```go
+// ServiceA
+func callServiceB(ctx context.Context) {
+	tracer := otel.Tracer("serviceA-tracer")
+	ctx, span := tracer.Start(ctx, "call-serviceB")
+	defer span.End()
+
+	// 模拟HTTP请求
+	req, _ := http.NewRequest("GET", "http://serviceB/api", nil)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	http.DefaultClient.Do(req)
+}
+
+// ServiceB
+func handleRequest(w http.ResponseWriter, r *http.Request) {
+	ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	tracer := otel.Tracer("serviceB-tracer")
+	ctx, span := tracer.Start(ctx, "handle-request")
+	defer span.End()
+
+	// 处理请求
+	w.Write([]byte("Hello from ServiceB"))
+}
+```
+
+:::note
+确保在 `ServiceB` 中正确提取了上下文，否则追踪链会断开。
+:::
+
+## 总结
+
+本文介绍了OpenTelemetry在Go中的实现，包括安装、配置、核心概念和实际案例。通过OpenTelemetry，你可以轻松监控分布式系统的性能问题。
+
+## 附加资源
+
+1. [OpenTelemetry官方文档](https://opentelemetry.io/docs/)
+2. [Jaeger官方文档](https://www.jaegertracing.io/docs/)
+3. [Go OpenTelemetry库](https://pkg.go.dev/go.opentelemetry.io/otel)
+
+## 练习
+
+1. 尝试将OpenTelemetry集成到一个现有的Go项目中。
+2. 使用Jaeger UI查看生成的追踪数据。
+3. 探索OpenTelemetry的指标（Metrics）功能。

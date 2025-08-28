@@ -1,0 +1,139 @@
+---
+title: Zipkin 常见问题解答
+description: 针对初学者的Zipkin分布式追踪系统常见问题解答，涵盖基础概念、部署问题和实际应用场景。
+---
+
+# Zipkin 常见问题解答
+
+## 介绍
+Zipkin是一个开源的分布式追踪系统，用于帮助开发者监控和排查微服务架构中的延迟问题。对于初学者而言，可能会遇到一些常见问题。本文档将解答这些疑问，并提供实用示例。
+
+---
+
+## 基础概念问题
+
+### 1. Zipkin与日志系统的区别是什么？
+:::note
+**核心区别**：Zipkin专注于**请求链路追踪**，而日志系统记录离散事件。
+:::
+- **Zipkin**：可视化请求在微服务间的流转路径，分析延迟瓶颈（如数据库调用耗时）。
+- **日志系统**：记录服务运行时的具体事件（如错误信息、调试输出）。
+
+```mermaid
+graph LR
+  A[用户请求] -->|Zipkin| B[服务A]
+  B -->|追踪ID传递| C[服务B]
+  C --> D[数据库]
+  D -->|返回耗时数据| A
+```
+
+### 2. 如何生成Trace ID？
+在代码中通过Brave（Zipkin的Java客户端）自动生成：
+```java
+// 示例：Spring Boot中自动生成的Trace ID
+@RestController
+public class DemoController {
+  @GetMapping("/hello")
+  public String hello() {
+    // 请求头会自动携带X-B3-TraceId
+    return "Hello Zipkin!";
+  }
+}
+```
+输出头示例：
+```
+X-B3-TraceId: 6b3f5a7e2c1d9f4a
+```
+
+---
+
+## 部署与配置问题
+
+### 3. Zipkin服务器启动失败怎么办？
+常见原因及解决方案：
+1. **端口冲突**：
+   ```bash
+   # 检查默认端口9411是否被占用
+   netstat -tuln | grep 9411
+   # 指定新端口启动
+   java -jar zipkin.jar --server.port=9421
+   ```
+2. **存储配置错误**：
+   ```yaml
+   # application.yml示例（使用MySQL存储）
+   zipkin:
+     storage:
+       type: mysql
+       mysql:
+         host: localhost
+         port: 3306
+         username: zipkin
+         password: zipkin
+   ```
+
+### 4. 数据存储支持哪些后端？
+:::tip
+Zipkin支持多种存储，根据数据量选择：
+:::
+| 存储类型   | 适用场景          | 配置示例                 |
+|------------|-------------------|--------------------------|
+| 内存       | 测试环境          | `--STORAGE_TYPE=mem`     |
+| MySQL      | 小规模生产        | 见问题3的YAML配置        |
+| Elasticsearch | 大规模生产    | `--STORAGE_TYPE=elasticsearch` |
+
+---
+
+## 实际应用场景
+
+### 5. 如何追踪跨服务调用？
+**电商系统示例**：
+1. 用户下单请求经过`订单服务` -> `支付服务` -> `库存服务`
+2. 每个服务通过HTTP头传递Trace ID：
+   ```python
+   # Python Flask示例
+   from flask import request
+   import requests
+
+   @app.route('/checkout')
+   def checkout():
+       headers = {
+           'X-B3-TraceId': request.headers.get('X-B3-TraceId'),
+           'X-B3-SpanId': generate_span_id()
+       }
+       requests.post('http://payment-service/pay', headers=headers)
+   ```
+
+### 6. 为什么在UI中看不到完整链路？
+可能原因：
+- **采样率设置过低**：调整采样率为100%用于调试：
+  ```java
+  // Spring Cloud Sleuth配置
+  spring.sleuth.sampler.probability=1.0
+  ```
+- **网络问题**：确认agent能访问Zipkin服务器：
+  ```bash
+  curl -v http://zipkin-server:9411/api/v2/services
+  ```
+
+---
+
+## 总结与练习
+
+### 总结
+- Zipkin通过Trace ID关联跨服务请求
+- 存储选择需考虑数据量和性能
+- 采样率影响数据完整性
+
+### 练习
+1. 本地启动Zipkin并发送一条测试数据：
+   ```bash
+   curl -s localhost:9411/zipkin/api/v2/spans -X POST \
+   -H "Content-Type: application/json" \
+   -d '[{"traceId":"5f1b000000000000","id":"5f1b000000000000","name":"test"}]'
+   ```
+2. 尝试在Spring Boot中集成Sleuth+Zipkin，追踪一个包含数据库调用的接口。
+
+### 扩展阅读
+- [Zipkin官方文档](https://zipkin.io/)
+- Brave Instrumentation指南
+- 分布式追踪原理（Dapper论文）

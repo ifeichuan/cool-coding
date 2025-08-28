@@ -1,0 +1,154 @@
+---
+title: PyTorch 静态图转换
+description: 了解如何使用PyTorch将动态计算图转换为静态图，以优化模型性能并支持更多部署场景。
+---
+
+# PyTorch 静态图转换
+
+在深度学习中，计算图是描述模型计算过程的核心概念。PyTorch 默认使用**动态计算图**（Dynamic Computation Graph），这意味着每次前向传播时都会重新构建计算图。这种灵活性使得调试和开发变得非常方便，但在某些场景下，**静态计算图**（Static Computation Graph）可能更适合，例如在部署到生产环境时。
+
+静态图转换是指将动态图转换为静态图的过程。PyTorch 提供了 `torch.jit` 模块来实现这一功能。本文将详细介绍静态图转换的概念、实现方法以及实际应用场景。
+
+---
+
+## 什么是静态图转换？
+
+静态图转换是将动态计算图“冻结”为一个固定的计算图的过程。与动态图不同，静态图在模型定义后不会改变，这使得它在以下场景中更具优势：
+
+1. **性能优化**：静态图可以进行更多的优化，例如算子融合、内存优化等。
+2. **跨平台部署**：静态图可以导出为独立格式（如 TorchScript），支持在非 Python 环境中运行。
+3. **减少开销**：静态图避免了每次前向传播时重新构建计算图的开销。
+
+---
+
+## 如何实现静态图转换？
+
+PyTorch 提供了两种主要方法来实现静态图转换：
+
+1. **Tracing**：通过运行模型并记录操作来生成静态图。
+2. **Scripting**：通过直接解析 Python 代码来生成静态图。
+
+### 方法 1：Tracing
+
+Tracing 是通过运行模型并记录操作来生成静态图的方法。以下是一个简单的示例：
+
+```python
+import torch
+import torch.nn as nn
+
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super(SimpleModel, self).__init__()
+        self.linear = nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.linear(x)
+
+# 实例化模型
+model = SimpleModel()
+
+# 创建一个输入张量
+example_input = torch.randn(1, 10)
+
+# 使用 torch.jit.trace 生成静态图
+traced_model = torch.jit.trace(model, example_input)
+
+# 保存静态图
+traced_model.save("traced_model.pt")
+```
+
+:::note
+**注意**：Tracing 只能记录在给定输入上执行的操作。如果模型的控制流（如 `if` 语句）依赖于输入数据，Tracing 可能无法正确捕获所有分支。
+:::
+
+### 方法 2：Scripting
+
+Scripting 是通过直接解析 Python 代码来生成静态图的方法。以下是一个示例：
+
+```python
+import torch
+import torch.nn as nn
+
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super(SimpleModel, self).__init__()
+        self.linear = nn.Linear(10, 1)
+
+    def forward(self, x):
+        if x.sum() > 0:
+            return self.linear(x)
+        else:
+            return -self.linear(x)
+
+# 实例化模型
+model = SimpleModel()
+
+# 使用 torch.jit.script 生成静态图
+scripted_model = torch.jit.script(model)
+
+# 保存静态图
+scripted_model.save("scripted_model.pt")
+```
+
+:::tip
+**提示**：Scripting 可以处理控制流，因此适用于更复杂的模型。
+:::
+
+---
+
+## 实际应用场景
+
+### 场景 1：模型部署
+
+静态图转换最常见的应用场景是模型部署。例如，将模型导出为 TorchScript 格式后，可以在 C++ 环境中加载并运行：
+
+```cpp
+#include <torch/script.h> // One-stop header.
+
+int main() {
+    // 加载模型
+    torch::jit::script::Module module;
+    module = torch::jit::load("scripted_model.pt");
+
+    // 创建输入张量
+    std::vector<int64_t> dims = {1, 10};
+    torch::Tensor input_tensor = torch::randn(dims);
+
+    // 运行模型
+    std::vector<torch::jit::IValue> inputs;
+    inputs.push_back(input_tensor);
+    at::Tensor output = module.forward(inputs).toTensor();
+
+    std::cout << output << std::endl;
+}
+```
+
+### 场景 2：性能优化
+
+静态图可以进行更多的优化。例如，PyTorch 的 `torch.jit.optimize_for_inference` 函数可以进一步优化模型以加速推理：
+
+```python
+optimized_model = torch.jit.optimize_for_inference(scripted_model)
+optimized_model.save("optimized_model.pt")
+```
+
+---
+
+## 总结
+
+静态图转换是 PyTorch 中一个强大的工具，能够将动态计算图转换为静态图，从而优化性能并支持跨平台部署。通过 Tracing 和 Scripting 两种方法，您可以根据模型的需求选择合适的方式生成静态图。
+
+---
+
+## 附加资源与练习
+
+### 资源
+- [PyTorch 官方文档：TorchScript](https://pytorch.org/docs/stable/jit.html)
+- [PyTorch 教程：模型部署](https://pytorch.org/tutorials/advanced/cpp_export.html)
+
+### 练习
+1. 尝试使用 Tracing 和 Scripting 分别转换一个包含控制流的模型，并比较它们的输出。
+2. 将转换后的模型导出为 TorchScript 格式，并在 C++ 环境中运行。
+3. 使用 `torch.jit.optimize_for_inference` 优化模型，并测量推理速度的提升。
+
+通过实践，您将更好地理解静态图转换的优势和应用场景。祝您学习愉快！

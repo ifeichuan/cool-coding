@@ -1,0 +1,143 @@
+---
+title: OpenTelemetry 与数据库监控
+description: 学习如何使用OpenTelemetry监控数据库性能，追踪查询延迟并优化应用与数据库的交互。
+---
+
+# OpenTelemetry 与数据库监控
+
+## 介绍
+
+在现代分布式系统中，数据库是核心组件之一，其性能直接影响整体应用的响应速度。OpenTelemetry（简称OTel）作为云原生可观测性工具，能够帮助开发者监控数据库操作，追踪慢查询，并分析事务链路。本文将介绍如何通过OpenTelemetry实现数据库监控，包括指标（Metrics）、追踪（Traces）和日志（Logs）的集成。
+
+:::note 关键概念
+- **Span**：表示一个独立的工作单元（如一次数据库查询）。
+- **Metric**：数值化指标（如查询耗时、错误率）。
+- **Context Propagation**：跨服务传递追踪上下文。
+:::
+
+---
+
+## 基础配置
+
+### 1. 安装依赖
+首先为你的应用添加OpenTelemetry数据库 instrumentation 库。以Node.js为例：
+
+```bash
+npm install @opentelemetry/sdk-node \
+            @opentelemetry/instrumentation \
+            @opentelemetry/instrumentation-pg \ # PostgreSQL专用
+            @opentelemetry/instrumentation-mysql
+```
+
+### 2. 初始化OpenTelemetry
+以下代码展示如何初始化一个基础配置：
+
+```javascript
+const { NodeSDK } = require('@opentelemetry/sdk-node');
+const { PgInstrumentation } = require('@opentelemetry/instrumentation-pg');
+
+const sdk = new NodeSDK({
+  instrumentations: [new PgInstrumentation()],
+});
+
+sdk.start();
+```
+
+---
+
+## 监控数据库查询
+
+### 追踪SQL操作
+OpenTelemetry会自动为每个数据库查询创建Span。例如，执行以下PostgreSQL查询时：
+
+```javascript
+const { Client } = require('pg');
+const client = new Client();
+
+async function queryUsers() {
+  const res = await client.query('SELECT * FROM users WHERE active = $1', [true]);
+  return res.rows;
+}
+```
+
+生成的Span将包含：
+- **操作名称**：`pg.query`
+- **属性**：SQL语句、参数、数据库名称。
+
+### 可视化追踪
+通过Jaeger或Zipkin查看追踪数据，你会看到类似这样的链路：
+
+```mermaid
+graph LR
+  A[HTTP请求 /users] --> B[POSTGRES: SELECT...]
+  B --> C[缓存查询]
+```
+
+---
+
+## 指标收集
+
+### 关键数据库指标
+OpenTelemetry可自动收集以下指标：
+- `db.query.duration`：查询耗时（毫秒）
+- `db.connections`：当前连接数
+- `db.errors`：错误计数
+
+通过Prometheus暴露指标：
+
+```yaml
+# prometheus.yml 配置示例
+scrape_configs:
+  - job_name: 'opentelemetry'
+    static_configs:
+      - targets: ['localhost:9464']
+```
+
+---
+
+## 实际案例：优化慢查询
+
+### 问题场景
+一个用户管理API响应缓慢，通过OpenTelemetry发现瓶颈在数据库：
+
+```json
+{
+  "spanName": "pg.query",
+  "duration": "1200ms",
+  "attributes": {
+    "db.statement": "SELECT * FROM users WHERE last_login < NOW() - INTERVAL '90 days'"
+  }
+}
+```
+
+### 解决方案
+1. 添加索引加速查询：
+   ```sql
+   CREATE INDEX idx_users_last_login ON users(last_login);
+   ```
+2. 重构查询，只返回必要字段：
+   ```sql
+   SELECT id, username FROM users WHERE last_login < NOW() - INTERVAL '90 days';
+   ```
+
+优化后追踪显示查询耗时降至`200ms`。
+
+---
+
+## 总结
+
+通过OpenTelemetry监控数据库，你可以：
+- 发现性能瓶颈
+- 追踪分布式事务
+- 实时监控关键指标
+
+:::tip 练习建议
+1. 在你的本地环境中配置OpenTelemetry + PostgreSQL。
+2. 故意创建一个慢查询，观察Span中的耗时和属性。
+3. 尝试将指标导出到Prometheus并配置告警规则。
+:::
+
+## 扩展资源
+- [OpenTelemetry官方文档](https://opentelemetry.io/docs/)
+- 《Database Reliability Engineering》书籍
+- PostgreSQL EXPLAIN ANALYZE命令

@@ -1,0 +1,160 @@
+---
+title: Seata Sharding-JDBC 集成
+description: 学习如何在分布式事务中集成 Seata 和 Sharding-JDBC，实现数据分片与事务一致性。
+---
+
+# Seata Sharding-JDBC 集成
+
+## 介绍
+
+在微服务架构中，分布式事务是一个常见的挑战。Seata 是一个开源的分布式事务解决方案，而 Sharding-JDBC 是一个强大的数据分片工具。通过将 Seata 与 Sharding-JDBC 集成，我们可以在分片数据库中实现分布式事务的一致性。
+
+本文将逐步介绍如何将 Seata 与 Sharding-JDBC 集成，并通过实际案例展示其应用场景。
+
+## Seata 与 Sharding-JDBC 的基本概念
+
+### Seata
+
+Seata（Simple Extensible Autonomous Transaction Architecture）是阿里巴巴开源的一个分布式事务解决方案。它提供了 AT（自动补偿事务）、TCC（Try-Confirm-Cancel）、Saga 等多种事务模式，适用于不同的业务场景。
+
+### Sharding-JDBC
+
+Sharding-JDBC 是一个轻量级的 Java 框架，提供了数据库分片、读写分离、分布式主键等功能。它可以在应用层透明地处理数据分片，而无需修改数据库结构。
+
+## 集成步骤
+
+### 1. 环境准备
+
+在开始集成之前，确保你已经安装了以下组件：
+
+- JDK 1.8 或更高版本
+- Maven 或 Gradle 构建工具
+- MySQL 或其他支持的数据库
+- Seata Server
+- Sharding-JDBC
+
+### 2. 配置 Seata
+
+首先，我们需要配置 Seata Server。在 `seata.conf` 文件中，配置事务日志存储模式、事务组名称等参数。
+
+```properties
+# seata.conf
+store.mode = db
+store.db.url = jdbc:mysql://localhost:3306/seata
+store.db.user = root
+store.db.password = root
+```
+
+### 3. 配置 Sharding-JDBC
+
+接下来，配置 Sharding-JDBC 的数据源和分片规则。以下是一个简单的配置示例：
+
+```yaml
+# sharding-jdbc.yaml
+dataSources:
+  ds0:
+    url: jdbc:mysql://localhost:3306/db0
+    username: root
+    password: root
+  ds1:
+    url: jdbc:mysql://localhost:3306/db1
+    username: root
+    password: root
+
+shardingRule:
+  tables:
+    order:
+      actualDataNodes: ds$->{0..1}.order_$->{0..1}
+      tableStrategy:
+        inline:
+          shardingColumn: order_id
+          algorithmExpression: order_$->{order_id % 2}
+      keyGenerator:
+        type: SNOWFLAKE
+        column: order_id
+```
+
+### 4. 集成 Seata 与 Sharding-JDBC
+
+在 Spring Boot 项目中，我们需要引入 Seata 和 Sharding-JDBC 的依赖，并配置 Seata 的事务管理器。
+
+```xml
+<!-- pom.xml -->
+<dependency>
+    <groupId>io.seata</groupId>
+    <artifactId>seata-spring-boot-starter</artifactId>
+    <version>1.4.2</version>
+</dependency>
+<dependency>
+    <groupId>org.apache.shardingsphere</groupId>
+    <artifactId>sharding-jdbc-spring-boot-starter</artifactId>
+    <version>4.1.1</version>
+</dependency>
+```
+
+在 `application.properties` 中配置 Seata 和 Sharding-JDBC：
+
+```properties
+# application.properties
+spring.application.name=seata-sharding-jdbc-demo
+seata.tx-service-group=my_test_tx_group
+seata.service.vgroup-mapping.my_test_tx_group=default
+seata.service.grouplist.default=127.0.0.1:8091
+```
+
+### 5. 编写业务代码
+
+在业务代码中，使用 `@GlobalTransactional` 注解来标记分布式事务。
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        orderMapper.insert(order);
+        // 其他业务逻辑
+    }
+}
+```
+
+### 6. 测试分布式事务
+
+启动 Seata Server 和 Spring Boot 应用，测试分布式事务是否正常工作。你可以通过模拟异常来验证事务的回滚功能。
+
+## 实际案例
+
+假设我们有一个电商系统，订单数据被分片存储在两个数据库中。通过 Seata 和 Sharding-JDBC 的集成，我们可以在创建订单时确保数据的一致性和事务的原子性。
+
+```java
+@RestController
+public class OrderController {
+
+    @Autowired
+    private OrderService orderService;
+
+    @PostMapping("/order")
+    public String createOrder(@RequestBody Order order) {
+        orderService.createOrder(order);
+        return "Order created successfully";
+    }
+}
+```
+
+## 总结
+
+通过本文的学习，你应该已经掌握了如何在分布式事务中集成 Seata 和 Sharding-JDBC。这种集成可以帮助你在分片数据库中实现事务的一致性，适用于复杂的微服务架构。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [Sharding-JDBC 官方文档](https://shardingsphere.apache.org/document/current/cn/overview/)
+
+## 练习
+
+1. 尝试在你的本地环境中配置 Seata 和 Sharding-JDBC。
+2. 编写一个简单的 Spring Boot 应用，测试分布式事务的回滚功能。
+3. 探索 Seata 的其他事务模式（如 TCC、Saga），并尝试在分片数据库中使用它们。

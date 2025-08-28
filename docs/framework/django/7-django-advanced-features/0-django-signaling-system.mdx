@@ -1,0 +1,143 @@
+---
+title: Django 信号系统
+description: 了解Django信号系统的工作原理及其在实际项目中的应用场景。通过代码示例和实际案例，掌握如何使用信号来解耦应用程序逻辑。
+---
+
+# Django 信号系统
+
+Django信号系统是Django框架中的一个强大工具，它允许应用程序的某些部分在特定事件发生时自动执行代码。信号系统的主要作用是解耦应用程序的逻辑，使得代码更加模块化和可维护。
+
+## 什么是Django信号系统？
+
+Django信号系统是一种观察者模式的实现。它允许某些“发送者”在特定事件发生时通知“接收者”。这些事件可以是模型实例的保存、删除、更新等操作。通过信号，你可以在不修改原有代码的情况下，添加额外的行为。
+
+### 信号的组成部分
+
+1. **发送者（Sender）**：触发信号的对象，通常是模型类。
+2. **信号（Signal）**：事件本身，例如 `post_save`、`pre_delete` 等。
+3. **接收者（Receiver）**：响应信号的函数或方法。
+
+## Django 内置信号
+
+Django提供了一些内置信号，常用的包括：
+
+- `pre_save`：在模型实例保存之前触发。
+- `post_save`：在模型实例保存之后触发。
+- `pre_delete`：在模型实例删除之前触发。
+- `post_delete`：在模型实例删除之后触发。
+- `m2m_changed`：在多对多关系发生变化时触发。
+
+### 示例：使用 `post_save` 信号
+
+假设我们有一个 `UserProfile` 模型，每当创建一个新用户时，我们希望自动创建一个与之关联的 `UserProfile` 实例。
+
+```python
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.auth.models import User
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    bio = models.TextField(blank=True)
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
+@receiver(post_save, sender=User)
+def save_user_profile(sender, instance, **kwargs):
+    instance.userprofile.save()
+```
+
+在这个例子中，`post_save` 信号在 `User` 模型实例保存后触发。`create_user_profile` 函数会在新用户创建时自动创建一个 `UserProfile` 实例。
+
+## 自定义信号
+
+除了使用内置信号，你还可以创建自定义信号。自定义信号允许你在应用程序中定义自己的事件。
+
+### 示例：创建自定义信号
+
+```python
+import django.dispatch
+
+# 定义一个自定义信号
+order_created = django.dispatch.Signal(providing_args=["order_id", "customer"])
+
+# 接收者函数
+def notify_customer(sender, **kwargs):
+    print(f"Order {kwargs['order_id']} created for customer {kwargs['customer']}")
+
+# 连接信号和接收者
+order_created.connect(notify_customer)
+
+# 触发信号
+order_created.send(sender=None, order_id=123, customer="John Doe")
+```
+
+在这个例子中，我们定义了一个名为 `order_created` 的自定义信号，并在信号触发时调用 `notify_customer` 函数。
+
+## 实际应用场景
+
+### 场景1：自动生成缩略图
+
+假设你有一个 `Image` 模型，每当上传一张图片时，你希望自动生成缩略图。
+
+```python
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from PIL import Image as PilImage
+import os
+
+class Image(models.Model):
+    original = models.ImageField(upload_to='images/')
+    thumbnail = models.ImageField(upload_to='thumbnails/', blank=True)
+
+@receiver(post_save, sender=Image)
+def generate_thumbnail(sender, instance, **kwargs):
+    if instance.original:
+        img = PilImage.open(instance.original.path)
+        img.thumbnail((100, 100))
+        thumb_path = os.path.join('thumbnails', os.path.basename(instance.original.path))
+        img.save(thumb_path)
+        instance.thumbnail = thumb_path
+        instance.save()
+```
+
+在这个场景中，`post_save` 信号在 `Image` 实例保存后触发，自动生成缩略图并保存到指定路径。
+
+### 场景2：日志记录
+
+你可以在每次用户登录时记录日志。
+
+```python
+from django.contrib.auth.signals import user_logged_in
+from django.dispatch import receiver
+import logging
+
+logger = logging.getLogger(__name__)
+
+@receiver(user_logged_in)
+def log_user_login(sender, request, user, **kwargs):
+    logger.info(f"User {user.username} logged in.")
+```
+
+在这个场景中，`user_logged_in` 信号在用户登录时触发，记录用户的登录信息。
+
+## 总结
+
+Django信号系统是一个强大的工具，可以帮助你在不修改原有代码的情况下，添加额外的行为。通过内置信号和自定义信号，你可以轻松地解耦应用程序的逻辑，使代码更加模块化和可维护。
+
+### 附加资源
+
+- [Django官方文档：信号](https://docs.djangoproject.com/en/stable/topics/signals/)
+- [Django信号系统详解](https://simpleisbetterthancomplex.com/tutorial/2016/07/28/how-to-create-django-signals.html)
+
+### 练习
+
+1. 创建一个自定义信号，当用户注册时发送欢迎邮件。
+2. 使用 `pre_save` 信号在保存模型实例之前验证数据。
+
+通过实践这些练习，你将更深入地理解Django信号系统的应用。

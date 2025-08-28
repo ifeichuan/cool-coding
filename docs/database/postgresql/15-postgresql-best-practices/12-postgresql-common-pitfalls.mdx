@@ -1,0 +1,192 @@
+---
+title: PostgreSQL 常见陷阱
+description: 了解 PostgreSQL 中常见的陷阱和错误，帮助初学者避免常见问题，提升数据库操作效率。
+---
+
+## 介绍
+
+PostgreSQL 是一个功能强大的开源关系型数据库管理系统，广泛应用于各种规模的项目中。然而，即使是经验丰富的开发者，在使用 PostgreSQL 时也可能会遇到一些常见的陷阱。这些陷阱可能会导致性能问题、数据不一致或其他意外行为。本文将介绍一些 PostgreSQL 中常见的陷阱，并提供解决方案和最佳实践，帮助初学者更好地使用 PostgreSQL。
+
+## 1. 未正确使用索引
+
+### 问题描述
+
+索引是提高查询性能的关键工具，但如果使用不当，可能会导致性能下降。例如，创建过多的索引会增加写操作的开销，而未使用索引的查询则会导致全表扫描，影响性能。
+
+### 示例
+
+```sql
+-- 创建索引
+CREATE INDEX idx_users_email ON users(email);
+
+-- 查询未使用索引
+EXPLAIN SELECT * FROM users WHERE lower(email) = 'user@example.com';
+```
+
+### 输出
+
+```
+Seq Scan on users  (cost=0.00..1234.56 rows=1 width=64)
+  Filter: (lower(email) = 'user@example.com'::text)
+```
+
+### 解决方案
+
+在查询中使用函数或表达式时，PostgreSQL 可能无法使用索引。可以通过创建函数索引来解决这个问题：
+
+```sql
+CREATE INDEX idx_users_lower_email ON users(lower(email));
+```
+
+## 2. 事务隔离级别不当
+
+### 问题描述
+
+PostgreSQL 支持多种事务隔离级别，不同的隔离级别会影响并发性和数据一致性。选择不当的隔离级别可能会导致脏读、不可重复读或幻读等问题。
+
+### 示例
+
+```sql
+-- 设置事务隔离级别为 READ COMMITTED
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
+
+-- 在另一个会话中更新数据
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+
+-- 在当前会话中查询数据
+SELECT balance FROM accounts WHERE id = 1;
+```
+
+### 输出
+
+```
+ balance 
+---------
+    900
+```
+
+### 解决方案
+
+根据应用需求选择合适的隔离级别。例如，如果需要避免不可重复读，可以使用 `REPEATABLE READ` 或 `SERIALIZABLE` 隔离级别。
+
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;
+```
+
+## 3. 未正确处理 NULL 值
+
+### 问题描述
+
+在 PostgreSQL 中，`NULL` 表示缺失或未知的值。如果在查询中未正确处理 `NULL` 值，可能会导致意外的结果。
+
+### 示例
+
+```sql
+-- 查询未正确处理 NULL 值
+SELECT * FROM users WHERE age <> 30;
+```
+
+### 输出
+
+```
+ id | name  | age 
+----+-------+-----
+  1 | Alice |  25
+  2 | Bob   |  35
+```
+
+### 解决方案
+
+在查询中显式处理 `NULL` 值：
+
+```sql
+SELECT * FROM users WHERE age <> 30 OR age IS NULL;
+```
+
+## 4. 未优化的大表查询
+
+### 问题描述
+
+在处理大表时，未优化的查询可能会导致性能问题。例如，未使用索引或未分页的查询可能会导致数据库负载过高。
+
+### 示例
+
+```sql
+-- 未分页的查询
+SELECT * FROM large_table;
+```
+
+### 解决方案
+
+使用分页查询来减少每次查询的数据量：
+
+```sql
+SELECT * FROM large_table LIMIT 100 OFFSET 0;
+```
+
+## 5. 未正确处理并发更新
+
+### 问题描述
+
+在高并发环境下，多个事务可能会同时更新同一条记录，导致数据不一致或更新丢失。
+
+### 示例
+
+```sql
+-- 事务1
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1;
+-- 假设 balance = 1000
+
+-- 事务2
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1;
+-- 假设 balance = 1000
+
+-- 事务1
+UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+
+-- 事务2
+UPDATE accounts SET balance = balance - 200 WHERE id = 1;
+
+-- 事务1
+COMMIT;
+
+-- 事务2
+COMMIT;
+```
+
+### 输出
+
+```
+-- 最终 balance = 800
+```
+
+### 解决方案
+
+使用 `SELECT FOR UPDATE` 锁定记录，避免并发更新冲突：
+
+```sql
+BEGIN;
+SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;
+-- 其他操作
+COMMIT;
+```
+
+## 总结
+
+PostgreSQL 是一个功能强大的数据库系统，但在使用过程中可能会遇到一些常见的陷阱。通过了解这些陷阱并采取相应的解决方案，可以避免许多潜在的问题，提升数据库操作的效率和可靠性。
+
+## 附加资源
+
+- [PostgreSQL 官方文档](https://www.postgresql.org/docs/)
+- [PostgreSQL 索引优化指南](https://www.postgresql.org/docs/current/indexes.html)
+- [PostgreSQL 事务隔离级别](https://www.postgresql.org/docs/current/transaction-iso.html)
+
+## 练习
+
+1. 创建一个包含 `NULL` 值的表，并编写查询来正确处理 `NULL` 值。
+2. 在一个高并发环境中模拟并发更新，并使用 `SELECT FOR UPDATE` 解决冲突。
+3. 优化一个大表查询，使用分页和索引来提高性能。

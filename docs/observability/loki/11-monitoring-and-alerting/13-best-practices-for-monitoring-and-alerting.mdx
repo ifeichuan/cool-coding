@@ -1,0 +1,147 @@
+---
+title: 监控告警最佳实践
+description: 学习如何基于Grafana Loki构建高效的监控告警系统，掌握告警规则配置、阈值设定和通知管理的核心方法。
+---
+
+# 监控告警最佳实践
+
+## 引言
+
+监控告警是现代可观测性体系的核心组件。通过Grafana Loki，我们可以对日志数据进行实时分析，并在异常发生时触发告警。本文将介绍如何设计可靠的告警策略，避免"告警疲劳"，同时确保关键问题能被及时捕获。
+
+:::note 什么是好的告警？
+有效的告警应满足三个标准：**相关性**（真实问题）、**可操作性**（明确修复步骤）和**及时性**（在影响扩大前通知）。
+:::
+
+---
+
+## 一、告警基础设计原则
+
+### 1. 告警分级策略
+根据影响程度划分告警级别：
+- **Critical**：服务完全不可用
+- **Warning**：性能降级但未中断
+- **Info**：需要关注但无需立即处理
+
+```mermaid
+pie title 告警分布理想比例
+    "Critical : 5%"
+    "Warning : 15%"
+    "Info : 80%"
+```
+
+### 2. 避免过度告警
+常见反模式：
+```text
+# 错误示例 - 对每个错误日志都告警
+{job="myapp"} |= "error"
+```
+
+应改为基于错误率的告警：
+```python
+# 正确示例 - 5分钟内错误率超过5%
+sum(rate({job="myapp"} |= "error" [5m])) by (service)
+/
+sum(rate({job="myapp"}[5m])) by (service)
+> 0.05
+```
+
+---
+
+## 二、Loki告警规则配置
+
+### 1. 告警规则文件示例
+创建 `loki-alerts.yaml`：
+```yaml
+groups:
+- name: service-errors
+  rules:
+  - alert: HighErrorRate
+    expr: |
+      sum(rate({job=~"api-server|frontend"} |= "error" [5m])) by (service)
+      /
+      sum(rate({job=~"api-server|frontend"}[5m])) by (service)
+      > 0.05
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High error rate on {{ $labels.service }}"
+      description: "{{ $labels.service }} has error rate of {{ $value }}"
+```
+
+### 2. 关键参数说明
+| 参数 | 说明 |
+|------|------|
+| `for` | 持续时长，避免瞬时抖动 |
+| `labels` | 添加业务维度标签 |
+| `annotations` | 提供上下文信息 |
+
+---
+
+## 三、告警路由与通知
+
+### 1. 使用Alertmanager路由
+配置 `alertmanager.yml` 实现分级通知：
+```yaml
+route:
+  group_by: ['alertname', 'service']
+  receiver: 'slack-critical'
+  routes:
+  - match:
+      severity: 'critical'
+    receiver: 'sms-team'
+  - match:
+      severity: 'warning'
+    receiver: 'email-team'
+```
+
+### 2. 告警抑制规则
+避免级联告警：
+```yaml
+inhibit_rules:
+- source_match:
+    alertname: 'NodeDown'
+  target_match:
+    severity: 'warning'
+  equal: ['instance']
+```
+
+---
+
+## 四、实战案例：电商大促监控
+
+### 场景需求
+- 监控支付服务错误率
+- 订单处理延迟超过阈值时告警
+- 库存服务异常立即通知
+
+### 解决方案
+```yaml
+# 支付错误率
+- alert: PaymentErrorSpike
+  expr: rate({job="payment-service"} |~ "payment failed" [5m]) > 10
+
+# 订单延迟(P99>2s)
+- alert: OrderProcessingDelay
+  expr: histogram_quantile(0.99,
+    sum by(le) (rate({job="order-service"} | logfmt | latency [5m]))
+  ) > 2000
+```
+
+---
+
+## 总结与进阶练习
+
+### 关键要点
+1. 告警应该具有业务价值，而非单纯技术指标
+2. 采用"分级-过滤-抑制"三层防御机制
+3. 定期回顾告警有效性（建议每周评审）
+
+### 练习建议
+1. 为你的测试环境配置一个当`/health`端点连续3次失败时触发的告警
+2. 创建一个抑制规则，使得当"主机宕机"告警触发时，抑制该主机上的所有应用告警
+
+### 扩展阅读
+- [SRE Book: Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/)
+- [Loki Alerting Documentation](https://grafana.com/docs/loki/latest/alerting/)

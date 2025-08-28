@@ -1,0 +1,239 @@
+---
+title: Elasticsearch 日志聚合分析
+description: 学习如何使用Elasticsearch进行日志聚合分析，掌握日志数据的收集、存储和分析方法，并通过实际案例理解其应用场景。
+---
+
+# Elasticsearch 日志聚合分析
+
+在现代应用程序中，日志数据是了解系统行为、排查问题和优化性能的重要信息来源。Elasticsearch 是一个强大的分布式搜索和分析引擎，特别适合处理大规模的日志数据。通过 Elasticsearch 的日志聚合分析功能，我们可以从海量日志中提取有价值的信息，帮助开发者和运维人员更好地理解系统状态。
+
+本文将逐步介绍如何使用 Elasticsearch 进行日志聚合分析，并通过实际案例展示其应用场景。
+
+---
+
+## 什么是日志聚合分析？
+
+日志聚合分析是指将分散在不同位置的日志数据集中存储，并通过聚合操作（如计数、求和、平均值等）提取有用的信息。Elasticsearch 提供了强大的聚合功能，能够对日志数据进行多维度的分析，例如：
+
+- 统计某个时间段内的错误日志数量
+- 分析不同服务的响应时间分布
+- 识别高频出现的日志模式
+
+通过日志聚合分析，我们可以快速发现问题、优化系统性能，并为决策提供数据支持。
+
+---
+
+## 日志数据的收集与存储
+
+在开始日志聚合分析之前，我们需要将日志数据导入 Elasticsearch。常见的日志收集工具有：
+
+- **Logstash**：用于收集、解析和传输日志数据。
+- **Filebeat**：轻量级的日志收集工具，适合从文件中提取日志。
+- **Fluentd**：开源的日志收集工具，支持多种输入和输出格式。
+
+以下是一个使用 Filebeat 将日志数据发送到 Elasticsearch 的示例配置：
+
+```yaml
+filebeat.inputs:
+- type: log
+  paths:
+    - /var/log/myapp/*.log
+
+output.elasticsearch:
+  hosts: ["http://localhost:9200"]
+```
+
+:::tip
+确保 Elasticsearch 和 Filebeat 的版本兼容，并正确配置索引模板以优化日志存储。
+:::
+
+---
+
+## Elasticsearch 聚合基础
+
+Elasticsearch 的聚合功能分为两类：
+
+1. **指标聚合（Metric Aggregations）**：计算数值型数据的统计值，如平均值、最大值、最小值等。
+2. **桶聚合（Bucket Aggregations）**：将数据分组到不同的桶中，例如按时间、字段值或范围分组。
+
+以下是一个简单的聚合查询示例，统计日志中不同日志级别的数量：
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "log_level_count": {
+      "terms": {
+        "field": "log_level.keyword"
+      }
+    }
+  }
+}
+```
+
+**输入**：日志数据中包含 `log_level` 字段，值为 `INFO`、`WARN`、`ERROR` 等。
+
+**输出**：
+
+```json
+{
+  "aggregations": {
+    "log_level_count": {
+      "buckets": [
+        { "key": "INFO", "doc_count": 1200 },
+        { "key": "WARN", "doc_count": 150 },
+        { "key": "ERROR", "doc_count": 50 }
+      ]
+    }
+  }
+}
+```
+
+:::note
+`size: 0` 表示不返回原始文档，只返回聚合结果。
+:::
+
+---
+
+## 实际案例：分析 Web 服务器日志
+
+假设我们有一个 Web 服务器，日志格式如下：
+
+```
+2023-10-01T12:00:00Z INFO 200 GET /index.html 10ms
+2023-10-01T12:01:00Z ERROR 500 POST /submit 100ms
+```
+
+我们的目标是：
+
+1. 统计每个 HTTP 状态码的出现次数。
+2. 计算每个端点的平均响应时间。
+
+### 步骤 1：统计 HTTP 状态码
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "status_code_count": {
+      "terms": {
+        "field": "status_code"
+      }
+    }
+  }
+}
+```
+
+**输出**：
+
+```json
+{
+  "aggregations": {
+    "status_code_count": {
+      "buckets": [
+        { "key": 200, "doc_count": 1000 },
+        { "key": 404, "doc_count": 50 },
+        { "key": 500, "doc_count": 10 }
+      ]
+    }
+  }
+}
+```
+
+### 步骤 2：计算平均响应时间
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "avg_response_time": {
+      "avg": {
+        "field": "response_time_ms"
+      }
+    }
+  }
+}
+```
+
+**输出**：
+
+```json
+{
+  "aggregations": {
+    "avg_response_time": {
+      "value": 15.5
+    }
+  }
+}
+```
+
+:::caution
+确保日志字段（如 `response_time_ms`）是数值类型，否则聚合操作会失败。
+:::
+
+---
+
+## 高级聚合：嵌套聚合
+
+Elasticsearch 支持嵌套聚合，例如在按状态码分组的基础上，进一步计算每个状态码的平均响应时间：
+
+```json
+{
+  "size": 0,
+  "aggs": {
+    "status_code_count": {
+      "terms": {
+        "field": "status_code"
+      },
+      "aggs": {
+        "avg_response_time": {
+          "avg": {
+            "field": "response_time_ms"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**输出**：
+
+```json
+{
+  "aggregations": {
+    "status_code_count": {
+      "buckets": [
+        {
+          "key": 200,
+          "doc_count": 1000,
+          "avg_response_time": { "value": 10.5 }
+        },
+        {
+          "key": 404,
+          "doc_count": 50,
+          "avg_response_time": { "value": 20.0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+## 总结
+
+通过 Elasticsearch 的日志聚合分析功能，我们可以轻松地从海量日志数据中提取有价值的信息。本文介绍了日志数据的收集与存储、基础聚合操作以及实际案例中的应用场景。掌握这些技能后，您可以更好地监控系统状态、优化性能并快速定位问题。
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试使用 Elasticsearch 分析您的应用程序日志，统计不同时间段的请求数量。
+2. **资源**：
+   - [Elasticsearch 官方文档](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
+   - [Logstash 入门指南](https://www.elastic.co/guide/en/logstash/current/getting-started-with-logstash.html)
+   - [Filebeat 配置示例](https://www.elastic.co/guide/en/beats/filebeat/current/filebeat-configuration.html)
+
+通过不断实践，您将更加熟练地使用 Elasticsearch 进行日志聚合分析！

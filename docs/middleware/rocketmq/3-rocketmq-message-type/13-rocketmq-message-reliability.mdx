@@ -1,0 +1,138 @@
+---
+title: RocketMQ 消息可靠性
+description: 了解RocketMQ如何确保消息的可靠性，包括消息存储、重试机制和事务消息等关键概念。
+---
+
+# RocketMQ 消息可靠性
+
+RocketMQ 是一个分布式消息中间件，广泛应用于高并发、高可靠性的消息传递场景。消息可靠性是 RocketMQ 的核心特性之一，它确保消息在传递过程中不会丢失，并且能够被消费者正确处理。本文将详细介绍 RocketMQ 如何实现消息的可靠性，并通过实际案例帮助你更好地理解这一概念。
+
+## 什么是消息可靠性？
+
+消息可靠性指的是消息在从生产者发送到消费者的过程中，能够确保消息不丢失、不重复，并且能够被消费者正确处理。RocketMQ 通过多种机制来保证消息的可靠性，包括消息存储、重试机制、事务消息等。
+
+## 消息存储
+
+RocketMQ 使用本地磁盘存储消息，确保即使在系统崩溃的情况下，消息也不会丢失。消息存储分为两部分：CommitLog 和 ConsumeQueue。
+
+- **CommitLog**：存储所有消息的原始数据，按顺序写入磁盘。
+- **ConsumeQueue**：存储消息的索引，方便消费者快速查找消息。
+
+```mermaid
+graph LR
+    A[Producer] --> B[CommitLog]
+    B --> C[ConsumeQueue]
+    C --> D[Consumer]
+```
+
+:::note
+CommitLog 是 RocketMQ 的核心存储结构，所有消息都按顺序写入 CommitLog，确保消息的持久化。
+:::
+
+## 重试机制
+
+RocketMQ 提供了消息重试机制，确保在消息消费失败时能够重新投递消息。重试机制分为两种：
+
+1. **同步重试**：消费者在消费消息时发生异常，RocketMQ 会立即重试投递消息。
+2. **异步重试**：消费者在消费消息时发生异常，RocketMQ 会将消息放入重试队列，稍后重新投递。
+
+```java
+// 示例：消费者处理消息时发生异常，触发重试机制
+public class MyConsumer implements MessageListenerConcurrently {
+    @Override
+    public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, ConsumeConcurrentlyContext context) {
+        for (MessageExt msg : msgs) {
+            try {
+                // 处理消息
+                processMessage(msg);
+            } catch (Exception e) {
+                // 发生异常，触发重试
+                return ConsumeConcurrentlyStatus.RECONSUME_LATER;
+            }
+        }
+        return ConsumeConcurrentlyStatus.CONSUME_SUCCESS;
+    }
+}
+```
+
+:::tip
+在实际应用中，建议在消费者代码中捕获所有异常，并根据业务需求决定是否触发重试机制。
+:::
+
+## 事务消息
+
+RocketMQ 支持事务消息，确保在分布式事务场景下消息的可靠性。事务消息的核心思想是“半消息”机制，即消息首先发送到 RocketMQ，但不会立即被消费者消费，直到事务提交后才会真正投递给消费者。
+
+```java
+// 示例：发送事务消息
+TransactionMQProducer producer = new TransactionMQProducer("my_producer_group");
+producer.setTransactionListener(new TransactionListener() {
+    @Override
+    public LocalTransactionState executeLocalTransaction(Message msg, Object arg) {
+        // 执行本地事务
+        boolean success = doLocalTransaction();
+        return success ? LocalTransactionState.COMMIT_MESSAGE : LocalTransactionState.ROLLBACK_MESSAGE;
+    }
+
+    @Override
+    public LocalTransactionState checkLocalTransaction(MessageExt msg) {
+        // 检查本地事务状态
+        return checkTransactionStatus();
+    }
+});
+
+producer.sendMessageInTransaction(new Message("my_topic", "my_tag", "Hello RocketMQ".getBytes()), null);
+```
+
+:::caution
+事务消息适用于需要强一致性的场景，但会增加系统的复杂性，使用时需谨慎。
+:::
+
+## 实际案例
+
+假设你正在开发一个电商系统，用户下单后需要发送订单确认消息。为了确保消息的可靠性，你可以使用 RocketMQ 的事务消息机制：
+
+1. 用户下单时，系统发送一个事务消息到 RocketMQ。
+2. 系统执行本地事务（如扣减库存、生成订单等）。
+3. 如果本地事务成功，提交事务消息，消费者收到消息后发送订单确认邮件。
+4. 如果本地事务失败，回滚事务消息，消费者不会收到消息。
+
+```java
+// 示例：电商系统中的事务消息
+TransactionMQProducer producer = new TransactionMQProducer("order_producer_group");
+producer.setTransactionListener(new TransactionListener() {
+    @Override
+    public LocalTransactionState executeLocalTransaction(Message msg, Object arg) {
+        try {
+            // 执行本地事务
+            boolean success = processOrder();
+            return success ? LocalTransactionState.COMMIT_MESSAGE : LocalTransactionState.ROLLBACK_MESSAGE;
+        } catch (Exception e) {
+            return LocalTransactionState.ROLLBACK_MESSAGE;
+        }
+    }
+
+    @Override
+    public LocalTransactionState checkLocalTransaction(MessageExt msg) {
+        return checkOrderStatus();
+    }
+});
+
+producer.sendMessageInTransaction(new Message("order_topic", "order_tag", "Order Confirmation".getBytes()), null);
+```
+
+## 总结
+
+RocketMQ 通过消息存储、重试机制和事务消息等多种机制，确保了消息在传递过程中的可靠性。理解这些机制对于构建高可靠性的分布式系统至关重要。希望本文能帮助你更好地掌握 RocketMQ 的消息可靠性概念。
+
+## 附加资源
+
+- [RocketMQ 官方文档](https://rocketmq.apache.org/docs/)
+- [RocketMQ 事务消息详解](https://rocketmq.apache.org/docs/transaction-example/)
+- [RocketMQ 重试机制](https://rocketmq.apache.org/docs/retry-mechanism/)
+
+## 练习
+
+1. 尝试在本地搭建一个 RocketMQ 环境，并实现一个简单的消息发送和消费示例。
+2. 修改消费者代码，模拟消息消费失败的情况，观察 RocketMQ 的重试机制。
+3. 实现一个事务消息的示例，模拟电商系统中的订单确认流程。

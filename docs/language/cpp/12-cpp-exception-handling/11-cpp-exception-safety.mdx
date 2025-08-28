@@ -1,0 +1,338 @@
+---
+title: C++ 异常安全
+description: 了解C++异常安全的概念、异常安全级别、RAII原则及实际应用，帮助初学者编写健壮的C++程序
+---
+
+# C++ 异常安全
+
+## 什么是异常安全？
+
+异常安全是指当程序中发生异常时，程序能够继续保持一致性与可靠性的能力。换句话说，即使在异常被抛出的情况下，程序也不会泄漏资源、保持数据结构的完整性，并且能够恢复到一个良好的状态。
+
+在C++中，异常安全尤为重要，因为C++提供了强大的异常处理机制，但如果使用不当，可能会导致严重的问题，如内存泄漏、悬挂指针或数据结构损坏。
+
+:::note
+异常安全不仅仅是捕获和处理异常的能力，更是确保在异常发生时程序状态仍然有效的保证。
+:::
+
+## 异常安全的级别
+
+C++中的异常安全通常分为以下几个级别：
+
+### 1. 基本保证（Basic Guarantee）
+
+当异常发生时，程序保持在有效状态，不会出现资源泄漏或数据结构损坏，但程序状态可能已经改变。
+
+### 2. 强保证（Strong Guarantee）
+
+当异常发生时，操作要么完全成功，要么程序状态不变（即"提交或回滚"语义）。
+
+### 3. 不抛出保证（No-throw Guarantee）
+
+保证操作不会抛出任何异常，常用于析构函数和内存释放操作。
+
+### 4. 无保证（No Guarantee）
+
+不提供任何异常安全保证，可能导致资源泄漏或程序状态不一致。
+
+## RAII：实现异常安全的关键技术
+
+RAII（资源获取即初始化）是C++中实现异常安全的核心技术。它通过将资源的生命周期绑定到对象的生命周期上，确保资源在对象销毁时自动释放。
+
+### RAII的基本原则
+
+1. 在构造函数中获取资源
+2. 在析构函数中释放资源
+3. 确保析构函数不会抛出异常
+
+### RAII示例：文件操作
+
+```cpp
+class FileHandler {
+private:
+    FILE* file;
+public:
+    FileHandler(const char* filename, const char* mode) {
+        file = fopen(filename, mode);
+        if (!file) {
+            throw std::runtime_error("无法打开文件");
+        }
+    }
+    
+    ~FileHandler() {
+        if (file) {
+            fclose(file);
+        }
+    }
+    
+    // 禁止复制
+    FileHandler(const FileHandler&) = delete;
+    FileHandler& operator=(const FileHandler&) = delete;
+    
+    // 写入数据
+    void write(const char* data) {
+        if (fputs(data, file) == EOF) {
+            throw std::runtime_error("写入文件失败");
+        }
+    }
+};
+
+void processFile() {
+    try {
+        FileHandler file("data.txt", "w");
+        file.write("Hello, World!");
+        // 即使此处出现异常，FileHandler的析构函数也会被调用，确保文件被关闭
+    } catch (const std::exception& e) {
+        std::cerr << "错误: " << e.what() << std::endl;
+    }
+}
+```
+
+在上面的例子中，即使在`processFile`函数中抛出异常，`FileHandler`对象的析构函数也会被调用，确保文件被正确关闭，避免了资源泄漏。
+
+## 实现异常安全的实用技巧
+
+### 1. 使用智能指针管理动态内存
+
+```cpp
+void unsafeFunction() {
+    int* array = new int[100];  // 分配内存
+    processSomething();  // 如果此函数抛出异常，array将泄漏
+    delete[] array;
+}
+
+void safeFunction() {
+    std::unique_ptr<int[]> array(new int[100]);  // RAII方式分配内存
+    processSomething();  // 即使此函数抛出异常，array也会被自动释放
+    // 函数结束时array自动释放
+}
+```
+
+### 2. 使用标准库容器而非原始数组
+
+```cpp
+void unsafeFunction() {
+    int* array = new int[size];
+    for (int i = 0; i < size; ++i) {
+        array[i] = complexCalculation(i);  // 可能抛出异常
+    }
+    // 使用array...
+    delete[] array;
+}
+
+void safeFunction() {
+    std::vector<int> array;
+    array.reserve(size);  // 提前分配空间但不改变大小
+    for (int i = 0; i < size; ++i) {
+        array.push_back(complexCalculation(i));  // 即使抛出异常，vector也会正确释放已分配的内存
+    }
+    // 使用array...
+    // 函数结束时array自动释放
+}
+```
+
+### 3. 异常中立性：函数透明传递异常
+
+```cpp
+// 异常中立的函数，不捕获也不抑制可能从其调用的函数传播的异常
+void exceptionNeutralFunction(std::vector<int>& vec, int value) {
+    vec.push_back(value);  // 可能抛出内存分配异常，但我们允许它传播
+}
+```
+
+### 4. 实现强异常安全保证
+
+实现强异常保证通常涉及"copy-and-swap"策略：
+
+```cpp
+class MyClass {
+private:
+    int* data;
+    size_t size;
+    
+public:
+    // 构造函数、析构函数等...
+    
+    // 强异常安全的赋值操作符
+    MyClass& operator=(const MyClass& other) {
+        // 创建临时副本
+        MyClass temp(other);
+        // 交换资源（不会抛出异常）
+        std::swap(data, temp.data);
+        std::swap(size, temp.size);
+        // temp析构时会释放原来的资源
+        return *this;
+    }
+};
+```
+
+## 实际案例：异常安全的银行转账系统
+
+下面是一个模拟银行转账的例子，展示了如何应用异常安全原则：
+
+```cpp
+class Account {
+private:
+    std::string id;
+    double balance;
+    std::mutex mtx; // 用于线程安全
+
+public:
+    Account(std::string accountId, double initialBalance)
+        : id(std::move(accountId)), balance(initialBalance) {}
+    
+    void withdraw(double amount) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (amount <= 0) {
+            throw std::invalid_argument("提款金额必须为正数");
+        }
+        if (amount > balance) {
+            throw std::runtime_error("余额不足");
+        }
+        balance -= amount;
+    }
+    
+    void deposit(double amount) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (amount <= 0) {
+            throw std::invalid_argument("存款金额必须为正数");
+        }
+        balance += amount;
+    }
+    
+    double getBalance() const {
+        std::lock_guard<std::mutex> lock(mtx);
+        return balance;
+    }
+};
+
+// 提供强异常安全保证的转账函数
+void transfer(Account& from, Account& to, double amount) {
+    if (&from == &to) {
+        return; // 自己转给自己，不做操作
+    }
+    
+    // 先从源账户扣款
+    from.withdraw(amount);
+    
+    try {
+        // 然后向目标账户存款
+        to.deposit(amount);
+    } catch (...) {
+        // 如果存款失败，恢复源账户余额
+        from.deposit(amount);
+        throw; // 重新抛出异常
+    }
+}
+```
+
+这个示例展示了如何在银行转账系统中实现强异常安全保证。如果在转账过程中发生异常，系统会确保资金不会丢失或重复计算。
+
+## 异常安全的最佳实践
+
+1. **遵循RAII原则**：使用构造函数获取资源，析构函数释放资源
+2. **使用智能指针**：`std::unique_ptr`、`std::shared_ptr`代替原始指针
+3. **标准库容器**：优先使用`std::vector`、`std::string`等标准容器
+4. **小心使用noexcept**：只在确保不会抛出异常的函数上使用
+5. **编写异常中立的代码**：允许异常透明地传递
+6. **测试异常路径**：不仅测试正常情况，也测试异常情况
+7. **明确文档说明**：在API文档中清楚说明函数的异常安全保证级别
+
+## 异常安全陷阱与避免方法
+
+### 1. 析构函数不应抛出异常
+
+```cpp
+// 错误示范
+class BadClass {
+public:
+    ~BadClass() {
+        throw std::runtime_error("析构函数抛出异常");  // 不好！
+    }
+};
+
+// 正确做法
+class GoodClass {
+public:
+    ~GoodClass() noexcept {
+        try {
+            // 可能抛出异常的清理代码
+        } catch (...) {
+            // 记录错误但不传播异常
+            std::cerr << "析构过程中发生错误" << std::endl;
+        }
+    }
+};
+```
+
+### 2. 避免部分初始化问题
+
+```cpp
+// 问题代码
+class PartialInitProblem {
+private:
+    int* array1;
+    int* array2;
+    
+public:
+    PartialInitProblem(size_t size) {
+        array1 = new int[size];  // 如果这里成功了
+        array2 = new int[size];  // 但这里失败了，array1将泄漏
+    }
+    
+    ~PartialInitProblem() {
+        delete[] array1;
+        delete[] array2;
+    }
+};
+
+// 改进版本
+class SafeInit {
+private:
+    std::unique_ptr<int[]> array1;
+    std::unique_ptr<int[]> array2;
+    
+public:
+    SafeInit(size_t size) {
+        array1 = std::make_unique<int[]>(size);
+        array2 = std::make_unique<int[]>(size);
+    }
+    // 析构函数会自动调用智能指针的析构函数
+};
+```
+
+## 总结
+
+异常安全是编写健壮C++程序的关键方面。通过理解异常安全保证级别，并遵循RAII等核心原则，您可以编写出在面对异常时仍然可靠的代码。
+
+异常安全的关键点包括：
+- 使用RAII管理资源
+- 理解并提供适当级别的异常安全保证
+- 使用智能指针和标准库容器
+- 小心编写不会泄漏资源的代码
+- 异常中立性和透明传递原则
+
+通过这些技术，您可以确保您的程序即使在异常情况下也能保持一致性和可靠性。
+
+## 练习
+
+1. 找出以下代码的异常安全问题并修复它：
+   ```cpp
+   void processData(const std::string& filename) {
+       FILE* file = fopen(filename.c_str(), "r");
+       int* buffer = new int[1000];
+       // 处理文件数据...
+       delete[] buffer;
+       fclose(file);
+   }
+   ```
+
+2. 编写一个具有强异常安全保证的字符串类实现，包括复制构造函数和赋值操作符。
+
+3. 实现一个资源管理类，用于管理数据库连接，确保即使在异常情况下连接也能正确关闭。
+
+## 其他资源
+
+- [Exceptional C++](https://www.amazon.com/Exceptional-Engineering-Programming-Problems-Solutions/dp/0201615622) by Herb Sutter
+- [C++ Coding Standards](https://www.amazon.com/Coding-Standards-Rules-Guidelines-Practices/dp/0321113586) by Herb Sutter and Andrei Alexandrescu
+- [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines) - 特别是异常安全部分

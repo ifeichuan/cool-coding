@@ -1,0 +1,212 @@
+---
+title: C 语言非阻塞IO
+description: 了解C语言中的非阻塞IO概念，掌握如何通过非阻塞IO实现高效的网络编程。
+---
+
+# C 语言非阻塞IO
+
+在C语言网络编程中，IO（输入输出）操作是至关重要的部分。传统的阻塞IO模型在处理多个连接时可能会遇到性能瓶颈，因为每个IO操作都会阻塞当前线程，直到操作完成。为了解决这个问题，非阻塞IO（Non-blocking IO）应运而生。本文将详细介绍C语言中的非阻塞IO概念，并通过代码示例和实际案例帮助你理解其应用。
+
+## 什么是非阻塞IO？
+
+非阻塞IO是一种IO操作模式，在这种模式下，IO操作不会阻塞当前线程。如果数据没有准备好，操作会立即返回，而不是等待数据准备好。这使得程序可以在等待IO操作完成的同时继续执行其他任务，从而提高程序的并发性和响应性。
+
+### 阻塞IO vs 非阻塞IO
+
+- **阻塞IO**：当程序执行一个IO操作时，如果数据没有准备好，程序会一直等待，直到数据准备好并完成操作。
+- **非阻塞IO**：当程序执行一个IO操作时，如果数据没有准备好，操作会立即返回一个错误或状态码，程序可以继续执行其他任务。
+
+## 如何实现非阻塞IO？
+
+在C语言中，可以通过设置文件描述符为非阻塞模式来实现非阻塞IO。常用的方法包括使用 `fcntl` 函数和 `select` 函数。
+
+### 使用 `fcntl` 设置非阻塞模式
+
+`fcntl` 函数可以用来设置文件描述符的属性，包括将其设置为非阻塞模式。以下是一个简单的示例：
+
+```c
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
+
+int main() {
+    int fd = open("example.txt", O_RDONLY | O_NONBLOCK);
+    if (fd == -1) {
+        perror("open");
+        return 1;
+    }
+
+    char buffer[1024];
+    ssize_t bytes_read = read(fd, buffer, sizeof(buffer));
+    if (bytes_read == -1) {
+        if (errno == EAGAIN) {
+            printf("No data available right now.\n");
+        } else {
+            perror("read");
+        }
+    } else {
+        printf("Read %zd bytes: %.*s\n", bytes_read, (int)bytes_read, buffer);
+    }
+
+    close(fd);
+    return 0;
+}
+```
+
+在这个示例中，`O_NONBLOCK` 标志被传递给 `open` 函数，使得文件描述符 `fd` 被设置为非阻塞模式。如果文件没有数据可读，`read` 函数会立即返回，并设置 `errno` 为 `EAGAIN`。
+
+### 使用 `select` 实现多路复用
+
+`select` 函数可以用来监控多个文件描述符的状态，包括是否可读、可写或是否有异常。以下是一个使用 `select` 实现非阻塞IO的示例：
+
+```c
+#include <sys/select.h>
+#include <unistd.h>
+#include <stdio.h>
+
+int main() {
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(STDIN_FILENO, &read_fds);
+
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+
+    int ret = select(STDIN_FILENO + 1, &read_fds, NULL, NULL, &timeout);
+    if (ret == -1) {
+        perror("select");
+    } else if (ret == 0) {
+        printf("No data within 5 seconds.\n");
+    } else {
+        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+            char buffer[1024];
+            ssize_t bytes_read = read(STDIN_FILENO, buffer, sizeof(buffer));
+            if (bytes_read > 0) {
+                printf("Read %zd bytes: %.*s\n", bytes_read, (int)bytes_read, buffer);
+            }
+        }
+    }
+
+    return 0;
+}
+```
+
+在这个示例中，`select` 函数监控标准输入（`STDIN_FILENO`）是否可读。如果在5秒内没有数据可读，`select` 会返回0，否则会返回可读的文件描述符数量。
+
+## 实际应用场景
+
+非阻塞IO在网络编程中非常有用，特别是在处理多个客户端连接时。以下是一个简单的服务器示例，使用非阻塞IO处理多个客户端连接：
+
+```c
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define PORT 8080
+#define MAX_CLIENTS 10
+
+int main() {
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+    char buffer[1024] = {0};
+
+    // 创建套接字
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 设置套接字选项
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(PORT);
+
+    // 绑定套接字
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // 监听连接
+    if (listen(server_fd, MAX_CLIENTS) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+    // 设置服务器套接字为非阻塞模式
+    fcntl(server_fd, F_SETFL, O_NONBLOCK);
+
+    while (1) {
+        new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+        if (new_socket < 0) {
+            if (errno == EWOULDBLOCK) {
+                // 没有新的连接，继续循环
+                continue;
+            } else {
+                perror("accept");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        // 设置客户端套接字为非阻塞模式
+        fcntl(new_socket, F_SETFL, O_NONBLOCK);
+
+        ssize_t bytes_read = read(new_socket, buffer, sizeof(buffer));
+        if (bytes_read < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // 没有数据可读，继续循环
+                continue;
+            } else {
+                perror("read");
+                close(new_socket);
+                continue;
+            }
+        } else if (bytes_read == 0) {
+            // 客户端关闭连接
+            close(new_socket);
+            continue;
+        }
+
+        printf("Received: %s\n", buffer);
+        send(new_socket, buffer, bytes_read, 0);
+        close(new_socket);
+    }
+
+    return 0;
+}
+```
+
+在这个示例中，服务器套接字和客户端套接字都被设置为非阻塞模式。服务器可以同时处理多个客户端连接，而不会因为某个客户端的IO操作而阻塞。
+
+## 总结
+
+非阻塞IO是C语言网络编程中的一个重要概念，它允许程序在等待IO操作完成的同时继续执行其他任务，从而提高程序的并发性和响应性。通过使用 `fcntl` 和 `select` 等函数，我们可以轻松实现非阻塞IO，并在实际应用中处理多个客户端连接。
+
+:::tip
+**提示**：在实际开发中，除了 `select`，还可以考虑使用 `poll` 或 `epoll` 等更高效的IO多路复用机制。
+:::
+
+## 附加资源
+
+- [Linux Programmer's Manual - fcntl](https://man7.org/linux/man-pages/man2/fcntl.2.html)
+- [Linux Programmer's Manual - select](https://man7.org/linux/man-pages/man2/select.2.html)
+- [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/)
+
+## 练习
+
+1. 修改上面的服务器示例，使其能够同时处理多个客户端连接，并在每个连接上实现简单的回显功能。
+2. 尝试使用 `poll` 或 `epoll` 替换 `select`，并比较它们的性能差异。

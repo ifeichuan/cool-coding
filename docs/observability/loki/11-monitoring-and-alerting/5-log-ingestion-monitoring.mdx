@@ -1,0 +1,115 @@
+---
+title: 日志摄取监控
+description: 学习如何使用Grafana Loki监控日志摄取过程，确保日志数据正确收集和处理。
+---
+
+# 日志摄取监控
+
+日志摄取监控是确保日志数据从源头正确收集并传输到Grafana Loki的关键环节。对于初学者来说，理解这一过程有助于排查日志丢失或延迟问题，并优化日志管道的可靠性。
+
+## 什么是日志摄取监控？
+
+日志摄取监控是指跟踪日志从应用程序或系统发送到Loki存储的完整过程。它包括以下关键指标：
+- **日志接收速率**：每秒接收的日志条目数
+- **处理延迟**：从日志生成到可查询的时间差
+- **错误率**：日志摄取失败的比例
+- **队列状态**：缓冲中的日志量
+
+```mermaid
+graph LR
+    A[应用程序] -->|发送日志| B(日志代理)
+    B -->|推送日志| C(Loki Distributor)
+    C -->|分片| D(Loki Ingester)
+    D -->|存储| E[Loki存储]
+    style A fill:#f9f,stroke:#333
+    style E fill:#bbf,stroke:#333
+```
+
+## 关键监控指标
+
+### 1. 摄取速率监控
+
+使用Prometheus查询Loki的日志接收速率：
+
+```promql
+sum(rate(loki_distributor_bytes_received_total[1m])) by (job)
+```
+
+示例输出：
+```
+{job="myapp"}  1024.45
+{job="nginx"}   768.23
+```
+
+### 2. 错误监控
+
+监控失败的日志批次：
+
+```promql
+sum(rate(loki_distributor_dropped_bytes_total[1m])) by (reason)
+```
+
+:::tip
+常见错误原因包括：
+- `validation_error`：日志格式无效
+- `ingester_error`：存储节点问题
+- `rate_limited`：超过配置的速率限制
+:::
+
+## 配置告警规则
+
+在Prometheus中设置关键告警：
+
+```yaml
+groups:
+- name: loki-ingestion
+  rules:
+  - alert: HighIngestionErrors
+    expr: rate(loki_distributor_dropped_bytes_total[5m]) > 0
+    for: 10m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High log ingestion errors (instance {{ $labels.instance }})"
+      description: "{{ $value }} bytes dropped in last 5 minutes"
+```
+
+## 实际案例：电商应用监控
+
+假设一个电商网站使用Loki收集以下日志：
+1. 用户行为日志（点击/购买）
+2. 支付网关日志
+3. 库存服务日志
+
+当大促销时，支付日志突然下降：
+
+1. 检查摄取速率：发现 `payment-service` 的日志速率降为0
+2. 检查错误指标：显示 `rate_limited` 错误增加
+3. 解决方案：调整Loki的速率限制配置
+
+```promql
+# 诊断查询
+rate(loki_distributor_dropped_bytes_total{reason="rate_limited", job="payment-service"}[5m])
+```
+
+## 总结
+
+有效的日志摄取监控需要：
+- 定期检查关键指标（速率、错误、延迟）
+- 设置合理的告警阈值
+- 了解系统容量限制
+
+## 延伸练习
+
+1. 在测试环境部署Loki，模拟日志洪峰并观察监控指标变化
+2. 故意配置错误的日志标签，观察验证错误如何体现
+3. 创建Dashboard可视化以下指标：
+   - 各服务的日志摄取量
+   - 错误类型分布
+   - 处理延迟百分位数
+
+## 附加资源
+
+- [Loki官方监控文档](https://grafana.com/docs/loki/latest/operations/monitoring/)
+- PromQL基础教程
+- 日志管道设计模式

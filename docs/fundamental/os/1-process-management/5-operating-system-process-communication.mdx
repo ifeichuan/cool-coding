@@ -1,0 +1,236 @@
+---
+title: 操作系统进程通信
+description: 了解操作系统中的进程通信机制，包括共享内存、消息传递和管道等常见方法，并通过实际案例和代码示例加深理解。
+---
+
+## 介绍
+
+在操作系统中，进程是程序执行的基本单位。每个进程都有自己的地址空间和资源，但有时多个进程需要协作完成任务，这就需要进程之间进行通信。进程通信（Inter-Process Communication, IPC）是指多个进程之间交换数据或信息的机制。
+
+进程通信的主要目的是：
+- 数据传输：一个进程需要将数据发送给另一个进程。
+- 资源共享：多个进程需要共享某些资源。
+- 同步：多个进程需要协调它们的执行顺序。
+
+本文将介绍几种常见的进程通信机制，并通过代码示例和实际案例帮助你理解这些概念。
+
+## 进程通信的常见方法
+
+### 1. 共享内存（Shared Memory）
+
+共享内存是一种高效的进程通信方式。多个进程可以访问同一块内存区域，从而实现数据共享。由于不需要通过内核进行数据复制，共享内存的速度通常比其他通信方式快。
+
+#### 代码示例
+
+以下是一个简单的共享内存示例，使用 POSIX 共享内存 API：
+
+```c
+#include <stdio.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+
+int main() {
+    const char *name = "/my_shared_memory";
+    const int SIZE = 4096;
+
+    // 创建共享内存对象
+    int shm_fd = shm_open(name, O_CREAT | O_RDWR, 0666);
+    ftruncate(shm_fd, SIZE);
+
+    // 映射共享内存
+    void *ptr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
+    // 写入数据
+    sprintf(ptr, "Hello from process 1");
+
+    // 解除映射
+    munmap(ptr, SIZE);
+
+    return 0;
+}
+```
+
+在另一个进程中，你可以读取共享内存中的数据：
+
+```c
+#include <stdio.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int main() {
+    const char *name = "/my_shared_memory";
+    const int SIZE = 4096;
+
+    // 打开共享内存对象
+    int shm_fd = shm_open(name, O_RDONLY, 0666);
+
+    // 映射共享内存
+    void *ptr = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+
+    // 读取数据
+    printf("Read from shared memory: %s\n", (char *)ptr);
+
+    // 解除映射
+    munmap(ptr, SIZE);
+
+    // 删除共享内存对象
+    shm_unlink(name);
+
+    return 0;
+}
+```
+
+#### 实际应用场景
+
+共享内存常用于高性能计算和实时系统中，例如视频处理、科学计算等领域，因为这些场景需要快速的数据交换。
+
+:::tip
+共享内存虽然高效，但需要进程之间进行同步，以避免数据竞争问题。
+:::
+
+### 2. 消息传递（Message Passing）
+
+消息传递是另一种常见的进程通信方式。进程通过发送和接收消息来交换数据。消息传递可以分为两种模式：
+- **直接通信**：发送方和接收方直接指定对方。
+- **间接通信**：通过消息队列或邮箱进行通信。
+
+#### 代码示例
+
+以下是一个使用消息队列的示例，使用 POSIX 消息队列 API：
+
+```c
+#include <stdio.h>
+#include <mqueue.h>
+#include <string.h>
+
+int main() {
+    mqd_t mq;
+    const char *queue_name = "/my_message_queue";
+    struct mq_attr attr;
+    char buffer[1024];
+
+    // 设置消息队列属性
+    attr.mq_flags = 0;
+    attr.mq_maxmsg = 10;
+    attr.mq_msgsize = 1024;
+    attr.mq_curmsgs = 0;
+
+    // 创建消息队列
+    mq = mq_open(queue_name, O_CREAT | O_RDWR, 0666, &attr);
+
+    // 发送消息
+    const char *message = "Hello from process 1";
+    mq_send(mq, message, strlen(message) + 1, 0);
+
+    // 关闭消息队列
+    mq_close(mq);
+
+    return 0;
+}
+```
+
+在另一个进程中，你可以接收消息：
+
+```c
+#include <stdio.h>
+#include <mqueue.h>
+#include <string.h>
+
+int main() {
+    mqd_t mq;
+    const char *queue_name = "/my_message_queue";
+    char buffer[1024];
+
+    // 打开消息队列
+    mq = mq_open(queue_name, O_RDONLY);
+
+    // 接收消息
+    mq_receive(mq, buffer, 1024, NULL);
+    printf("Received message: %s\n", buffer);
+
+    // 关闭消息队列
+    mq_close(mq);
+
+    // 删除消息队列
+    mq_unlink(queue_name);
+
+    return 0;
+}
+```
+
+#### 实际应用场景
+
+消息传递常用于分布式系统和微服务架构中，例如在多个服务之间传递请求和响应。
+
+:::caution
+消息传递可能会引入延迟，特别是在高负载情况下，消息队列可能会成为瓶颈。
+:::
+
+### 3. 管道（Pipe）
+
+管道是一种半双工的通信方式，数据只能单向流动。管道通常用于父子进程之间的通信。
+
+#### 代码示例
+
+以下是一个简单的管道示例：
+
+```c
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+
+int main() {
+    int pipefd[2];
+    pid_t pid;
+    char buffer[20];
+
+    // 创建管道
+    pipe(pipefd);
+
+    // 创建子进程
+    pid = fork();
+
+    if (pid == 0) {  // 子进程
+        close(pipefd[1]);  // 关闭写端
+        read(pipefd[0], buffer, sizeof(buffer));
+        printf("Child process received: %s\n", buffer);
+        close(pipefd[0]);
+    } else {  // 父进程
+        close(pipefd[0]);  // 关闭读端
+        write(pipefd[1], "Hello from parent", 17);
+        close(pipefd[1]);
+    }
+
+    return 0;
+}
+```
+
+#### 实际应用场景
+
+管道常用于命令行工具中，例如在 Linux 中使用 `|` 符号将多个命令连接起来，实现数据流的传递。
+
+:::note
+管道是半双工的，如果需要双向通信，可以使用两个管道。
+:::
+
+## 总结
+
+进程通信是操作系统中非常重要的概念，它允许多个进程协作完成任务。本文介绍了三种常见的进程通信机制：共享内存、消息传递和管道。每种机制都有其优缺点和适用场景，选择合适的通信方式可以提高系统的性能和可靠性。
+
+### 附加资源
+
+- [POSIX 共享内存文档](https://man7.org/linux/man-pages/man7/shm_overview.7.html)
+- [POSIX 消息队列文档](https://man7.org/linux/man-pages/man7/mq_overview.7.html)
+- [Linux 管道文档](https://man7.org/linux/man-pages/man2/pipe.2.html)
+
+### 练习
+
+1. 修改共享内存示例，使其支持双向通信。
+2. 使用消息队列实现一个简单的聊天程序。
+3. 编写一个程序，使用管道将多个命令连接起来，模拟 Linux 的 `|` 功能。
+
+通过完成这些练习，你将更深入地理解进程通信的机制和应用。

@@ -1,0 +1,132 @@
+---
+title: OpenTelemetry 内存泄漏
+description: 学习如何识别、诊断和解决OpenTelemetry中的内存泄漏问题，包含实际案例和代码示例。
+---
+
+# OpenTelemetry 内存泄漏
+
+## 介绍
+
+内存泄漏是OpenTelemetry（以下简称OTel）应用中常见的性能问题之一。当应用程序未能正确释放不再使用的内存时，会导致内存占用持续增长，最终可能引发应用崩溃或系统资源耗尽。本文将帮助你理解OTel中内存泄漏的常见原因、诊断方法以及解决方案。
+
+:::note
+OpenTelemetry是一个开源的观测性框架，用于生成、收集和管理遥测数据（如指标、日志和追踪）。内存泄漏可能发生在SDK配置、导出器（Exporters）或自定义处理器中。
+:::
+
+## 常见内存泄漏场景
+
+### 1. 未关闭的导出器（Exporters）
+导出器负责将遥测数据发送到后端（如Jaeger、Prometheus）。如果未正确关闭导出器，可能会导致缓冲区的数据堆积。
+
+```javascript
+const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
+const { ConsoleSpanExporter } = require('@opentelemetry/sdk-trace-base');
+
+const provider = new NodeTracerProvider();
+const exporter = new ConsoleSpanExporter();
+provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+
+// 错误示例：未调用 shutdown()
+// provider.shutdown(); // 必须显式关闭！
+```
+
+:::caution
+忘记调用 `provider.shutdown()` 会导致导出器的资源（如网络连接或缓冲区）无法释放。
+:::
+
+### 2. 无限增长的上下文（Context）
+在追踪中，如果未正确清理上下文（如`AsyncLocalStorage`），可能会导致内存泄漏。
+
+```javascript
+const { AsyncLocalStorageContextManager } = require('@opentelemetry/context-async-hooks');
+const provider = new NodeTracerProvider({
+  contextManager: new AsyncLocalStorageContextManager(),
+});
+
+// 必须确保异步操作完成后清理上下文
+```
+
+### 3. 自定义处理器中的闭包引用
+如果自定义处理器持有对大型对象的引用（如缓存未清理），内存可能无法释放。
+
+```javascript
+const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+
+class LeakyProcessor {
+  constructor() {
+    this.cache = []; // 错误：数据会无限增长
+  }
+
+  onStart(span) {
+    this.cache.push(span); // 泄漏点
+  }
+}
+
+provider.addSpanProcessor(new LeakyProcessor()); // 避免此类设计！
+```
+
+## 诊断内存泄漏
+
+### 使用堆快照（Heap Snapshots）
+通过Node.js的`heapdump`或Chrome DevTools生成堆快照，分析内存占用对象。
+
+```bash
+# 安装heapdump
+npm install heapdump
+```
+
+```javascript
+const heapdump = require('heapdump');
+heapdump.writeSnapshot(); // 生成快照文件
+```
+
+### 监控内存增长
+使用`process.memoryUsage()`定期打印内存使用情况：
+
+```javascript
+setInterval(() => {
+  console.log(process.memoryUsage());
+}, 5000);
+```
+
+## 实际案例
+
+### 案例：未关闭的批量导出器
+以下是一个因未关闭批量导出器导致内存泄漏的场景：
+
+```javascript
+const { BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+const exporter = new ConsoleSpanExporter();
+
+// 错误：未限制批量大小或关闭处理器
+provider.addSpanProcessor(new BatchSpanProcessor(exporter, {
+  maxQueueSize: Infinity, // 危险：队列无限制
+}));
+
+// 解决方案：设置合理的maxQueueSize并确保关闭
+provider.addSpanProcessor(new BatchSpanProcessor(exporter, {
+  maxQueueSize: 1000, // 限制队列大小
+  scheduledDelayMillis: 5000,
+}));
+```
+
+## 解决方案
+
+1. **显式关闭资源**：在应用退出时调用 `provider.shutdown()`。
+2. **限制缓冲区大小**：为批量处理器设置 `maxQueueSize`。
+3. **避免全局缓存**：在自定义处理器中定期清理缓存。
+4. **使用WeakMap**：如果需要缓存，优先使用弱引用。
+
+## 总结
+
+OpenTelemetry内存泄漏通常由未释放的资源、无限增长的缓冲区或错误的上下文管理引起。通过堆快照分析和合理配置导出器/处理器，可以有效解决问题。
+
+## 附加资源
+
+- [OpenTelemetry JavaScript SDK文档](https://opentelemetry.io/docs/instrumentation/js/)
+- [Node.js内存调试指南](https://nodejs.org/en/docs/guides/simple-profiling/)
+
+## 练习
+
+1. 创建一个会泄漏内存的自定义SpanProcessor，并通过堆快照验证。
+2. 修改代码，使用`WeakMap`替代普通对象缓存Span数据。

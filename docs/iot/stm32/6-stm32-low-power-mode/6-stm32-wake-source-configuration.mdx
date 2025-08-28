@@ -1,0 +1,168 @@
+---
+title: STM32 唤醒源配置
+description: 了解如何配置STM32微控制器的唤醒源，以实现低功耗模式下的高效唤醒。
+---
+
+## 介绍
+
+在嵌入式系统中，低功耗模式是延长电池寿命的关键技术之一。STM32微控制器提供了多种低功耗模式，例如停止模式（Stop Mode）和待机模式（Standby Mode）。在这些模式下，微控制器的大部分功能被关闭以节省电能。然而，当需要恢复运行时，必须通过配置唤醒源来唤醒微控制器。
+
+本文将详细介绍如何配置STM32的唤醒源，并提供实际案例和代码示例，帮助初学者理解和应用这一概念。
+
+## STM32 唤醒源概述
+
+STM32微控制器支持多种唤醒源，包括外部中断、RTC闹钟、WKUP引脚等。这些唤醒源可以在低功耗模式下触发，使微控制器从休眠状态恢复到正常运行状态。
+
+### 常见的唤醒源
+
+1. **外部中断**：通过配置GPIO引脚的外部中断功能，可以在引脚状态变化时唤醒微控制器。
+2. **RTC闹钟**：通过配置RTC（实时时钟）的闹钟功能，可以在特定时间点唤醒微控制器。
+3. **WKUP引脚**：STM32提供了专用的WKUP引脚，用于在低功耗模式下唤醒微控制器。
+
+## 配置唤醒源的步骤
+
+### 1. 配置外部中断唤醒源
+
+以下是一个配置外部中断唤醒源的示例代码：
+
+```c
+#include "stm32f4xx.h"
+
+void EXTI0_IRQHandler(void) {
+    if (EXTI_GetITStatus(EXTI_Line0) != RESET) {
+        // 清除中断标志
+        EXTI_ClearITPendingBit(EXTI_Line0);
+        // 唤醒后的处理代码
+    }
+}
+
+void configure_EXTI(void) {
+    // 使能GPIOA时钟
+    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
+    // 配置PA0为输入模式
+    GPIO_InitTypeDef GPIO_InitStruct;
+    GPIO_InitStruct.GPIO_Pin = GPIO_Pin_0;
+    GPIO_InitStruct.GPIO_Mode = GPIO_Mode_IN;
+    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+    GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    // 配置EXTI0
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_SYSCFG, ENABLE);
+    SYSCFG_EXTILineConfig(EXTI_PortSourceGPIOA, EXTI_PinSource0);
+    EXTI_InitTypeDef EXTI_InitStruct;
+    EXTI_InitStruct.EXTI_Line = EXTI_Line0;
+    EXTI_InitStruct.EXTI_Mode = EXTI_Mode_Interrupt;
+    EXTI_InitStruct.EXTI_Trigger = EXTI_Trigger_Rising;
+    EXTI_InitStruct.EXTI_LineCmd = ENABLE;
+    EXTI_Init(&EXTI_InitStruct);
+
+    // 配置NVIC
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = EXTI0_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 0;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 0;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStruct);
+}
+```
+
+:::note
+在配置外部中断时，确保正确配置GPIO引脚和EXTI线路，并在中断服务程序（ISR）中清除中断标志。
+:::
+
+### 2. 配置RTC闹钟唤醒源
+
+以下是一个配置RTC闹钟唤醒源的示例代码：
+
+```c
+#include "stm32f4xx.h"
+
+void configure_RTC(void) {
+    // 使能PWR和BKP时钟
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+    PWR_BackupAccessCmd(ENABLE);
+
+    // 使能RTC时钟
+    RCC_LSEConfig(RCC_LSE_ON);
+    while (RCC_GetFlagStatus(RCC_FLAG_LSERDY) == RESET);
+    RCC_RTCCLKConfig(RCC_RTCCLKSource_LSE);
+    RCC_RTCCLKCmd(ENABLE);
+
+    // 配置RTC闹钟
+    RTC_AlarmTypeDef RTC_AlarmStruct;
+    RTC_AlarmStruct.RTC_AlarmTime.RTC_H12 = RTC_H12_AM;
+    RTC_AlarmStruct.RTC_AlarmTime.RTC_Hours = 1;
+    RTC_AlarmStruct.RTC_AlarmTime.RTC_Minutes = 0;
+    RTC_AlarmStruct.RTC_AlarmTime.RTC_Seconds = 0;
+    RTC_AlarmStruct.RTC_AlarmMask = RTC_AlarmMask_DateWeekDay | RTC_AlarmMask_Hours | RTC_AlarmMask_Minutes;
+    RTC_AlarmStruct.RTC_AlarmDateWeekDaySel = RTC_AlarmDateWeekDaySel_Date;
+    RTC_AlarmStruct.RTC_AlarmDateWeekDay = 1;
+    RTC_SetAlarm(RTC_Format_BIN, RTC_Alarm_A, &RTC_AlarmStruct);
+    RTC_AlarmCmd(RTC_Alarm_A, ENABLE);
+
+    // 配置RTC闹钟中断
+    RTC_ITConfig(RTC_IT_ALRA, ENABLE);
+    NVIC_InitTypeDef NVIC_InitStruct;
+    NVIC_InitStruct.NVIC_IRQChannel = RTC_Alarm_IRQn;
+    NVIC_InitStruct.NVIC_IRQChannelPreemptionPriority = 0;
+    NVIC_InitStruct.NVIC_IRQChannelSubPriority = 0;
+    NVIC_InitStruct.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStruct);
+}
+
+void RTC_Alarm_IRQHandler(void) {
+    if (RTC_GetITStatus(RTC_IT_ALRA) != RESET) {
+        // 清除中断标志
+        RTC_ClearITPendingBit(RTC_IT_ALRA);
+        // 唤醒后的处理代码
+    }
+}
+```
+
+:::tip
+在配置RTC闹钟时，确保正确设置闹钟时间和日期，并在中断服务程序（ISR）中清除中断标志。
+:::
+
+### 3. 配置WKUP引脚唤醒源
+
+以下是一个配置WKUP引脚唤醒源的示例代码：
+
+```c
+#include "stm32f4xx.h"
+
+void configure_WKUP(void) {
+    // 使能PWR时钟
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+
+    // 配置WKUP引脚
+    PWR_WakeUpPinCmd(PWR_WakeUpPin_1, ENABLE);
+    PWR_WakeUpPinCmd(PWR_WakeUpPin_2, ENABLE);
+    PWR_WakeUpPinCmd(PWR_WakeUpPin_3, ENABLE);
+}
+```
+
+:::caution
+在配置WKUP引脚时，确保正确选择WKUP引脚，并根据需要启用相应的引脚。
+:::
+
+## 实际应用案例
+
+假设我们有一个基于STM32的智能家居控制系统，系统在大部分时间处于低功耗模式，只有在检测到门磁传感器状态变化或到达预定时间时才唤醒。我们可以通过以下方式配置唤醒源：
+
+1. **门磁传感器**：使用外部中断唤醒源，当门磁传感器状态变化时唤醒系统。
+2. **定时任务**：使用RTC闹钟唤醒源，在每天特定时间点唤醒系统执行定时任务。
+
+## 总结
+
+配置STM32的唤醒源是实现低功耗模式的关键步骤。通过合理配置外部中断、RTC闹钟和WKUP引脚等唤醒源，可以在保证系统低功耗的同时，实现高效唤醒。本文提供了详细的配置步骤和代码示例，帮助初学者理解和应用这一概念。
+
+## 附加资源
+
+- [STM32参考手册](https://www.st.com/resource/en/reference_manual/dm00031020-stm32f405-415-stm32f407-417-stm32f427-437-and-stm32f429-439-advanced-arm-based-32-bit-mcus-stmicroelectronics.pdf)
+- [STM32低功耗模式应用笔记](https://www.st.com/resource/en/application_note/dm00031020-stm32f4-series-low-power-modes-stmicroelectronics.pdf)
+
+## 练习
+
+1. 修改外部中断唤醒源的代码，使其在下降沿触发。
+2. 配置RTC闹钟唤醒源，使其在每天的12:00 PM唤醒系统。
+3. 尝试使用WKUP引脚唤醒源，并在唤醒后点亮LED灯。

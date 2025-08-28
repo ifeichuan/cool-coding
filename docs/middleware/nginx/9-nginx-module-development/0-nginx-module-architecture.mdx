@@ -1,0 +1,164 @@
+---
+title: Nginx 模块架构
+description: 了解Nginx模块架构的基本概念、工作原理以及如何通过模块扩展Nginx的功能。本文适合初学者，将逐步讲解Nginx模块的核心组件和实际应用。
+---
+
+## 介绍
+
+Nginx 是一个高性能的 HTTP 服务器和反向代理服务器，广泛用于现代 Web 架构中。它的强大之处不仅在于其高效的性能，还在于其模块化的设计。Nginx 的模块架构允许开发者通过编写自定义模块来扩展其功能，从而满足特定的需求。
+
+本文将带你深入了解 Nginx 模块架构的核心概念，帮助你理解如何通过模块扩展 Nginx 的功能。
+
+## Nginx 模块架构概述
+
+Nginx 的模块架构是其灵活性和可扩展性的基础。Nginx 的核心功能是通过模块实现的，每个模块负责处理特定的任务，例如处理 HTTP 请求、管理连接、负载均衡等。
+
+### 模块类型
+
+Nginx 模块主要分为以下几类：
+
+1. **核心模块**：负责 Nginx 的基本功能，如配置解析、事件处理等。
+2. **HTTP 模块**：处理 HTTP 请求和响应，包括 HTTP 核心模块和各种 HTTP 过滤器模块。
+3. **Stream 模块**：处理 TCP 和 UDP 流量，通常用于代理和负载均衡。
+4. **Mail 模块**：处理邮件协议（如 SMTP、IMAP、POP3）的流量。
+
+### 模块的生命周期
+
+Nginx 模块的生命周期通常包括以下几个阶段：
+
+1. **配置解析**：在 Nginx 启动时，模块会解析配置文件中的指令。
+2. **初始化**：模块在 Nginx 启动时进行初始化，分配资源并设置回调函数。
+3. **请求处理**：在请求到达时，模块会根据配置和请求内容进行处理。
+4. **清理**：在 Nginx 关闭时，模块会释放资源并执行清理操作。
+
+## Nginx 模块的核心组件
+
+### 模块定义
+
+每个 Nginx 模块都需要定义一个 `ngx_module_t` 结构体，该结构体包含了模块的元信息，如模块名称、版本、命令等。
+
+```c
+typedef struct {
+    ngx_str_t             name;
+    void                 *(*create_conf)(ngx_cycle_t *cycle);
+    char                 *(*init_conf)(ngx_cycle_t *cycle, void *conf);
+    // 其他回调函数
+} ngx_module_t;
+```
+
+### 配置指令
+
+Nginx 模块通过配置指令与用户交互。每个指令都需要定义一个 `ngx_command_t` 结构体，该结构体包含了指令的名称、类型、处理函数等信息。
+
+```c
+typedef struct {
+    ngx_str_t             name;
+    ngx_uint_t            type;
+    char                 *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
+    // 其他字段
+} ngx_command_t;
+```
+
+### 请求处理
+
+Nginx 模块通过回调函数处理请求。例如，HTTP 模块通常会实现 `ngx_http_handler_pt` 回调函数来处理 HTTP 请求。
+
+```c
+typedef ngx_int_t (*ngx_http_handler_pt)(ngx_http_request_t *r);
+```
+
+## 实际案例：编写一个简单的 Nginx 模块
+
+让我们通过一个简单的例子来理解如何编写一个 Nginx 模块。假设我们要编写一个模块，该模块会在 HTTP 响应头中添加一个自定义的 `X-Hello` 字段。
+
+### 模块定义
+
+首先，我们需要定义模块的 `ngx_module_t` 结构体。
+
+```c
+ngx_module_t  ngx_http_hello_module = {
+    NGX_MODULE_V1,
+    &ngx_http_hello_module_ctx,          /* module context */
+    ngx_http_hello_commands,             /* module directives */
+    NGX_HTTP_MODULE,                     /* module type */
+    NULL,                                /* init master */
+    NULL,                                /* init module */
+    NULL,                                /* init process */
+    NULL,                                /* init thread */
+    NULL,                                /* exit thread */
+    NULL,                                /* exit process */
+    NULL,                                /* exit master */
+    NGX_MODULE_V1_PADDING
+};
+```
+
+### 配置指令
+
+接下来，我们定义模块的配置指令。
+
+```c
+static ngx_command_t  ngx_http_hello_commands[] = {
+    { ngx_string("hello"),
+      NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_NOARGS,
+      ngx_http_hello,
+      NGX_HTTP_LOC_CONF_OFFSET,
+      0,
+      NULL },
+    ngx_null_command
+};
+```
+
+### 请求处理
+
+然后，我们实现请求处理函数，该函数会在 HTTP 响应头中添加 `X-Hello` 字段。
+
+```c
+static ngx_int_t
+ngx_http_hello_handler(ngx_http_request_t *r)
+{
+    ngx_table_elt_t  *h;
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->hash = 1;
+    ngx_str_set(&h->key, "X-Hello");
+    ngx_str_set(&h->value, "World");
+
+    return NGX_OK;
+}
+```
+
+### 编译和加载模块
+
+最后，我们需要将模块编译为动态库，并在 Nginx 配置文件中加载该模块。
+
+```nginx
+load_module modules/ngx_http_hello_module.so;
+
+http {
+    server {
+        location / {
+            hello;
+        }
+    }
+}
+```
+
+## 总结
+
+Nginx 的模块架构是其强大功能的基础。通过编写自定义模块，开发者可以扩展 Nginx 的功能，满足特定的需求。本文介绍了 Nginx 模块架构的核心概念，并通过一个简单的例子展示了如何编写和加载一个 Nginx 模块。
+
+## 附加资源
+
+- [Nginx 官方文档](https://nginx.org/en/docs/)
+- [Nginx 模块开发指南](https://www.nginx.com/resources/wiki/extending/)
+- [Nginx 源码](https://github.com/nginx/nginx)
+
+## 练习
+
+1. 尝试编写一个 Nginx 模块，该模块会在 HTTP 响应体中添加一段自定义文本。
+2. 研究 Nginx 的核心模块，了解它们是如何处理请求的。
+3. 尝试将你的模块编译为动态库，并在 Nginx 中加载和使用它。

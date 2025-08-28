@@ -1,0 +1,156 @@
+---
+title: STM32 HTTP 客户端
+description: 学习如何在 STM32 微控制器上实现 HTTP 客户端，与 Web 服务器进行通信。本文将从基础概念讲起，逐步引导你完成代码实现，并提供实际应用案例。
+---
+
+## 介绍
+
+HTTP（超文本传输协议）是互联网上最常用的协议之一，用于客户端与服务器之间的通信。在嵌入式系统中，STM32 微控制器可以通过网络模块（如以太网或 Wi-Fi）实现 HTTP 客户端功能，从而与远程服务器进行数据交换。
+
+本文将介绍如何在 STM32 上实现一个简单的 HTTP 客户端，包括如何发送 HTTP 请求、解析服务器响应，并展示一个实际应用案例。
+
+## 准备工作
+
+在开始之前，确保你已经具备以下条件：
+
+1. 一块支持网络功能的 STM32 开发板（如 STM32F4 Discovery 或 STM32H7 Nucleo）。
+2. 安装了 STM32CubeMX 和 STM32CubeIDE。
+3. 一个可访问的 Web 服务器，用于测试 HTTP 请求。
+
+## 配置 STM32 网络模块
+
+首先，使用 STM32CubeMX 配置网络模块。假设你使用的是以太网模块，以下是配置步骤：
+
+1. 打开 STM32CubeMX，选择你的 STM32 开发板型号。
+2. 在 "Pinout & Configuration" 选项卡中，启用以太网模块（ETH）。
+3. 配置以太网参数，如 MAC 地址、PHY 类型等。
+4. 生成代码并导入到 STM32CubeIDE 中。
+
+## 实现 HTTP 客户端
+
+### 1. 初始化网络连接
+
+在 `main.c` 中，初始化网络连接并确保开发板能够成功连接到网络。
+
+```c
+#include "lwip.h"
+#include "lwip/dhcp.h"
+
+void Netif_Config(void) {
+    ip_addr_t ipaddr, netmask, gw;
+
+    IP4_ADDR(&ipaddr, 192, 168, 1, 10);
+    IP4_ADDR(&netmask, 255, 255, 255, 0);
+    IP4_ADDR(&gw, 192, 168, 1, 1);
+
+    netif_add(&gnetif, &ipaddr, &netmask, &gw, NULL, ðernetif_init, &tcpip_input);
+    netif_set_default(&gnetif);
+    netif_set_up(&gnetif);
+
+    dhcp_start(&gnetif);
+}
+```
+
+### 2. 发送 HTTP GET 请求
+
+接下来，实现一个简单的 HTTP GET 请求。我们将使用 LWIP（轻量级 IP 协议栈）来发送请求。
+
+```c
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+
+void http_get_request(const char *host, const char *path) {
+    int sock;
+    struct sockaddr_in server_addr;
+    char request[256];
+    char response[1024];
+
+    // 创建套接字
+    sock = lwip_socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        printf("Socket creation error\n");
+        return;
+    }
+
+    // 解析服务器地址
+    struct hostent *server = lwip_gethostbyname(host);
+    if (server == NULL) {
+        printf("Host resolution failed\n");
+        return;
+    }
+
+    // 设置服务器地址
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(80);
+    server_addr.sin_addr.s_addr = *((unsigned long *)server->h_addr);
+
+    // 连接到服务器
+    if (lwip_connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        printf("Connection failed\n");
+        return;
+    }
+
+    // 发送 HTTP GET 请求
+    snprintf(request, sizeof(request), "GET %s HTTP/1.1\r\nHost: %s\r\n\r\n", path, host);
+    lwip_write(sock, request, strlen(request));
+
+    // 接收服务器响应
+    int bytes_received = lwip_read(sock, response, sizeof(response) - 1);
+    if (bytes_received > 0) {
+        response[bytes_received] = '\0';
+        printf("Response: %s\n", response);
+    }
+
+    // 关闭套接字
+    lwip_close(sock);
+}
+```
+
+### 3. 调用 HTTP GET 请求
+
+在 `main` 函数中调用 `http_get_request` 函数，发送一个 HTTP GET 请求到指定的服务器。
+
+```c
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    Netif_Config();
+
+    http_get_request("www.example.com", "/");
+
+    while (1) {
+        // 主循环
+    }
+}
+```
+
+## 实际应用案例
+
+假设你正在开发一个智能家居系统，STM32 需要从远程服务器获取温度数据。你可以使用上述 HTTP 客户端代码，定期向服务器发送 GET 请求，获取最新的温度数据。
+
+```c
+void get_temperature_data() {
+    http_get_request("api.weather.com", "/v1/temperature?location=NewYork");
+}
+```
+
+## 总结
+
+通过本文，你已经学会了如何在 STM32 上实现一个简单的 HTTP 客户端。我们介绍了如何配置网络模块、发送 HTTP GET 请求，并展示了一个实际应用案例。
+
+:::tip
+在实际项目中，你可能需要处理更复杂的 HTTP 请求（如 POST 请求）和服务器响应（如 JSON 解析）。建议进一步学习 LWIP 和 HTTP 协议的相关知识。
+:::
+
+## 附加资源
+
+- [LWIP 官方文档](http://www.nongnu.org/lwip/)
+- [STM32CubeMX 用户手册](https://www.st.com/resource/en/user_manual/dm00104712-stm32cubemx-for-stm32-configuration-and-initialization-c-code-generation-stmicroelectronics.pdf)
+- [HTTP 协议详解](https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview)
+
+## 练习
+
+1. 修改代码，使其能够发送 HTTP POST 请求。
+2. 尝试解析服务器返回的 JSON 数据。
+3. 实现一个简单的 Web 服务器，与 STM32 进行双向通信。

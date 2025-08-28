@@ -1,0 +1,183 @@
+---
+title: OpenTelemetry 文件配置
+description: 学习如何使用配置文件管理OpenTelemetry的采集器和导出器设置，实现灵活的遥测数据收集。
+---
+
+# OpenTelemetry 文件配置
+
+## 介绍
+
+OpenTelemetry文件配置允许开发者通过YAML或JSON文件定义数据采集规则，而无需修改应用代码。这种方式特别适合需要动态调整采样率、过滤属性或切换导出目标的场景。本文将带你了解核心配置项，并通过实际案例演示如何落地。
+
+---
+
+## 配置文件基础结构
+
+一个典型的OpenTelemetry配置文件包含三大模块：
+
+```yaml
+receivers:  # 数据接收器配置
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:  # 数据处理管道
+  batch:
+    timeout: 10s
+
+exporters:  # 数据导出目标
+  logging:
+    logLevel: debug
+```
+
+:::tip 模块关系
+数据流向遵循 `receivers → processors → exporters` 的链条，每个环节都可以独立配置。
+:::
+
+---
+
+## 关键配置详解
+
+### 1. 接收器(Receivers)
+
+配置示例（同时启用gRPC和HTTP）：
+
+```yaml
+receivers:
+  otlp:
+    protocols: 
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+```
+
+支持的其他接收器类型：
+- `prometheus` - 抓取Prometheus指标
+- `jaeger` - 接收Jaeger格式数据
+
+### 2. 处理器(Processors)
+
+常用处理器示例：
+
+```yaml
+processors:
+  memory_limiter:  # 内存保护
+    check_interval: 2s
+    limit_mib: 2000
+  batch:  # 批量处理
+    timeout: 5s
+    send_batch_size: 10000
+  attributes:  # 属性修改
+    actions:
+      - key: credit_card
+        action: delete  # 删除敏感字段
+```
+
+### 3. 导出器(Exporters)
+
+多目标导出配置：
+
+```yaml
+exporters:
+  otlp:
+    endpoint: otel-collector:4317
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+  logging:
+    verbosity: detailed
+```
+
+---
+
+## 完整配置案例
+
+以下配置实现：
+1. 接收gRPC遥测数据
+2. 过滤敏感属性
+3. 同时输出到Jaeger和Prometheus
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+  memory_limiter:
+    limit_mib: 1500
+  batch:
+    timeout: 10s
+  attributes:
+    actions:
+      - key: user.password
+        action: delete
+
+exporters:
+  jaeger:
+    endpoint: jaeger-all-in-one:14250
+  prometheus:
+    endpoint: "0.0.0.0:9090"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, attributes]
+      exporters: [jaeger]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+```
+
+---
+
+## 配置热更新机制
+
+OpenTelemetry Collector支持动态重载配置：
+
+```bash
+# 发送SIGHUP信号触发重载
+kill -SIGHUP $(pidof otelcol)
+```
+
+:::caution 注意事项
+- 部分处理器（如`memory_limiter`）需要重启才能生效
+- 重载失败时会自动回滚到上一版本
+:::
+
+---
+
+## 调试技巧
+
+启用诊断接口检测配置问题：
+
+```yaml
+service:
+  telemetry:
+    metrics:
+      level: detailed
+    logs:
+      level: debug
+```
+
+然后访问 `http://localhost:8888/debug/configz` 验证生效配置。
+
+---
+
+## 总结与进阶
+
+通过文件配置，你可以实现：
+✅ 环境差异化管理（开发/生产）<br />
+✅ 集中式采样策略控制<br />
+✅ 敏感数据自动过滤
+
+推荐练习：
+1. 创建一个过滤特定HTTP状态码的配置
+2. 配置同时输出到本地文件和云服务
+
+官方资源：
+- [OpenTelemetry Collector 配置文档](https://opentelemetry.io/docs/collector/configuration/)
+- [配置验证工具](https://github.com/open-telemetry/opentelemetry-collector/tree/main/cmd/configschema)

@@ -1,0 +1,172 @@
+---
+title: Android数据加密
+description: 了解如何在Android应用中加密数据，保护用户隐私和敏感信息。本文涵盖基本概念、实现方法和实际案例。
+---
+
+# Android数据加密
+
+在现代移动应用中，数据安全至关重要。Android数据加密是一种保护用户隐私和敏感信息的关键技术。通过加密，我们可以确保即使数据被非法访问，也无法被轻易解读。本文将介绍Android数据加密的基本概念、实现方法以及实际应用场景。
+
+## 什么是数据加密？
+
+数据加密是将原始数据（明文）转换为不可读的形式（密文）的过程。只有拥有正确密钥的人才能将密文解密回明文。加密技术广泛应用于保护敏感信息，如用户密码、信用卡信息等。
+
+## Android中的加密API
+
+Android提供了多种加密API，主要包括：
+
+- **KeyStore**：用于安全存储密钥。
+- **Cipher**：用于执行加密和解密操作。
+- **SecureRandom**：用于生成安全的随机数。
+
+### 使用KeyStore存储密钥
+
+KeyStore是一个安全的容器，用于存储加密密钥。以下是一个简单的示例，展示如何在KeyStore中生成和存储密钥：
+
+```java
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
+import java.security.KeyStore;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+
+public class KeyStoreHelper {
+    private static final String KEY_ALIAS = "my_key_alias";
+
+    public static SecretKey generateKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            KeyGenerator keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+            keyGenerator.init(new KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_CBC)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_PKCS7)
+                .build());
+            return keyGenerator.generateKey();
+        } else {
+            return (SecretKey) keyStore.getKey(KEY_ALIAS, null);
+        }
+    }
+}
+```
+
+### 使用Cipher进行加密和解密
+
+Cipher类用于执行加密和解密操作。以下是一个使用Cipher进行加密和解密的示例：
+
+```java
+import javax.crypto.Cipher;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.IvParameterSpec;
+
+public class EncryptionHelper {
+    public static byte[] encrypt(byte[] data, SecretKey secretKey) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS7Padding");
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+        byte[] iv = cipher.getIV();
+        byte[] encryptedData = cipher.doFinal(data);
+        return concatenate(iv, encryptedData);
+    }
+
+    public static byte[] decrypt(byte[] encryptedData, SecretKey secretKey) throws Exception {
+        byte[] iv = new byte[16];
+        System.arraycopy(encryptedData, 0, iv, 0, 16);
+        byte[] data = new byte[encryptedData.length - 16];
+        System.arraycopy(encryptedData, 16, data, 0, data.length);
+
+        Cipher cipher = Cipher.getInstance("AES/CBC/PKCS7Padding");
+        cipher.init(Cipher.DECRYPT_MODE, secretKey, new IvParameterSpec(iv));
+        return cipher.doFinal(data);
+    }
+
+    private static byte[] concatenate(byte[] a, byte[] b) {
+        byte[] result = new byte[a.length + b.length];
+        System.arraycopy(a, 0, result, 0, a.length);
+        System.arraycopy(b, 0, result, a.length, b.length);
+        return result;
+    }
+}
+```
+
+## 实际应用场景
+
+### 加密用户密码
+
+在用户注册或登录时，密码通常需要加密存储。以下是一个简单的示例，展示如何使用上述方法加密用户密码：
+
+```java
+public class UserManager {
+    private SecretKey secretKey;
+
+    public UserManager() throws Exception {
+        secretKey = KeyStoreHelper.generateKey();
+    }
+
+    public void savePassword(String password) throws Exception {
+        byte[] encryptedPassword = EncryptionHelper.encrypt(password.getBytes(), secretKey);
+        // 将encryptedPassword存储到SharedPreferences或数据库中
+    }
+
+    public boolean verifyPassword(String password, byte[] encryptedPassword) throws Exception {
+        byte[] decryptedPassword = EncryptionHelper.decrypt(encryptedPassword, secretKey);
+        return password.equals(new String(decryptedPassword));
+    }
+}
+```
+
+### 加密本地文件
+
+有时我们需要加密存储在设备上的文件，以防止未经授权的访问。以下是一个简单的示例，展示如何加密和解密文件：
+
+```java
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+
+public class FileEncryptionHelper {
+    public static void encryptFile(File inputFile, File outputFile, SecretKey secretKey) throws Exception {
+        byte[] fileData = new byte[(int) inputFile.length()];
+        try (FileInputStream fis = new FileInputStream(inputFile)) {
+            fis.read(fileData);
+        }
+        byte[] encryptedData = EncryptionHelper.encrypt(fileData, secretKey);
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            fos.write(encryptedData);
+        }
+    }
+
+    public static void decryptFile(File inputFile, File outputFile, SecretKey secretKey) throws Exception {
+        byte[] encryptedData = new byte[(int) inputFile.length()];
+        try (FileInputStream fis = new FileInputStream(inputFile)) {
+            fis.read(encryptedData);
+        }
+        byte[] decryptedData = EncryptionHelper.decrypt(encryptedData, secretKey);
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            fos.write(decryptedData);
+        }
+    }
+}
+```
+
+## 总结
+
+Android数据加密是保护用户隐私和敏感信息的重要手段。通过使用KeyStore、Cipher等API，我们可以轻松实现数据的加密和解密。本文介绍了基本概念、实现方法以及实际应用场景，希望能帮助你更好地理解和应用Android数据加密技术。
+
+## 附加资源
+
+- [Android Developer Documentation on Security](https://developer.android.com/training/articles/security-tips)
+- [Java Cryptography Architecture (JCA) Reference Guide](https://docs.oracle.com/javase/8/docs/technotes/guides/security/crypto/CryptoSpec.html)
+
+## 练习
+
+1. 修改上述示例代码，使其支持多种加密算法（如RSA）。
+2. 尝试在应用中实现文件加密功能，并测试其性能。
+3. 研究Android的Biometric API，了解如何将生物识别技术与数据加密结合使用。
+
+:::tip
+在实际开发中，务必遵循最佳实践，确保密钥的安全存储和管理。避免硬编码密钥或使用弱加密算法。
+:::

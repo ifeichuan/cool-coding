@@ -1,0 +1,130 @@
+---
+title: Jaeger 服务发现
+description: "了解Jaeger中的服务发现机制，学习如何动态注册和发现追踪组件，实现分布式系统的可观测性。"
+---
+
+## 介绍
+
+在分布式系统中，服务发现（Service Discovery）是核心基础设施之一，它允许服务动态地注册和发现其他服务的位置。Jaeger作为分布式追踪系统，同样依赖服务发现机制来定位其组件（如Agent、Collector等）。本文将介绍Jaeger服务发现的工作原理、配置方式及实际应用场景。
+
+:::note 为什么需要服务发现？
+- **动态环境**：在容器化或云原生环境中，服务IP和端口可能频繁变化。
+- **简化配置**：避免硬编码依赖服务的地址。
+- **高可用性**：自动处理服务实例的增减。
+:::
+
+---
+
+## Jaeger 服务发现的核心组件
+
+Jaeger的服务发现主要涉及以下组件：
+1. **Agent**：负责接收应用发送的Span数据，需发现Collector的地址。
+2. **Collector**：收集Agent上报的数据，可能需要发现存储后端（如Cassandra、Elasticsearch）。
+3. **Query Service**：查询追踪数据时需发现存储后端。
+
+```mermaid
+graph LR
+  A[Application] -->|发送Span| B[Jaeger Agent]
+  B -->|服务发现| C[Jaeger Collector]
+  C -->|服务发现| D[Storage Backend]
+```
+
+---
+
+## 服务发现实现方式
+
+Jaeger支持多种服务发现机制，常见的有：
+
+### 1. 静态配置
+直接通过配置文件或环境变量指定服务地址。适合简单环境。
+
+**示例：Agent静态配置Collector地址**
+```yaml
+# jaeger-agent.yaml
+agent:
+  collector:
+    host-port: "jaeger-collector:14267"
+```
+
+### 2. DNS查询
+通过定期解析DNS记录获取服务地址。适合Kubernetes的Headless Service。
+
+**示例：Agent通过DNS发现Collector**
+```yaml
+agent:
+  collector:
+    host-port: "dns:///jaeger-collector-headless:14267"
+```
+
+### 3. 动态服务发现（如Consul、ZooKeeper）
+集成第三方工具实现动态注册与发现。
+
+**示例：使用Consul发现Collector**
+```yaml
+agent:
+  discovery:
+    type: "consul"
+    consul:
+      server-url: "http://consul-server:8500"
+      service-name: "jaeger-collector"
+```
+
+---
+
+## 实际案例：Kubernetes中的Jaeger服务发现
+
+在Kubernetes中，Jaeger通常通过DNS或环境变量实现服务发现。
+
+### 场景描述
+- Jaeger Collector以Deployment形式运行，通过Service暴露。
+- Jaeger Agent需要动态发现Collector的地址。
+
+**步骤：**
+1. 为Collector创建Headless Service：
+```yaml
+# collector-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger-collector-headless
+spec:
+  clusterIP: None
+  ports:
+    - name: grpc
+      port: 14267
+  selector:
+    app: jaeger-collector
+```
+
+2. 配置Agent使用DNS发现：
+```yaml
+# jaeger-agent-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-agent-conf
+data:
+  agent.yaml: |
+    collector:
+      host-port: "dns:///jaeger-collector-headless:14267"
+```
+
+---
+
+## 常见问题与调试
+
+:::caution 问题排查
+- **DNS解析失败**：检查CoreDNS是否正常运行，`nslookup jaeger-collector-headless`。
+- **连接超时**：验证网络策略是否允许Agent与Collector通信。
+- **配置错误**：使用`JAEGER_AGENT_LOG_LEVEL=debug`查看详细日志。
+:::
+
+---
+
+## 总结
+
+Jaeger服务发现是确保分布式追踪系统灵活性和可靠性的关键。通过静态配置、DNS或动态注册（如Consul），可以适应不同复杂度的环境。在云原生场景中，结合Kubernetes的服务发现机制能显著简化部署。
+
+**延伸学习：**
+- [Jaeger官方文档 - 服务发现](https://www.jaegertracing.io/docs/latest/deployment/#service-discovery)
+- 练习：在本地Minikube集群中部署Jaeger，尝试通过DNS实现Agent到Collector的动态发现。

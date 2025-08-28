@@ -1,0 +1,205 @@
+---
+title: RabbitMQ 核心概念
+description: 了解RabbitMQ的核心概念，包括消息队列、交换机、绑定、路由键等，帮助初学者掌握RabbitMQ的基础知识。
+---
+
+# RabbitMQ 核心概念
+
+RabbitMQ是一个开源的消息代理软件，用于在分布式系统中传递消息。它实现了高级消息队列协议（AMQP），并提供了可靠的消息传递机制。本文将介绍RabbitMQ的核心概念，帮助你理解其工作原理和基本用法。
+
+## 1. 消息队列（Message Queue）
+
+消息队列是RabbitMQ中最基本的概念。它是一个存储消息的缓冲区，生产者将消息发送到队列中，消费者从队列中获取消息进行处理。
+
+:::note
+消息队列的主要作用是解耦生产者和消费者，使得它们可以独立地进行扩展和修改。
+:::
+
+### 示例代码
+
+```python
+import pika
+
+# 连接到RabbitMQ服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 创建一个名为'hello'的队列
+channel.queue_declare(queue='hello')
+
+# 发送消息到队列
+channel.basic_publish(exchange='',
+                      routing_key='hello',
+                      body='Hello World!')
+print(" [x] Sent 'Hello World!'")
+
+# 关闭连接
+connection.close()
+```
+
+## 2. 交换机（Exchange）
+
+交换机是消息的路由中心，它接收来自生产者的消息，并根据特定的规则将消息路由到一个或多个队列。RabbitMQ支持多种类型的交换机，包括直连交换机（Direct）、主题交换机（Topic）、扇出交换机（Fanout）和头交换机（Headers）。
+
+:::tip
+不同类型的交换机适用于不同的消息路由场景。例如，直连交换机适用于精确匹配路由键的场景，而扇出交换机适用于广播消息的场景。
+:::
+
+### 示例代码
+
+```python
+import pika
+
+# 连接到RabbitMQ服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 创建一个名为'logs'的扇出交换机
+channel.exchange_declare(exchange='logs', exchange_type='fanout')
+
+# 发送消息到交换机
+channel.basic_publish(exchange='logs',
+                      routing_key='',
+                      body='Log message')
+print(" [x] Sent 'Log message'")
+
+# 关闭连接
+connection.close()
+```
+
+## 3. 绑定（Binding）
+
+绑定是交换机和队列之间的关联关系。通过绑定，交换机知道将消息路由到哪些队列。绑定通常包含一个路由键（Routing Key），用于指定消息的路由规则。
+
+:::caution
+如果没有为交换机绑定任何队列，发送到该交换机的消息将会丢失。
+:::
+
+### 示例代码
+
+```python
+import pika
+
+# 连接到RabbitMQ服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 创建一个名为'logs'的扇出交换机
+channel.exchange_declare(exchange='logs', exchange_type='fanout')
+
+# 创建一个匿名队列
+result = channel.queue_declare(queue='', exclusive=True)
+queue_name = result.method.queue
+
+# 将队列绑定到交换机
+channel.queue_bind(exchange='logs', queue=queue_name)
+
+print(' [*] Waiting for logs. To exit press CTRL+C')
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(f" [x] {body}")
+
+# 开始消费消息
+channel.basic_consume(queue=queue_name, on_message_callback=callback, auto_ack=True)
+channel.start_consuming()
+```
+
+## 4. 路由键（Routing Key）
+
+路由键是消息的一个属性，用于指定消息的路由规则。生产者发送消息时，可以指定一个路由键，交换机根据这个路由键将消息路由到相应的队列。
+
+:::warning
+路由键的使用方式取决于交换机的类型。例如，直连交换机要求路由键完全匹配，而主题交换机允许使用通配符。
+:::
+
+### 示例代码
+
+```python
+import pika
+
+# 连接到RabbitMQ服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 创建一个名为'direct_logs'的直连交换机
+channel.exchange_declare(exchange='direct_logs', exchange_type='direct')
+
+# 发送消息到交换机，并指定路由键
+severity = 'error'
+message = 'Error log message'
+channel.basic_publish(exchange='direct_logs',
+                      routing_key=severity,
+                      body=message)
+print(f" [x] Sent '{severity}':'{message}'")
+
+# 关闭连接
+connection.close()
+```
+
+## 5. 实际应用场景
+
+RabbitMQ广泛应用于各种分布式系统中，以下是一些常见的应用场景：
+
+- **任务队列**：将耗时的任务放入队列中，由多个工作进程异步处理。
+- **日志处理**：将日志消息发送到RabbitMQ，由多个消费者进行处理和存储。
+- **事件驱动架构**：通过消息队列实现微服务之间的松耦合通信。
+
+### 示例场景：任务队列
+
+假设你有一个Web应用，用户上传图片后需要进行图像处理。你可以使用RabbitMQ将图像处理任务放入队列中，由后台工作进程进行处理。
+
+```python
+# 生产者：将任务放入队列
+import pika
+
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+channel.queue_declare(queue='image_processing')
+
+channel.basic_publish(exchange='',
+                      routing_key='image_processing',
+                      body='image_data')
+print(" [x] Sent 'image_data'")
+
+connection.close()
+```
+
+```python
+# 消费者：从队列中获取任务并处理
+import pika
+
+def process_image(image_data):
+    # 模拟图像处理
+    print(f"Processing image: {image_data}")
+
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+channel.queue_declare(queue='image_processing')
+
+def callback(ch, method, properties, body):
+    process_image(body)
+
+channel.basic_consume(queue='image_processing', on_message_callback=callback, auto_ack=True)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+## 总结
+
+本文介绍了RabbitMQ的核心概念，包括消息队列、交换机、绑定和路由键。通过这些概念，你可以理解RabbitMQ的基本工作原理，并开始在实际项目中使用它。
+
+### 附加资源
+
+- [RabbitMQ官方文档](https://www.rabbitmq.com/documentation.html)
+- [AMQP协议详解](https://www.amqp.org/)
+
+### 练习
+
+1. 创建一个直连交换机，并绑定两个队列，分别处理不同严重级别的日志消息。
+2. 实现一个简单的任务队列系统，生产者发送任务，消费者处理任务并返回结果。
+
+通过以上练习，你将更深入地理解RabbitMQ的核心概念及其应用。

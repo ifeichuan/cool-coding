@@ -1,0 +1,185 @@
+---
+title: Go 内存模型
+description: 了解 Go 语言的内存模型，掌握其内存管理机制，包括内存分配、垃圾回收以及并发编程中的内存可见性问题。
+---
+
+# Go 内存模型
+
+Go 语言的内存模型是理解 Go 程序如何管理内存的关键。它涵盖了内存分配、垃圾回收以及并发编程中的内存可见性问题。本文将逐步讲解 Go 内存模型的核心概念，并通过代码示例和实际案例帮助你更好地理解。
+
+## 什么是 Go 内存模型？
+
+Go 内存模型定义了 Go 程序在运行时如何管理内存，包括内存的分配、回收以及并发环境下的内存可见性。Go 语言通过自动内存管理（垃圾回收）和并发原语（如 Goroutine 和 Channel）来简化内存管理，但开发者仍需理解其背后的机制，以编写高效且安全的代码。
+
+## 内存分配
+
+Go 语言的内存分配是通过内置的 `new` 和 `make` 函数来完成的。`new` 用于分配值类型的内存，而 `make` 用于分配引用类型（如切片、映射和通道）的内存。
+
+### 示例：使用 `new` 和 `make`
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    // 使用 new 分配内存
+    p := new(int)
+    *p = 42
+    fmt.Println(*p) // 输出: 42
+
+    // 使用 make 分配内存
+    s := make([]int, 5)
+    s[0] = 1
+    fmt.Println(s) // 输出: [1 0 0 0 0]
+}
+```
+
+:::note
+`new` 返回的是指向分配内存的指针，而 `make` 返回的是初始化后的引用类型。
+:::
+
+## 垃圾回收
+
+Go 语言使用垃圾回收（Garbage Collection, GC）来自动管理内存。垃圾回收器会定期扫描不再使用的内存并释放它们，从而避免内存泄漏。
+
+### 垃圾回收的工作原理
+
+Go 的垃圾回收器基于标记-清除算法（Mark-and-Sweep）。它分为两个阶段：
+
+1. **标记阶段**：从根对象（如全局变量、栈上的变量等）开始，递归地标记所有可达的对象。
+2. **清除阶段**：遍历所有内存，回收未被标记的对象。
+
+:::tip
+Go 的垃圾回收器是并发的，这意味着它可以在程序运行时进行垃圾回收，而不会完全阻塞程序的执行。
+:::
+
+## 并发编程中的内存可见性
+
+在并发编程中，内存可见性是一个重要的问题。Go 内存模型定义了 Goroutine 之间如何共享内存，并确保在并发操作中内存的可见性和一致性。
+
+### 示例：Goroutine 和内存可见性
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+)
+
+var counter int
+var wg sync.WaitGroup
+
+func increment() {
+    defer wg.Done()
+    for i := 0; i < 1000; i++ {
+        counter++
+    }
+}
+
+func main() {
+    wg.Add(2)
+    go increment()
+    go increment()
+    wg.Wait()
+    fmt.Println(counter) // 输出可能小于 2000
+}
+```
+
+:::caution
+在上面的代码中，`counter` 的最终值可能小于 2000，因为两个 Goroutine 同时修改 `counter` 时可能会发生竞态条件（Race Condition）。
+:::
+
+### 使用 `sync.Mutex` 解决竞态条件
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+)
+
+var counter int
+var wg sync.WaitGroup
+var mu sync.Mutex
+
+func increment() {
+    defer wg.Done()
+    for i := 0; i < 1000; i++ {
+        mu.Lock()
+        counter++
+        mu.Unlock()
+    }
+}
+
+func main() {
+    wg.Add(2)
+    go increment()
+    go increment()
+    wg.Wait()
+    fmt.Println(counter) // 输出: 2000
+}
+```
+
+:::tip
+使用 `sync.Mutex` 可以确保同一时间只有一个 Goroutine 能够访问共享资源，从而避免竞态条件。
+:::
+
+## 实际案例：并发 Web 服务器
+
+在实际应用中，Go 的内存模型和并发原语被广泛用于构建高性能的 Web 服务器。以下是一个简单的并发 Web 服务器示例：
+
+```go
+package main
+
+import (
+    "fmt"
+    "net/http"
+    "sync"
+)
+
+var mu sync.Mutex
+var count int
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    mu.Lock()
+    count++
+    mu.Unlock()
+    fmt.Fprintf(w, "URL.Path = %q\n", r.URL.Path)
+}
+
+func counter(w http.ResponseWriter, r *http.Request) {
+    mu.Lock()
+    fmt.Fprintf(w, "Count %d\n", count)
+    mu.Unlock()
+}
+
+func main() {
+    http.HandleFunc("/", handler)
+    http.HandleFunc("/count", counter)
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+:::note
+在这个示例中，`count` 变量被多个 Goroutine 共享，因此需要使用 `sync.Mutex` 来确保并发安全。
+:::
+
+## 总结
+
+Go 内存模型是理解 Go 程序如何管理内存的基础。通过本文，你学习了 Go 语言中的内存分配、垃圾回收以及并发编程中的内存可见性问题。掌握这些概念将帮助你编写更高效、更安全的 Go 程序。
+
+## 附加资源
+
+- [Go 官方文档：内存模型](https://golang.org/ref/mem)
+- [Go 并发编程](https://golang.org/doc/effective_go#concurrency)
+- [Go 垃圾回收机制](https://blog.golang.org/ismmkeynote)
+
+## 练习
+
+1. 修改上面的并发 Web 服务器示例，使其能够统计每个 URL 的访问次数。
+2. 编写一个程序，使用 Goroutine 和 Channel 来实现生产者-消费者模型，并确保内存安全。
+
+通过实践这些练习，你将更深入地理解 Go 内存模型及其在实际编程中的应用。

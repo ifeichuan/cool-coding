@@ -1,0 +1,140 @@
+---
+title: Go 上下文(Context)
+description: 了解Go语言中的上下文(Context)机制，掌握如何在并发编程中使用上下文来管理请求的生命周期、取消操作和传递数据。
+---
+
+# Go 上下文(Context)
+
+在Go语言的并发编程中，**上下文(Context)** 是一个非常重要的概念。它用于管理请求的生命周期、取消操作、超时控制以及跨API边界的值传递。理解并正确使用上下文是编写高效、可维护的并发程序的关键。
+
+## 什么是上下文(Context)?
+
+上下文是Go语言标准库中的一个接口类型 `context.Context`，它提供了以下功能：
+
+1. **取消操作**：允许在多个goroutine之间传播取消信号。
+2. **超时控制**：可以设置操作的超时时间，防止操作无限期地阻塞。
+3. **值传递**：可以在上下文中存储和传递请求范围内的数据。
+
+上下文通常用于HTTP请求处理、数据库操作、RPC调用等场景，特别是在需要跨多个goroutine协作的情况下。
+
+## 上下文的基本用法
+
+### 创建上下文
+
+在Go中，可以使用 `context.Background()` 或 `context.TODO()` 来创建一个空的上下文。`context.Background()` 通常用于主函数、初始化或测试中，而 `context.TODO()` 用于尚未确定上下文类型的场景。
+
+```go
+ctx := context.Background()
+```
+
+### 取消上下文
+
+通过 `context.WithCancel()` 可以创建一个可取消的上下文。它返回一个上下文对象和一个取消函数 `cancel`，调用 `cancel` 可以取消该上下文及其所有子上下文。
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel() // 确保在函数退出时取消上下文
+
+// 在goroutine中使用上下文
+go func(ctx context.Context) {
+    select {
+    case <-ctx.Done():
+        fmt.Println("Context canceled")
+    }
+}(ctx)
+
+// 取消上下文
+cancel()
+```
+
+### 超时控制
+
+使用 `context.WithTimeout()` 可以创建一个带有超时时间的上下文。如果操作在指定的时间内未完成，上下文将被自动取消。
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+defer cancel()
+
+select {
+case <-time.After(3 * time.Second):
+    fmt.Println("Operation completed")
+case <-ctx.Done():
+    fmt.Println("Operation timed out")
+}
+```
+
+### 值传递
+
+通过 `context.WithValue()` 可以在上下文中存储和传递请求范围内的数据。这些数据通常是请求ID、用户身份信息等。
+
+```go
+ctx := context.WithValue(context.Background(), "userID", 123)
+
+// 在goroutine中获取值
+go func(ctx context.Context) {
+    if userID := ctx.Value("userID"); userID != nil {
+        fmt.Println("User ID:", userID)
+    }
+}(ctx)
+```
+
+## 实际应用场景
+
+### HTTP请求处理
+
+在HTTP服务器中，上下文通常用于管理请求的生命周期。例如，当客户端断开连接时，服务器可以取消正在进行的操作。
+
+```go
+func handler(w http.ResponseWriter, r *http.Request) {
+    ctx := r.Context()
+
+    select {
+    case <-time.After(5 * time.Second):
+        fmt.Fprintln(w, "Request processed")
+    case <-ctx.Done():
+        fmt.Fprintln(w, "Request canceled")
+    }
+}
+
+func main() {
+    http.HandleFunc("/", handler)
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+### 数据库操作
+
+在数据库操作中，上下文可以用于设置查询的超时时间，防止查询长时间阻塞。
+
+```go
+func queryDatabase(ctx context.Context, query string) {
+    // 模拟数据库查询
+    select {
+    case <-time.After(3 * time.Second):
+        fmt.Println("Query completed:", query)
+    case <-ctx.Done():
+        fmt.Println("Query canceled:", query)
+    }
+}
+
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+    defer cancel()
+
+    queryDatabase(ctx, "SELECT * FROM users")
+}
+```
+
+## 总结
+
+上下文是Go语言中管理并发操作的重要工具。它提供了取消操作、超时控制和值传递的功能，使得编写高效、可维护的并发程序变得更加容易。通过理解上下文的基本用法和实际应用场景，你可以在Go并发编程中更好地利用这一机制。
+
+## 附加资源与练习
+
+- **官方文档**：[context package](https://pkg.go.dev/context)
+- **练习**：尝试在一个HTTP服务器中使用上下文来管理请求的生命周期，并实现超时控制。
+- **进一步学习**：探索如何在微服务架构中使用上下文来传递请求ID和跟踪信息。
+
+:::tip
+在实际开发中，尽量避免滥用 `context.WithValue()` 来传递大量数据。上下文的主要用途是传递请求范围内的少量数据，而不是作为全局变量的替代品。
+:::

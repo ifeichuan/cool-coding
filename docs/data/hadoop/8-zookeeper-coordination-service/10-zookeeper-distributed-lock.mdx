@@ -1,0 +1,123 @@
+---
+title: ZooKeeper分布式锁
+description: 了解如何使用ZooKeeper实现分布式锁，确保在分布式系统中资源的互斥访问。
+---
+
+# ZooKeeper分布式锁
+
+在分布式系统中，多个进程或服务可能需要同时访问共享资源。为了避免竞争条件和数据不一致，我们需要一种机制来确保同一时间只有一个进程可以访问这些资源。这就是分布式锁的用武之地。ZooKeeper作为一个分布式协调服务，提供了一种简单而强大的方式来实现分布式锁。
+
+## 什么是分布式锁？
+
+分布式锁是一种在分布式系统中用于控制对共享资源访问的机制。它确保在同一时间只有一个进程可以持有锁，从而避免多个进程同时修改共享资源而导致的数据不一致问题。
+
+## ZooKeeper如何实现分布式锁？
+
+ZooKeeper通过其**临时顺序节点**（Ephemeral Sequential Nodes）特性来实现分布式锁。每个想要获取锁的客户端都会在ZooKeeper中创建一个临时顺序节点。ZooKeeper会为这些节点分配一个唯一的、递增的序列号。客户端通过检查自己创建的节点是否具有最小的序列号来判断是否成功获取锁。
+
+### 实现步骤
+
+1. **创建锁节点**：客户端在ZooKeeper的指定路径下创建一个临时顺序节点。
+2. **检查锁**：客户端获取该路径下的所有子节点，并检查自己创建的节点是否具有最小的序列号。
+3. **获取锁**：如果客户端创建的节点具有最小的序列号，则成功获取锁。
+4. **等待锁**：如果客户端创建的节点不是最小的，则监听前一个节点的删除事件。
+5. **释放锁**：客户端完成任务后，删除自己创建的节点，释放锁。
+
+### 代码示例
+
+以下是一个使用ZooKeeper实现分布式锁的简单示例：
+
+```java
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.WatchedEvent;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooDefs;
+import org.apache.zookeeper.ZooKeeper;
+import org.apache.zookeeper.data.Stat;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+
+public class DistributedLock {
+    private static final String LOCK_ROOT_PATH = "/locks";
+    private static final String LOCK_NODE_NAME = "lock_";
+    private ZooKeeper zooKeeper;
+    private String lockPath;
+
+    public DistributedLock(ZooKeeper zooKeeper) {
+        this.zooKeeper = zooKeeper;
+    }
+
+    public void acquireLock() throws Exception {
+        // 创建锁节点
+        lockPath = zooKeeper.create(LOCK_ROOT_PATH + "/" + LOCK_NODE_NAME, new byte[0],
+                ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.EPHEMERAL_SEQUENTIAL);
+
+        // 检查锁
+        while (true) {
+            List<String> children = zooKeeper.getChildren(LOCK_ROOT_PATH, false);
+            Collections.sort(children);
+            String smallestChild = children.get(0);
+
+            if (lockPath.endsWith(smallestChild)) {
+                // 获取锁
+                System.out.println("Lock acquired: " + lockPath);
+                return;
+            } else {
+                // 等待锁
+                String previousChild = children.get(Collections.binarySearch(children, lockPath.substring(LOCK_ROOT_PATH.length() + 1)) - 1);
+                final CountDownLatch latch = new CountDownLatch(1);
+                Stat stat = zooKeeper.exists(LOCK_ROOT_PATH + "/" + previousChild, new Watcher() {
+                    @Override
+                    public void process(WatchedEvent event) {
+                        if (event.getType() == Event.EventType.NodeDeleted) {
+                            latch.countDown();
+                        }
+                    }
+                });
+
+                if (stat != null) {
+                    latch.await();
+                }
+            }
+        }
+    }
+
+    public void releaseLock() throws Exception {
+        if (lockPath != null) {
+            zooKeeper.delete(lockPath, -1);
+            System.out.println("Lock released: " + lockPath);
+            lockPath = null;
+        }
+    }
+}
+```
+
+### 输入与输出
+
+- **输入**：多个客户端尝试获取锁。
+- **输出**：只有一个客户端成功获取锁，其他客户端等待锁释放。
+
+## 实际应用场景
+
+分布式锁在许多场景中都非常有用，例如：
+
+- **分布式任务调度**：确保同一时间只有一个任务实例在运行。
+- **分布式缓存更新**：避免多个节点同时更新缓存导致的数据不一致。
+- **分布式资源管理**：控制对共享资源的访问，如数据库连接池。
+
+## 总结
+
+ZooKeeper分布式锁是一种强大的工具，可以帮助我们在分布式系统中实现资源的互斥访问。通过临时顺序节点和监听机制，ZooKeeper提供了一种简单而可靠的方式来实现分布式锁。
+
+## 附加资源与练习
+
+- **练习**：尝试在本地搭建一个ZooKeeper集群，并使用上述代码实现分布式锁。
+- **资源**：
+  - [ZooKeeper官方文档](https://zookeeper.apache.org/doc/current/)
+  - [ZooKeeper分布式锁实现详解](https://www.baeldung.com/java-zookeeper-distributed-lock)
+
+:::tip
+在实际生产环境中，建议使用成熟的分布式锁库，如Curator，它提供了更高级的抽象和更健壮的实现。
+:::

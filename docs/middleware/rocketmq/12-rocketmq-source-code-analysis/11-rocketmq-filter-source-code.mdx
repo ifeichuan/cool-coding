@@ -1,0 +1,148 @@
+---
+title: RocketMQ 过滤器源码分析
+description: 本文深入探讨RocketMQ中的过滤器机制，帮助初学者理解其工作原理、源码实现以及实际应用场景。
+---
+
+# RocketMQ 过滤器源码分析
+
+RocketMQ 是一个分布式消息中间件，广泛应用于大规模分布式系统中。为了满足不同业务场景的需求，RocketMQ 提供了消息过滤功能，允许消费者根据特定的条件过滤消息。本文将深入分析 RocketMQ 过滤器的源码实现，帮助初学者理解其工作原理。
+
+## 1. 什么是RocketMQ过滤器？
+
+RocketMQ 过滤器是一种机制，允许消费者在订阅消息时指定过滤条件，从而只接收符合条件的消息。过滤条件可以是消息的属性、标签（Tag）或 SQL 表达式。通过过滤器，消费者可以避免接收不相关的消息，从而提高系统的效率和资源利用率。
+
+:::note
+RocketMQ 支持两种类型的过滤器：
+- **Tag 过滤器**：基于消息的标签进行过滤。
+- **SQL 过滤器**：基于消息的属性进行复杂的 SQL 表达式过滤。
+:::
+
+## 2. 过滤器的工作原理
+
+RocketMQ 的过滤器机制主要分为两个部分：
+1. **Broker 端过滤**：Broker 在接收到消息后，会根据消费者订阅的过滤条件进行过滤，只将符合条件的消息发送给消费者。
+2. **Consumer 端过滤**：如果 Broker 端过滤不满足需求，消费者可以在本地进行二次过滤。
+
+### 2.1 Broker 端过滤
+
+Broker 端过滤的核心逻辑位于 `org.apache.rocketmq.filter.FilterAPI` 类中。该类提供了多种过滤方法，如 `compile`、`match` 等，用于编译和匹配过滤条件。
+
+```java
+public class FilterAPI {
+    public static SubscriptionData compile(String topic, String subString, String type) {
+        // 编译过滤条件
+    }
+
+    public static boolean match(MessageExt msg, SubscriptionData subscriptionData) {
+        // 匹配消息与过滤条件
+    }
+}
+```
+
+### 2.2 Consumer 端过滤
+
+Consumer 端过滤通常用于更复杂的过滤需求。消费者可以在接收到消息后，使用自定义的过滤逻辑进行二次过滤。
+
+```java
+public class CustomFilter implements MessageFilter {
+    @Override
+    public boolean match(MessageExt msg) {
+        // 自定义过滤逻辑
+        return true; // 返回 true 表示消息符合条件
+    }
+}
+```
+
+## 3. 过滤器的源码分析
+
+### 3.1 Tag 过滤器
+
+Tag 过滤器是 RocketMQ 中最常用的过滤器类型。它基于消息的标签进行过滤，标签是消息的一个属性，通常用于标识消息的类型或用途。
+
+#### 3.1.1 订阅时的过滤条件
+
+在消费者订阅消息时，可以通过指定标签来过滤消息。例如：
+
+```java
+consumer.subscribe("TopicTest", "TagA || TagB");
+```
+
+上述代码表示消费者只接收标签为 `TagA` 或 `TagB` 的消息。
+
+#### 3.1.2 源码实现
+
+Tag 过滤器的核心逻辑位于 `org.apache.rocketmq.filter.TagFilter` 类中。该类实现了 `MessageFilter` 接口，并提供了 `match` 方法用于匹配消息的标签。
+
+```java
+public class TagFilter implements MessageFilter {
+    @Override
+    public boolean match(MessageExt msg, SubscriptionData subscriptionData) {
+        String tags = msg.getTags();
+        if (tags == null || tags.isEmpty()) {
+            return false;
+        }
+        return subscriptionData.getTagsSet().contains(tags);
+    }
+}
+```
+
+### 3.2 SQL 过滤器
+
+SQL 过滤器允许消费者使用 SQL 表达式对消息的属性进行过滤。SQL 表达式可以包含消息的属性和常量，支持 `AND`、`OR`、`=`、`>`、`<` 等操作符。
+
+#### 3.2.1 订阅时的过滤条件
+
+在消费者订阅消息时，可以通过指定 SQL 表达式来过滤消息。例如：
+
+```java
+consumer.subscribe("TopicTest", "a > 10 AND b = 'hello'");
+```
+
+上述代码表示消费者只接收属性 `a` 大于 10 且属性 `b` 等于 `'hello'` 的消息。
+
+#### 3.2.2 源码实现
+
+SQL 过滤器的核心逻辑位于 `org.apache.rocketmq.filter.SQLFilter` 类中。该类实现了 `MessageFilter` 接口，并提供了 `match` 方法用于匹配消息的属性。
+
+```java
+public class SQLFilter implements MessageFilter {
+    @Override
+    public boolean match(MessageExt msg, SubscriptionData subscriptionData) {
+        String sql = subscriptionData.getSubString();
+        Map<String, String> properties = msg.getProperties();
+        // 解析 SQL 表达式并匹配消息属性
+        return SQLParser.parse(sql).evaluate(properties);
+    }
+}
+```
+
+## 4. 实际应用场景
+
+### 4.1 电商系统中的订单消息过滤
+
+在电商系统中，订单消息可能包含多种状态（如“待支付”、“已支付”、“已发货”等）。消费者可以通过 Tag 过滤器只接收特定状态的订单消息，从而减少不必要的消息处理。
+
+```java
+consumer.subscribe("OrderTopic", "待支付 || 已支付");
+```
+
+### 4.2 日志系统中的日志级别过滤
+
+在日志系统中，日志消息可能包含不同的级别（如“INFO”、“WARN”、“ERROR”等）。消费者可以通过 SQL 过滤器只接收特定级别的日志消息。
+
+```java
+consumer.subscribe("LogTopic", "level = 'ERROR'");
+```
+
+## 5. 总结
+
+RocketMQ 的过滤器机制为消息的精准投递提供了强大的支持。通过 Tag 过滤器和 SQL 过滤器，消费者可以根据业务需求灵活地过滤消息，从而提高系统的效率和资源利用率。本文详细分析了 RocketMQ 过滤器的源码实现，并通过实际应用场景展示了其强大的功能。
+
+## 6. 附加资源与练习
+
+- **官方文档**：阅读 [RocketMQ 官方文档](https://rocketmq.apache.org/docs/) 了解更多关于过滤器的详细信息。
+- **练习**：尝试在自己的项目中实现一个自定义的过滤器，并测试其效果。
+
+:::tip
+如果你对 RocketMQ 的其他功能感兴趣，可以继续学习 RocketMQ 的消息存储、消息重试等机制。
+:::

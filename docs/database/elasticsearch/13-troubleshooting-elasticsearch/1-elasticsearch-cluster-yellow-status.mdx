@@ -1,0 +1,189 @@
+---
+title: Elasticsearch 集群黄色状态
+description: 了解Elasticsearch集群黄色状态的含义、原因以及如何排查和解决问题。
+---
+
+# Elasticsearch 集群黄色状态
+
+## 介绍
+
+Elasticsearch集群的健康状态通常分为三种：绿色（Green）、黄色（Yellow）和红色（Red）。其中，**黄色状态**表示集群的主分片（Primary Shard）都已分配，但部分副本分片（Replica Shard）未分配。虽然集群仍然可以正常工作，但黄色状态可能意味着潜在的风险，例如数据冗余不足或节点资源不足。
+
+本文将详细介绍Elasticsearch集群黄色状态的原因、排查方法以及如何解决相关问题。
+
+---
+
+## 什么是黄色状态？
+
+Elasticsearch集群的健康状态由分片的分配情况决定。以下是三种状态的简要说明：
+
+- **绿色（Green）**：所有主分片和副本分片都已分配，集群完全健康。
+- **黄色（Yellow）**：所有主分片已分配，但部分副本分片未分配。
+- **红色（Red）**：部分主分片未分配，集群无法正常工作。
+
+黄色状态通常是由于以下原因之一引起的：
+
+1. **节点数量不足**：副本分片需要分配到不同的节点上，如果节点数量不足，副本分片将无法分配。
+2. **磁盘空间不足**：节点磁盘空间不足可能导致分片无法分配。
+3. **分片分配限制**：集群的分片分配策略可能限制了副本分片的分配。
+
+---
+
+## 如何检查集群状态？
+
+你可以通过以下命令检查集群的健康状态：
+
+```bash
+GET /_cluster/health
+```
+
+输出示例：
+
+```json
+{
+  "cluster_name": "my_cluster",
+  "status": "yellow",
+  "timed_out": false,
+  "number_of_nodes": 2,
+  "number_of_data_nodes": 2,
+  "active_primary_shards": 10,
+  "active_shards": 10,
+  "relocating_shards": 0,
+  "initializing_shards": 0,
+  "unassigned_shards": 5,
+  "delayed_unassigned_shards": 0,
+  "number_of_pending_tasks": 0,
+  "number_of_in_flight_fetch": 0,
+  "task_max_waiting_in_queue_millis": 0,
+  "active_shards_percent_as_number": 66.67
+}
+```
+
+从输出中可以看到，`status` 为 `yellow`，并且 `unassigned_shards` 为 `5`，表示有 5 个分片未分配。
+
+---
+
+## 排查黄色状态的步骤
+
+### 1. 检查未分配的分片
+
+使用以下命令查看未分配的分片及其原因：
+
+```bash
+GET /_cluster/allocation/explain
+```
+
+输出示例：
+
+```json
+{
+  "index": "my_index",
+  "shard": 0,
+  "primary": false,
+  "current_state": "unassigned",
+  "unassigned_info": {
+    "reason": "NODE_LEFT",
+    "details": "node_left[abc123]",
+    "at": "2023-10-01T12:00:00Z"
+  },
+  "can_allocate": "no",
+  "allocate_explanation": "cannot allocate because allocation is not permitted"
+}
+```
+
+从输出中可以看到分片未分配的原因，例如节点离开（`NODE_LEFT`）或分配策略限制。
+
+---
+
+### 2. 检查节点状态
+
+使用以下命令查看集群中的节点状态：
+
+```bash
+GET /_cat/nodes?v
+```
+
+输出示例：
+
+```
+ip         heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+192.168.1.1           45          95  10    0.50    0.40     0.30 di        -      node-1
+192.168.1.2           60          98  15    0.60    0.50     0.40 di        *      node-2
+```
+
+检查节点的资源使用情况（如内存、CPU、磁盘空间），确保没有节点资源不足。
+
+---
+
+### 3. 检查磁盘空间
+
+磁盘空间不足是导致分片未分配的常见原因。使用以下命令查看节点的磁盘使用情况：
+
+```bash
+GET /_cat/allocation?v
+```
+
+输出示例：
+
+```
+shards disk.indices disk.used disk.avail disk.total disk.percent host      ip        node
+     5        10gb      50gb       20gb       70gb           71 192.168.1.1 192.168.1.1 node-1
+     5        15gb      60gb       10gb       70gb           85 192.168.1.2 192.168.1.2 node-2
+```
+
+如果 `disk.percent` 接近 100%，则需要清理磁盘空间或增加磁盘容量。
+
+---
+
+### 4. 调整分片分配策略
+
+如果节点数量不足，可以调整副本分片的数量。例如，将副本分片数从 `1` 调整为 `0`：
+
+```bash
+PUT /my_index/_settings
+{
+  "index.number_of_replicas": 0
+}
+```
+
+:::caution
+减少副本分片数会降低数据的冗余性，请谨慎操作。
+:::
+
+---
+
+## 实际案例
+
+假设你有一个包含 3 个节点的 Elasticsearch 集群，其中一个节点因磁盘空间不足而离线。此时，集群状态变为黄色，因为部分副本分片无法分配到离线节点上。
+
+通过以下步骤解决问题：
+
+1. 使用 `GET /_cluster/health` 确认集群状态为黄色。
+2. 使用 `GET /_cluster/allocation/explain` 查看未分配分片的原因，发现是磁盘空间不足。
+3. 清理离线节点的磁盘空间，或增加磁盘容量。
+4. 重新启动离线节点，等待分片重新分配。
+
+---
+
+## 总结
+
+Elasticsearch集群的黄色状态虽然不会影响集群的正常运行，但可能隐藏着潜在的风险。通过检查未分配的分片、节点状态和磁盘空间，可以快速定位并解决问题。
+
+:::tip
+定期监控集群的健康状态，并确保节点资源充足，可以有效避免黄色状态的发生。
+:::
+
+---
+
+## 附加资源
+
+- [Elasticsearch 官方文档：集群健康状态](https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html)
+- [Elasticsearch 分片分配策略](https://www.elastic.co/guide/en/elasticsearch/reference/current/shards-allocation.html)
+
+---
+
+## 练习
+
+1. 使用 `GET /_cluster/health` 命令检查你的 Elasticsearch 集群状态。
+2. 如果集群状态为黄色，尝试使用 `GET /_cluster/allocation/explain` 查看未分配分片的原因。
+3. 模拟磁盘空间不足的场景，观察集群状态的变化，并尝试解决问题。

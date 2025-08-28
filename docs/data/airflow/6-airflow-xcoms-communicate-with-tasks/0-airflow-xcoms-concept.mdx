@@ -1,0 +1,139 @@
+---
+title: Airflow XComs 概念
+description: "了解 Apache Airflow 中的 XComs 概念，掌握任务间通信的基本原理和实际应用。"
+---
+
+# Airflow XComs 概念
+
+在 Apache Airflow 中，任务（Task）是工作流的基本构建块。每个任务通常执行一个特定的操作，但在复杂的场景中，任务之间可能需要共享数据。这就是 **XComs**（Cross-Communication）的用武之地。XComs 允许任务之间传递小量数据，从而实现任务间的通信。
+
+## 什么是 XComs？
+
+XComs 是 Airflow 中用于任务间通信的机制。它允许一个任务将数据推送到 XComs 存储中，另一个任务可以从该存储中拉取数据。XComs 的名称来源于 "Cross-Communication"，即跨任务通信。
+
+:::note
+XComs 适用于传递小量数据（例如字符串、数字或 JSON 对象）。如果需要传递大量数据，建议使用外部存储（如数据库或文件系统）。
+:::
+
+## XComs 的工作原理
+
+XComs 的核心思想是通过键值对（key-value pairs）存储和检索数据。每个任务可以将数据推送到 XComs 存储中，并指定一个唯一的键（key）。其他任务可以通过该键从 XComs 中拉取数据。
+
+### 数据推送与拉取
+
+- **推送数据**：使用 `xcom_push` 方法将数据推送到 XComs 存储中。
+- **拉取数据**：使用 `xcom_pull` 方法从 XComs 存储中拉取数据。
+
+### 示例代码
+
+以下是一个简单的示例，展示了如何在两个任务之间使用 XComs 传递数据：
+
+```python
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime
+
+def push_data(**kwargs):
+    # 推送数据到 XComs
+    kwargs['ti'].xcom_push(key='my_key', value='Hello from Task 1')
+
+def pull_data(**kwargs):
+    # 从 XComs 拉取数据
+    value = kwargs['ti'].xcom_pull(key='my_key')
+    print(f"Received value: {value}")
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2023, 1, 1),
+}
+
+with DAG('xcom_example', default_args=default_args, schedule_interval=None) as dag:
+    task1 = PythonOperator(
+        task_id='task1',
+        python_callable=push_data,
+        provide_context=True,
+    )
+
+    task2 = PythonOperator(
+        task_id='task2',
+        python_callable=pull_data,
+        provide_context=True,
+    )
+
+    task1 >> task2
+```
+
+在这个示例中：
+- `task1` 推送了一个键为 `my_key`，值为 `'Hello from Task 1'` 的数据到 XComs。
+- `task2` 从 XComs 中拉取该数据并打印出来。
+
+### 输出结果
+
+当运行这个 DAG 时，`task2` 的输出将是：
+
+```
+Received value: Hello from Task 1
+```
+
+## XComs 的实际应用场景
+
+XComs 在以下场景中非常有用：
+
+1. **任务间传递参数**：例如，一个任务生成一个文件名，另一个任务需要读取该文件。
+2. **汇总数据**：多个任务生成部分结果，最后一个任务汇总这些结果。
+3. **条件分支**：根据前一个任务的输出决定后续任务的执行路径。
+
+### 实际案例：汇总多个任务的结果
+
+假设我们有三个任务，每个任务生成一个数字，最后一个任务需要计算这些数字的总和。我们可以使用 XComs 来实现这一需求：
+
+```python
+def generate_number_1(**kwargs):
+    kwargs['ti'].xcom_push(key='number', value=10)
+
+def generate_number_2(**kwargs):
+    kwargs['ti'].xcom_push(key='number', value=20)
+
+def generate_number_3(**kwargs):
+    kwargs['ti'].xcom_push(key='number', value=30)
+
+def sum_numbers(**kwargs):
+    numbers = kwargs['ti'].xcom_pull(key='number', task_ids=['task1', 'task2', 'task3'])
+    total = sum(numbers)
+    print(f"Total sum: {total}")
+
+with DAG('xcom_sum_example', default_args=default_args, schedule_interval=None) as dag:
+    task1 = PythonOperator(task_id='task1', python_callable=generate_number_1, provide_context=True)
+    task2 = PythonOperator(task_id='task2', python_callable=generate_number_2, provide_context=True)
+    task3 = PythonOperator(task_id='task3', python_callable=generate_number_3, provide_context=True)
+    task4 = PythonOperator(task_id='task4', python_callable=sum_numbers, provide_context=True)
+
+    [task1, task2, task3] >> task4
+```
+
+在这个案例中：
+- `task1`、`task2` 和 `task3` 分别生成数字 10、20 和 30，并将它们推送到 XComs。
+- `task4` 从 XComs 中拉取这些数字并计算它们的总和。
+
+### 输出结果
+
+运行这个 DAG 后，`task4` 的输出将是：
+
+```
+Total sum: 60
+```
+
+## 总结
+
+XComs 是 Airflow 中任务间通信的重要机制。它允许任务之间传递小量数据，从而实现复杂的任务协作。通过 `xcom_push` 和 `xcom_pull` 方法，您可以轻松地在任务之间共享数据。
+
+:::tip
+在使用 XComs 时，请确保传递的数据量较小。如果需要传递大量数据，建议使用外部存储（如数据库或文件系统）。
+:::
+
+## 附加资源与练习
+
+- **练习**：尝试修改上述示例，使 `task4` 计算所有任务生成数字的平均值。
+- **进一步学习**：阅读 [Airflow 官方文档](https://airflow.apache.org/docs/) 中关于 XComs 的更多内容，了解其高级用法和限制。
+
+通过掌握 XComs，您将能够更好地设计和实现复杂的 Airflow 工作流！

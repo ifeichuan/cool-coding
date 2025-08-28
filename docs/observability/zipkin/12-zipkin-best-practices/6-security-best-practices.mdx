@@ -1,0 +1,112 @@
+---
+title: Zipkin 安全性最佳实践
+description: 学习如何在使用 Zipkin 分布式追踪系统时实施关键安全措施，保护敏感数据并确保系统安全。
+---
+
+# Zipkin 安全性最佳实践
+
+## 介绍
+
+Zipkin 是一个开源的分布式追踪系统，用于收集和分析微服务架构中的请求链路数据。在生产环境中，确保 Zipkin 的安全性至关重要，因为它可能涉及敏感数据（如请求头、用户 ID 等）。本文将介绍 Zipkin 的安全性最佳实践，帮助您保护数据并减少潜在风险。
+
+## 1. 数据传输加密
+
+### 使用 HTTPS 保护通信
+Zipkin 客户端与服务端之间的通信应通过 HTTPS 加密，防止中间人攻击和数据泄露。
+
+**示例配置（Spring Boot 应用）：**
+```properties
+# 启用 Zipkin 的 HTTPS 端点
+spring.zipkin.base-url=https://your-zipkin-server:9411
+```
+
+:::note
+确保您的 Zipkin 服务器已配置有效的 SSL/TLS 证书（如 Let's Encrypt 或企业级证书）。
+:::
+
+## 2. 身份验证与授权
+
+### 基础认证
+为 Zipkin UI 和 API 启用基础认证，限制未授权访问。
+
+**示例（通过反向代理配置 Nginx）：**
+```nginx
+location /zipkin/ {
+    proxy_pass http://zipkin-server:9411;
+    auth_basic "Zipkin Access";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+}
+```
+
+### 集成 OAuth2/OIDC
+对于企业级部署，建议集成 OAuth2 或 OpenID Connect（如 Keycloak、Auth0）。
+
+## 3. 数据脱敏
+
+### 过滤敏感字段
+确保 Zipkin 不会记录敏感信息（如密码、令牌）。
+
+**示例（通过 Brave 库配置脱敏规则）：**
+```java
+@Bean
+public SpanHandler spanHandler() {
+    return new SpanHandler() {
+        @Override
+        public boolean end(TraceContext context, MutableSpan span, Cause cause) {
+            span.tag("http.headers.authorization", "__REDACTED__");
+            return true;
+        }
+    };
+}
+```
+
+## 4. 网络隔离
+
+### 私有网络部署
+将 Zipkin 服务器部署在内网，仅允许通过 VPN 或跳板机访问。
+
+```mermaid
+graph LR
+    A[客户端应用] -->|HTTPS| B(API 网关)
+    B -->|内部网络| C[Zipkin 服务器]
+    C --> D[(存储: Elasticsearch)]
+```
+
+## 5. 存储安全
+
+### 加密存储数据
+如果使用 Elasticsearch 作为存储后端，启用磁盘加密和访问控制。
+
+**Elasticsearch 配置示例：**
+```yaml
+xpack.security.enabled: true
+xpack.security.transport.ssl.enabled: true
+```
+
+## 实际案例
+
+**场景：** 某电商平台使用 Zipkin 追踪订单流程，但发现日志中泄露了用户的信用卡令牌。
+
+**解决方案：**
+1. 配置脱敏规则过滤 `credit_card_token` 字段。
+2. 将 Zipkin 服务器迁移至私有子网。
+3. 为所有员工启用 RBAC（基于角色的访问控制）。
+
+## 总结
+
+| 实践领域       | 关键措施                          |
+|----------------|-----------------------------------|
+| 传输加密       | 强制使用 HTTPS                    |
+| 访问控制       | 基础认证/OAuth2                   |
+| 数据隐私       | 脱敏敏感字段                      |
+| 基础设施       | 网络隔离 + 存储加密               |
+
+## 延伸资源
+
+- [Zipkin 官方安全文档](https://zipkin.io/security/)
+- [OWASP 分布式追踪安全指南](https://owasp.org/)
+- 练习：在本地部署 Zipkin，尝试配置 Nginx 基础认证并测试访问。
+
+:::warning
+切勿在生产环境中使用默认配置或无保护的 Zipkin 实例！
+:::

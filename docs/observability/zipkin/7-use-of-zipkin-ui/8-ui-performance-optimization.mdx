@@ -1,0 +1,139 @@
+---
+title: UI性能优化
+description: "学习如何优化Zipkin UI的性能，提升用户体验和系统效率。"
+---
+
+# Zipkin UI性能优化
+
+## 介绍
+
+Zipkin UI是分布式追踪系统Zipkin的重要组成部分，它帮助开发者可视化服务间的调用链路。随着追踪数据量的增长，UI性能可能成为瓶颈。本章将介绍如何通过配置优化、查询调优和前端技巧提升Zipkin UI的响应速度。
+
+:::note 为什么需要优化？
+当处理百万级span数据时，未经优化的UI可能导致：
+- 页面加载时间超过10秒
+- 浏览器内存占用超过1GB
+- 频繁的卡顿或无响应
+:::
+
+## 核心优化策略
+
+### 1. 数据采样配置
+
+在服务端配置采样率，减少不必要的数据收集：
+
+```java
+// Spring Boot示例
+@Bean
+public Sampler alwaysSampler() {
+    // 生产环境建议使用RateLimitingSampler
+    return Sampler.create(0.1); // 10%的采样率
+}
+```
+
+**效果对比**：
+- 采样前：每日1000万span，存储大小约15GB
+- 采样后(10%)：每日100万span，存储大小约1.5GB
+
+### 2. 索引优化
+
+确保Zipkin使用合适的存储后端并建立索引：
+
+```sql
+-- Cassandra示例
+CREATE TABLE IF NOT EXISTS zipkin.span_by_service (
+    service_name text,
+    bucket int,
+    span_name text,
+    span_id bigint,
+    PRIMARY KEY ((service_name, bucket), span_name, span_id)
+) WITH compaction = {'class': 'TimeWindowCompactionStrategy'};
+```
+
+### 3. 前端缓存策略
+
+利用浏览器缓存机制，在`zipkin-ui`配置中：
+
+```javascript
+// zipkin-ui/config.js
+module.exports = {
+  cacheControl: {
+    staticAssets: {
+      maxAge: 31536000 // 1年缓存
+    }
+  }
+};
+```
+
+## 实际案例
+
+### 电商平台优化实践
+
+**问题现象**：
+- 大促期间UI完全不可用
+- 单个查询返回超过50MB数据
+
+**解决方案**：
+
+1. 实施分层采样：
+   ```mermaid
+   graph TD
+     A[前端服务] -->|100%采样| B(订单服务)
+     B -->|50%采样| C[支付服务]
+     C -->|10%采样| D[库存服务]
+   ```
+
+2. 添加查询时间限制：
+   ```bash
+   # 启动参数
+   ZIPKIN_QUERY_TIMEOUT=5000 # 5秒超时
+   ```
+
+3. 结果：
+   - P99延迟从12s降至1.2s
+   - 内存使用减少70%
+
+## 高级技巧
+
+### 追踪聚合
+
+使用`zipkin-dependencies`生成服务依赖关系，避免实时计算：
+
+```bash
+STORAGE_TYPE=cassandra \
+java -jar zipkin-dependencies.jar
+```
+
+### 查询优化公式
+
+合理设置查询时间范围：
+```
+推荐最大时间范围 = 平均请求量 × 采样率 / 存储分片数
+```
+
+例如：
+- 日均1000万请求
+- 10%采样率
+- 24小时分片
+```
+1000万 × 0.1 / 24 ≈ 41,666 spans/小时
+```
+
+## 总结
+
+关键优化点回顾：
+
+1. **数据源头**：合理设置采样率
+2. **存储层面**：正确配置索引和压缩
+3. **查询层面**：限制时间范围和结果大小
+4. **展示层面**：启用缓存和聚合数据
+
+## 延伸学习
+
+- [Zipkin官方性能调优指南](https://zipkin.io/pages/tuning.html)
+- 《分布式系统观测》第三章：追踪数据优化
+- 实践练习：使用Docker部署压力测试环境，比较不同配置下的UI响应时间
+
+:::tip 小测验
+当你的Zipkin UI在查询时返回`504 Gateway Timeout`，应该优先检查哪个配置项？
+:::

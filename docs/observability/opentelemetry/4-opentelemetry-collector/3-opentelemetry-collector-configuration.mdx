@@ -1,0 +1,170 @@
+---
+title: OpenTelemetry Collector配置
+description: 学习如何配置OpenTelemetry Collector来收集、处理和导出遥测数据。本指南适合初学者，包含基础概念、配置示例和实际应用场景。
+---
+
+# OpenTelemetry Collector配置
+
+## 介绍
+
+OpenTelemetry Collector是一个用于接收、处理和导出遥测数据（如指标、日志和跟踪）的组件。它是OpenTelemetry生态系统中的核心工具，帮助开发者统一管理观测数据。本文将介绍如何配置OpenTelemetry Collector，包括基础配置、组件定义和实际案例。
+
+## 基础概念
+
+OpenTelemetry Collector的配置由三个主要部分组成：
+1. **Receivers**：负责接收数据（如从应用程序或服务）。
+2. **Processors**：对接收到的数据进行处理（如过滤、转换）。
+3. **Exporters**：将处理后的数据发送到目标系统（如Prometheus、Jaeger）。
+
+配置文件通常为YAML格式，默认命名为 `otel-collector-config.yaml`。
+
+## 配置文件结构
+
+以下是一个最小化的配置示例：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+
+exporters:
+  logging:
+    logLevel: debug
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]
+```
+
+### 逐部分解释
+1. **Receivers**：配置了一个OTLP（OpenTelemetry Protocol）接收器，支持gRPC和HTTP协议。
+2. **Processors**：使用 `batch` 处理器将数据批量发送以减少开销。
+3. **Exporters**：将数据输出到日志（`logging`），并设置日志级别为 `debug`。
+4. **Service**：定义了一个名为 `traces` 的管道，将上述组件串联起来。
+
+:::tip
+使用 `logging` 导出器时，数据会打印到Collector的日志中，适合调试但不适合生产环境。
+:::
+
+## 实际配置案例
+
+### 场景：将跟踪数据发送到Jaeger
+假设你需要将应用程序的跟踪数据发送到Jaeger后端。配置如下：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+exporters:
+  jaeger:
+    endpoint: "jaeger-all-in-one:14250"
+    insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger]
+```
+
+### 场景：添加处理逻辑
+如果需要过滤掉某些跟踪数据（如健康检查请求），可以添加 `filter` 处理器：
+
+```yaml
+processors:
+  filter:
+    traces:
+      exclude:
+        match_type: strict
+        services: ["health-check"]
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [filter, batch]
+      exporters: [jaeger]
+```
+
+## 高级配置
+
+### 多管道配置
+Collector支持为不同类型的数据（如指标、日志、跟踪）配置独立的管道。例如：
+
+```yaml
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger]
+    metrics:
+      receivers: [otlp]
+      exporters: [prometheus]
+```
+
+### 扩展配置
+以下是一个包含资源检测和动态标签的完整示例：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+  resource:
+    attributes:
+      - key: environment
+        value: production
+        action: upsert
+  batch:
+
+exporters:
+  logging:
+    logLevel: debug
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [resource, batch]
+      exporters: [logging]
+```
+
+## 调试配置
+
+如果配置出错，Collector会显示详细的错误信息。可以通过以下命令测试配置文件的语法：
+
+```bash
+otelcol validate --config=otel-collector-config.yaml
+```
+
+:::caution
+确保YAML文件的缩进正确，否则会导致解析失败。
+:::
+
+## 总结
+
+本文介绍了OpenTelemetry Collector的基础配置方法，包括接收器、处理器和导出器的定义，以及如何组合它们构建数据管道。通过实际案例，你可以快速上手配置自己的Collector。
+
+### 下一步
+1. 尝试将Collector与你的应用程序集成。
+2. 探索更多处理器（如 `memory_limiter`、`spanmetrics`）。
+3. 阅读[官方文档](https://opentelemetry.io/docs/collector/)了解更多高级功能。
+
+```mermaid
+flowchart LR
+    A[应用程序] -->|OTLP| B(Receiver)
+    B --> C(Processor)
+    C --> D(Exporter)
+    D --> E[后端系统]

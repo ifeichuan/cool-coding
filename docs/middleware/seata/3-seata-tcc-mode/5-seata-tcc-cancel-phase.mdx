@@ -1,0 +1,105 @@
+---
+title: Seata TCC Cancel阶段
+description: 了解Seata TCC模式中的Cancel阶段，掌握其工作原理、代码实现及实际应用场景。
+---
+
+# Seata TCC Cancel阶段
+
+## 介绍
+
+在分布式事务中，Seata的TCC（Try-Confirm-Cancel）模式是一种常见的解决方案。TCC模式通过将事务分为三个阶段（Try、Confirm、Cancel）来确保事务的最终一致性。本文将重点介绍TCC模式中的**Cancel阶段**，帮助初学者理解其工作原理、代码实现及实际应用场景。
+
+### 什么是TCC Cancel阶段？
+
+TCC Cancel阶段是TCC模式的第三个阶段，用于在事务失败或需要回滚时，撤销Try阶段所做的操作。Cancel阶段的目的是确保事务的原子性，即要么所有操作都成功，要么所有操作都回滚。
+
+## TCC Cancel阶段的工作原理
+
+在TCC模式中，Cancel阶段的触发条件通常是以下两种情况之一：
+
+1. **事务失败**：在Try阶段或Confirm阶段发生错误，导致事务无法继续。
+2. **事务回滚**：由于某些业务逻辑或外部条件，事务需要主动回滚。
+
+Cancel阶段的主要任务是撤销Try阶段所做的操作，确保系统状态恢复到事务开始之前的状态。
+
+### 示例场景
+
+假设我们有一个电商系统，用户下单时需要扣减库存并生成订单。在TCC模式中，Try阶段会预留库存并生成订单记录。如果事务失败或需要回滚，Cancel阶段将释放预留的库存并删除订单记录。
+
+## 代码示例
+
+以下是一个简单的TCC Cancel阶段的代码示例，使用Java语言实现。
+
+```java
+public interface OrderService {
+    @TwoPhaseBusinessAction(name = "createOrder", commitMethod = "confirm", rollbackMethod = "cancel")
+    boolean tryCreateOrder(BusinessActionContext context, String orderId, int quantity);
+
+    boolean confirm(BusinessActionContext context);
+
+    boolean cancel(BusinessActionContext context);
+}
+
+@Service
+public class OrderServiceImpl implements OrderService {
+
+    @Override
+    public boolean tryCreateOrder(BusinessActionContext context, String orderId, int quantity) {
+        // Try阶段：预留库存并生成订单记录
+        boolean success = inventoryService.reserveStock(orderId, quantity);
+        if (success) {
+            orderDao.createOrder(orderId, quantity);
+        }
+        return success;
+    }
+
+    @Override
+    public boolean confirm(BusinessActionContext context) {
+        // Confirm阶段：确认订单，实际扣减库存
+        String orderId = (String) context.getActionContext("orderId");
+        int quantity = (int) context.getActionContext("quantity");
+        return inventoryService.confirmStock(orderId, quantity);
+    }
+
+    @Override
+    public boolean cancel(BusinessActionContext context) {
+        // Cancel阶段：释放预留库存并删除订单记录
+        String orderId = (String) context.getActionContext("orderId");
+        int quantity = (int) context.getActionContext("quantity");
+        inventoryService.releaseStock(orderId, quantity);
+        orderDao.deleteOrder(orderId);
+        return true;
+    }
+}
+```
+
+### 代码解释
+
+1. **tryCreateOrder**：在Try阶段，我们预留库存并生成订单记录。如果预留成功，返回`true`，否则返回`false`。
+2. **confirm**：在Confirm阶段，我们确认订单并实际扣减库存。
+3. **cancel**：在Cancel阶段，我们释放预留的库存并删除订单记录。
+
+## 实际应用场景
+
+### 电商系统
+
+在电商系统中，用户下单时可能会遇到库存不足、支付失败等问题。此时，TCC Cancel阶段可以确保库存和订单数据的一致性，避免因事务失败而导致的数据不一致问题。
+
+### 金融系统
+
+在金融系统中，转账操作需要确保资金的原子性。如果转账失败，TCC Cancel阶段可以撤销已扣减的金额，确保账户余额的正确性。
+
+## 总结
+
+TCC Cancel阶段是Seata TCC模式中至关重要的一部分，用于在事务失败或需要回滚时撤销Try阶段的操作。通过理解Cancel阶段的工作原理和代码实现，开发者可以更好地设计和实现分布式事务，确保系统的最终一致性。
+
+## 附加资源
+
+- [Seata官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务解决方案](https://dubbo.apache.org/zh/docs/v2.7/user/examples/distributed-transaction/)
+
+## 练习
+
+1. 尝试在本地环境中实现一个简单的TCC模式，包括Try、Confirm和Cancel阶段。
+2. 模拟事务失败的情况，观察Cancel阶段的执行过程。
+3. 思考在实际项目中，哪些场景适合使用TCC模式，并设计相应的业务逻辑。

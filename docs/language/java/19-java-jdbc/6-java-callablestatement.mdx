@@ -1,0 +1,226 @@
+---
+title: Java CallableStatement
+description: "Java JDBC中CallableStatement的详细介绍，包括如何使用存储过程，如何处理输入参数和输出参数，以及实际应用案例。"
+---
+
+# Java CallableStatement
+
+在JDBC编程中，`CallableStatement`是一个特殊的接口，专门用于执行数据库存储过程。相比于`Statement`和`PreparedStatement`，`CallableStatement`更加强大，因为它不仅能执行SQL语句，还能调用数据库中预先编译好的存储过程，并且支持输入参数和输出参数。
+
+## 什么是存储过程？
+
+存储过程是一组预先编译好的SQL语句，它们被存储在数据库中，可以被应用程序多次调用。使用存储过程可以提高性能、增强安全性、减少网络流量，并且便于代码维护。
+
+## CallableStatement的基本使用
+
+### 创建CallableStatement对象
+
+要创建一个`CallableStatement`对象，首先需要获取到数据库连接，然后通过`prepareCall()`方法创建：
+
+```java
+Connection connection = DriverManager.getConnection(url, user, password);
+CallableStatement callableStatement = connection.prepareCall("{call procedure_name(?, ?)}");
+```
+
+### 调用语法
+
+`CallableStatement`的调用语法遵循JDBC标准的转义语法：
+
+- 调用无返回值的存储过程：`{call procedure_name(?, ?)}`
+- 调用有返回值的存储过程：`{? = call procedure_name(?, ?)}`
+- 调用函数：`{? = call function_name(?, ?)}`
+
+## 参数处理
+
+`CallableStatement`可以处理三种类型的参数：
+
+1. **IN参数**：输入参数，向存储过程传递值
+2. **OUT参数**：输出参数，从存储过程获取值
+3. **INOUT参数**：既是输入又是输出参数
+
+### 设置IN参数
+
+```java
+callableStatement.setInt(1, 100); // 设置第一个参数为整数100
+callableStatement.setString(2, "测试"); // 设置第二个参数为字符串"测试"
+```
+
+### 注册OUT参数
+
+```java
+callableStatement.registerOutParameter(3, java.sql.Types.INTEGER); // 注册第三个参数为整数输出参数
+```
+
+### 获取OUT参数值
+
+```java
+int result = callableStatement.getInt(3); // 获取第三个输出参数的值
+```
+
+## 完整示例
+
+以下是一个完整的示例，展示了如何调用一个存储过程，该存储过程接收两个输入参数并返回一个输出参数：
+
+假设我们有一个名为`calculate_sum`的存储过程，它接收两个整数并返回它们的和：
+
+```sql
+CREATE PROCEDURE calculate_sum (IN num1 INT, IN num2 INT, OUT result INT)
+BEGIN
+    SET result = num1 + num2;
+END
+```
+
+下面是调用此存储过程的Java代码：
+
+```java
+import java.sql.*;
+
+public class CallableStatementExample {
+    public static void main(String[] args) {
+        String url = "jdbc:mysql://localhost:3306/testdb";
+        String user = "username";
+        String password = "password";
+        
+        try (Connection conn = DriverManager.getConnection(url, user, password);
+             CallableStatement stmt = conn.prepareCall("{call calculate_sum(?, ?, ?)}")) {
+            
+            // 设置输入参数
+            stmt.setInt(1, 5);
+            stmt.setInt(2, 10);
+            
+            // 注册输出参数
+            stmt.registerOutParameter(3, Types.INTEGER);
+            
+            // 执行存储过程
+            stmt.execute();
+            
+            // 获取输出参数
+            int sum = stmt.getInt(3);
+            
+            System.out.println("5 + 10 = " + sum);
+            
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+输出：
+```
+5 + 10 = 15
+```
+
+## CallableStatement的生命周期
+
+与其他Statement对象类似，`CallableStatement`的生命周期也包括创建、设置参数、执行和关闭几个阶段：
+
+```mermaid
+flowchart LR
+    A[创建连接] --> B[创建CallableStatement]
+    B --> C[设置IN参数]
+    C --> D[注册OUT参数]
+    D --> E[执行]
+    E --> F[获取OUT参数]
+    F --> G[关闭资源]
+```
+
+## CallableStatement与PreparedStatement的区别
+
+虽然两者都支持参数化查询，但有以下区别：
+
+1. `CallableStatement`专门用于调用存储过程，而`PreparedStatement`主要用于执行参数化SQL语句
+2. `CallableStatement`支持输入和输出参数，`PreparedStatement`只支持输入参数
+3. `CallableStatement`是`PreparedStatement`的子接口，继承了它的所有功能
+
+## 实际应用案例
+
+### 案例1：银行转账系统
+
+在银行系统中，转账是一个需要保证原子性的操作。使用存储过程可以确保转账操作的完整性：
+
+```java
+public void transferMoney(int fromAccount, int toAccount, double amount) {
+    try (Connection conn = getConnection();
+         CallableStatement stmt = conn.prepareCall("{call transfer_money(?, ?, ?, ?)}")) {
+        
+        stmt.setInt(1, fromAccount);
+        stmt.setInt(2, toAccount);
+        stmt.setDouble(3, amount);
+        stmt.registerOutParameter(4, Types.INTEGER); // 0表示成功，其他值表示错误码
+        
+        stmt.execute();
+        
+        int result = stmt.getInt(4);
+        if (result == 0) {
+            System.out.println("转账成功！");
+        } else {
+            System.out.println("转账失败，错误码：" + result);
+        }
+        
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+}
+```
+
+### 案例2：批量数据处理
+
+当需要处理大量数据时，在数据库端执行操作比在应用程序中更高效：
+
+```java
+public void batchProcessData(Date startDate, Date endDate) {
+    try (Connection conn = getConnection();
+         CallableStatement stmt = conn.prepareCall("{call process_data(?, ?, ?)}")) {
+        
+        stmt.setDate(1, new java.sql.Date(startDate.getTime()));
+        stmt.setDate(2, new java.sql.Date(endDate.getTime()));
+        stmt.registerOutParameter(3, Types.INTEGER); // 处理的记录数
+        
+        stmt.execute();
+        
+        int processedRecords = stmt.getInt(3);
+        System.out.println("成功处理了 " + processedRecords + " 条记录");
+        
+    } catch (SQLException e) {
+        e.printStackTrace();
+    }
+}
+```
+
+## 最佳实践
+
+:::tip
+使用`CallableStatement`时，请记住以下几点：
+1. 总是使用参数化查询，而不是字符串拼接
+2. 使用try-with-resources语句自动关闭资源
+3. 适当处理异常
+4. 为提高性能，考虑重用`CallableStatement`对象
+:::
+
+:::caution
+避免常见的错误：
+1. 忘记注册输出参数
+2. 参数索引不匹配
+3. 参数类型不匹配
+:::
+
+## 总结
+
+`CallableStatement`是JDBC中一个强大的接口，专门用于调用数据库存储过程。它支持输入参数和输出参数，能够处理复杂的数据库操作。使用`CallableStatement`可以提高应用程序的性能、安全性和可维护性。
+
+在实际开发中，当需要执行复杂的业务逻辑、批量处理数据或者需要确保事务完整性时，使用存储过程和`CallableStatement`是一个很好的选择。
+
+## 练习
+
+1. 创建一个存储过程，计算给定两个日期之间的天数，并使用`CallableStatement`调用它。
+2. 实现一个用户认证系统，使用存储过程检查用户名和密码，并返回用户角色。
+3. 创建一个批量数据导入的存储过程，接受一个XML或JSON字符串作为输入，解析并插入到多个表中。
+
+## 附加资源
+
+- [Oracle官方JDBC文档](https://docs.oracle.com/javase/8/docs/technotes/guides/jdbc/)
+- [MySQL存储过程编程](https://dev.mysql.com/doc/refman/8.0/en/stored-programs-defining.html)
+- [PostgreSQL存储过程](https://www.postgresql.org/docs/current/sql-createprocedure.html)
+
+通过掌握`CallableStatement`，你将能够更有效地利用数据库资源，编写更高效、更安全的数据库应用程序。

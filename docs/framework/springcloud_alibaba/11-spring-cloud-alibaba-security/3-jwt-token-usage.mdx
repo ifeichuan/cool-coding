@@ -1,0 +1,171 @@
+---
+title: JWT令牌使用
+description: 了解JWT（JSON Web Token）的基本概念、工作原理及其在Spring Cloud Alibaba中的实际应用。
+---
+
+# JWT令牌使用
+
+## 介绍
+
+JWT（JSON Web Token）是一种开放标准（RFC 7519），用于在网络应用环境间安全地传递声明（claims）。JWT通常用于身份验证和信息交换，特别是在微服务架构中。JWT由三部分组成：头部（Header）、载荷（Payload）和签名（Signature）。每个部分都是经过Base64编码的JSON对象。
+
+### JWT的结构
+
+JWT的结构如下：
+
+```
+Header.Payload.Signature
+```
+
+- **Header**：包含令牌的类型（通常是JWT）和所使用的签名算法（如HMAC SHA256或RSA）。
+- **Payload**：包含声明（claims）。声明是关于实体（通常是用户）和其他数据的声明。
+- **Signature**：用于验证消息在传递过程中没有被篡改。
+
+## JWT的工作原理
+
+1. **用户登录**：用户通过用户名和密码登录系统。
+2. **生成JWT**：服务器验证用户凭据后，生成一个JWT并返回给客户端。
+3. **存储JWT**：客户端（通常是浏览器）将JWT存储在本地存储或Cookie中。
+4. **发送JWT**：客户端在每次请求时，将JWT放在HTTP请求的`Authorization`头中发送给服务器。
+5. **验证JWT**：服务器验证JWT的签名，并提取其中的信息以确定用户的身份和权限。
+
+## 在Spring Cloud Alibaba中使用JWT
+
+在Spring Cloud Alibaba中，JWT通常用于微服务之间的身份验证和授权。以下是一个简单的示例，展示如何在Spring Boot应用中使用JWT。
+
+### 1. 添加依赖
+
+首先，在`pom.xml`中添加JWT相关的依赖：
+
+```xml
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt</artifactId>
+    <version>0.9.1</version>
+</dependency>
+```
+
+### 2. 创建JWT工具类
+
+接下来，创建一个工具类来生成和验证JWT：
+
+```java
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.Claims;
+import java.util.Date;
+
+public class JwtUtil {
+
+    private static final String SECRET_KEY = "your-secret-key";
+    private static final long EXPIRATION_TIME = 864_000_000; // 10 days
+
+    public static String generateToken(String username) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+                .signWith(SignatureAlgorithm.HS512, SECRET_KEY)
+                .compact();
+    }
+
+    public static Claims parseToken(String token) {
+        return Jwts.parser()
+                .setSigningKey(SECRET_KEY)
+                .parseClaimsJws(token)
+                .getBody();
+    }
+}
+```
+
+### 3. 使用JWT进行身份验证
+
+在Spring Boot应用中，可以使用JWT进行身份验证。以下是一个简单的控制器示例：
+
+```java
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class AuthController {
+
+    @PostMapping("/login")
+    public String login(@RequestBody User user) {
+        // 验证用户凭据
+        if (authenticate(user)) {
+            return JwtUtil.generateToken(user.getUsername());
+        } else {
+            throw new RuntimeException("Invalid credentials");
+        }
+    }
+
+    private boolean authenticate(User user) {
+        // 实际应用中，这里应该验证用户名和密码
+        return "admin".equals(user.getUsername()) && "password".equals(user.getPassword());
+    }
+}
+```
+
+### 4. 验证JWT
+
+在每次请求时，服务器需要验证JWT的有效性。可以通过Spring Security或自定义过滤器来实现：
+
+```java
+import org.springframework.web.filter.OncePerRequestFilter;
+import javax.servlet.FilterChain;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
+public class JwtFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        String token = request.getHeader("Authorization");
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7);
+            try {
+                Claims claims = JwtUtil.parseToken(token);
+                // 将用户信息存储在请求中
+                request.setAttribute("username", claims.getSubject());
+            } catch (Exception e) {
+                response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid token");
+                return;
+            }
+        }
+        filterChain.doFilter(request, response);
+    }
+}
+```
+
+## 实际应用场景
+
+### 微服务间的身份验证
+
+在微服务架构中，JWT可以用于服务间的身份验证。例如，当一个服务调用另一个服务时，可以在请求头中携带JWT，接收方服务可以验证JWT的有效性并提取用户信息。
+
+### 单点登录（SSO）
+
+JWT也可以用于实现单点登录（SSO）。用户在一个系统中登录后，系统生成一个JWT，用户可以使用该JWT访问其他相关系统，而无需再次登录。
+
+## 总结
+
+JWT是一种轻量级、自包含的令牌，非常适合用于分布式系统中的身份验证和信息交换。通过使用JWT，可以简化身份验证流程，并提高系统的安全性。
+
+## 附加资源
+
+- [JWT官方文档](https://jwt.io/)
+- [Spring Security JWT](https://spring.io/projects/spring-security)
+- [微服务架构中的JWT使用](https://microservices.io/patterns/security/jwt.html)
+
+## 练习
+
+1. 尝试在Spring Boot应用中实现JWT的生成和验证。
+2. 使用JWT实现一个简单的微服务间的身份验证流程。
+3. 研究JWT的签名算法，并尝试使用不同的算法生成和验证JWT。
+
+:::tip
+在实际生产环境中，务必保护好JWT的密钥，并定期更新密钥以提高安全性。
+:::

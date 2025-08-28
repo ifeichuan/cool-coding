@@ -1,0 +1,145 @@
+---
+title: 互操作性配置
+description: 学习如何配置Jaeger与OpenTelemetry的互操作性，实现分布式追踪系统的无缝集成。
+---
+
+# Jaeger 与OpenTelemetry互操作性配置
+
+## 介绍
+
+在现代分布式系统中，**Jaeger**和**OpenTelemetry**是两个广泛使用的开源工具，用于实现分布式追踪。虽然它们可以独立工作，但通过配置互操作性，开发者可以结合两者的优势：OpenTelemetry的标准化数据采集能力与Jaeger强大的可视化分析功能。
+
+本指南将逐步介绍如何配置两者的互操作性，包括协议转换、数据导出和常见场景的解决方案。
+
+---
+
+## 核心概念
+
+### 1. OpenTelemetry Collector的作用
+OpenTelemetry Collector是一个中间组件，负责接收、处理和导出遥测数据。它支持多种协议（如OTLP、Jaeger Thrift等），是互操作性的关键枢纽。
+
+```mermaid
+graph LR
+    A[应用] -->|OTLP| B[OpenTelemetry Collector]
+    B -->|Jaeger协议| C[Jaeger后端]
+```
+
+### 2. 协议兼容性
+Jaeger原生支持以下协议：
+- Jaeger Thrift (HTTP/UD)
+- Jaeger Protobuf (gRPC)
+
+OpenTelemetry默认使用**OTLP**（OpenTelemetry Protocol），但Collector可以通过扩展接收/导出Jaeger格式的数据。
+
+---
+
+## 配置步骤
+
+### 步骤1：部署OpenTelemetry Collector
+安装Collector并配置`receivers`和`exporters`，以下为示例配置（`otel-collector-config.yaml`）：
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+  jaeger:
+    protocols:
+      grpc:
+      thrift_http:
+
+exporters:
+  jaeger:
+    endpoint: "jaeger-all-in-one:14250"
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp, jaeger]
+      exporters: [jaeger]
+```
+
+:::note
+- `receivers`：定义数据接收方式（同时支持OTLP和Jaeger原生协议）。
+- `exporters`：将数据转发到Jaeger后端。
+:::
+
+### 步骤2：配置应用程序
+以Go应用为例，配置OpenTelemetry SDK将数据发送到Collector：
+
+```go
+package main
+
+import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/trace"
+)
+
+func initTracer() {
+	exporter, _ := otlptracegrpc.New(
+		context.Background(),
+		otlptracegrpc.WithEndpoint("otel-collector:4317"),
+		otlptracegrpc.WithInsecure(),
+	)
+
+	tp := trace.NewTracerProvider(
+		trace.WithBatcher(exporter),
+	)
+	otel.SetTracerProvider(tp)
+}
+```
+
+---
+
+## 实际案例
+
+### 场景：混合部署环境
+假设你的系统中：
+- 部分服务使用Jaeger SDK直接上报数据。
+- 新服务采用OpenTelemetry SDK。
+
+通过Collector的统一接入：
+1. Jaeger服务通过`thrift_http`协议发送到Collector的`14268`端口。
+2. OpenTelemetry服务通过OTLP发送到`4317`端口。
+3. Collector将所有数据转换为Jaeger格式，转发到Jaeger后端。
+
+---
+
+## 常见问题
+
+### Q1: 数据在Jaeger UI中缺失字段？
+确保在Collector中配置`processors`补充资源属性：
+```yaml
+processors:
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "production"
+        action: upsert
+```
+
+### Q2: 如何验证配置？
+使用Jaeger的`/metrics`端点检查数据接收状态：
+```bash
+curl http://jaeger-all-in-one:14269/metrics
+```
+
+---
+
+## 总结
+
+通过OpenTelemetry Collector的桥梁作用，Jaeger和OpenTelemetry可以实现无缝协作。关键步骤包括：
+1. 部署Collector并配置多协议支持。
+2. 应用程序统一接入Collector。
+3. 使用处理器增强数据一致性。
+
+---
+
+## 扩展资源
+- [OpenTelemetry Collector官方文档](https://opentelemetry.io/docs/collector/)
+- [Jaeger协议兼容性矩阵](https://www.jaegertracing.io/docs/latest/apis/)

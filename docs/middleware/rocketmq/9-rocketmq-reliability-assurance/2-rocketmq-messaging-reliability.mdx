@@ -1,0 +1,183 @@
+---
+title: RocketMQ 消息发送可靠性
+description: 了解RocketMQ如何保障消息发送的可靠性，包括消息发送机制、重试策略以及实际应用场景。
+---
+
+# RocketMQ 消息发送可靠性
+
+RocketMQ 是一款高性能、高可用的分布式消息中间件，广泛应用于大规模分布式系统中。消息发送的可靠性是 RocketMQ 的核心特性之一，它确保了消息在发送过程中不会丢失，并且能够被正确投递到目标队列。本文将详细介绍 RocketMQ 如何保障消息发送的可靠性，并通过代码示例和实际案例帮助你更好地理解这一概念。
+
+## 1. 消息发送机制
+
+在 RocketMQ 中，消息发送的可靠性主要通过以下几个机制来保障：
+
+### 1.1 同步发送
+
+同步发送是指消息发送方在发送消息后，会等待 RocketMQ 的响应，确保消息已经被成功接收并存储。如果发送失败，发送方会收到异常信息，并可以根据需要进行重试。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("producer_group");
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("TopicTest", "TagA", "Hello RocketMQ".getBytes());
+SendResult sendResult = producer.send(msg);
+System.out.println("消息发送结果: " + sendResult);
+
+producer.shutdown();
+```
+
+:::note
+同步发送适用于对消息可靠性要求较高的场景，但会增加发送方的等待时间。
+:::
+
+### 1.2 异步发送
+
+异步发送是指消息发送方在发送消息后，不会等待 RocketMQ 的响应，而是通过回调函数来处理发送结果。这种方式可以提高发送方的吞吐量，但需要处理发送失败的情况。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("producer_group");
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("TopicTest", "TagA", "Hello RocketMQ".getBytes());
+producer.send(msg, new SendCallback() {
+    @Override
+    public void onSuccess(SendResult sendResult) {
+        System.out.println("消息发送成功: " + sendResult);
+    }
+
+    @Override
+    public void onException(Throwable e) {
+        System.out.println("消息发送失败: " + e.getMessage());
+    }
+});
+
+producer.shutdown();
+```
+
+:::tip
+异步发送适用于对消息发送速度要求较高的场景，但需要处理发送失败的情况。
+:::
+
+### 1.3 单向发送
+
+单向发送是指消息发送方在发送消息后，不会等待 RocketMQ 的响应，也不会处理发送结果。这种方式适用于对消息可靠性要求不高的场景。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("producer_group");
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("TopicTest", "TagA", "Hello RocketMQ".getBytes());
+producer.sendOneway(msg);
+
+producer.shutdown();
+```
+
+:::caution
+单向发送适用于对消息可靠性要求不高的场景，但无法保证消息一定被成功接收。
+:::
+
+## 2. 重试策略
+
+RocketMQ 提供了多种重试策略，以确保消息在发送失败时能够被重新发送。默认情况下，RocketMQ 会进行 3 次重试，每次重试的间隔时间会逐渐增加。
+
+### 2.1 同步发送重试
+
+在同步发送模式下，如果消息发送失败，RocketMQ 会自动进行重试，直到达到最大重试次数或发送成功。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("producer_group");
+producer.setRetryTimesWhenSendFailed(5); // 设置最大重试次数为 5
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("TopicTest", "TagA", "Hello RocketMQ".getBytes());
+SendResult sendResult = producer.send(msg);
+System.out.println("消息发送结果: " + sendResult);
+
+producer.shutdown();
+```
+
+### 2.2 异步发送重试
+
+在异步发送模式下，如果消息发送失败，RocketMQ 会自动进行重试，直到达到最大重试次数或发送成功。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("producer_group");
+producer.setRetryTimesWhenSendAsyncFailed(5); // 设置最大重试次数为 5
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("TopicTest", "TagA", "Hello RocketMQ".getBytes());
+producer.send(msg, new SendCallback() {
+    @Override
+    public void onSuccess(SendResult sendResult) {
+        System.out.println("消息发送成功: " + sendResult);
+    }
+
+    @Override
+    public void onException(Throwable e) {
+        System.out.println("消息发送失败: " + e.getMessage());
+    }
+});
+
+producer.shutdown();
+```
+
+## 3. 实际应用场景
+
+### 3.1 电商订单系统
+
+在电商系统中，订单的创建和支付是两个关键步骤。为了确保订单消息能够被可靠地发送到支付系统，可以使用 RocketMQ 的同步发送模式，并结合重试策略，确保消息不会丢失。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("order_producer_group");
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("OrderTopic", "CreateOrder", orderInfo.getBytes());
+SendResult sendResult = producer.send(msg);
+System.out.println("订单消息发送结果: " + sendResult);
+
+producer.shutdown();
+```
+
+### 3.2 日志收集系统
+
+在日志收集系统中，日志消息的发送速度非常重要。为了提高发送速度，可以使用 RocketMQ 的异步发送模式，并结合回调函数处理发送失败的情况。
+
+```java
+DefaultMQProducer producer = new DefaultMQProducer("log_producer_group");
+producer.setNamesrvAddr("localhost:9876");
+producer.start();
+
+Message msg = new Message("LogTopic", "Info", logMessage.getBytes());
+producer.send(msg, new SendCallback() {
+    @Override
+    public void onSuccess(SendResult sendResult) {
+        System.out.println("日志消息发送成功: " + sendResult);
+    }
+
+    @Override
+    public void onException(Throwable e) {
+        System.out.println("日志消息发送失败: " + e.getMessage());
+    }
+});
+
+producer.shutdown();
+```
+
+## 4. 总结
+
+RocketMQ 通过同步发送、异步发送和单向发送三种模式，以及灵活的重试策略，确保了消息发送的可靠性。在实际应用中，可以根据业务需求选择合适的发送模式和重试策略，以确保消息能够被可靠地发送和接收。
+
+## 5. 附加资源与练习
+
+- **官方文档**: [RocketMQ 官方文档](https://rocketmq.apache.org/docs/)
+- **练习**: 尝试在自己的项目中集成 RocketMQ，并使用不同的发送模式和重试策略，观察消息发送的效果。
+
+:::warning
+在实际生产环境中，建议对消息发送的可靠性进行充分的测试，以确保系统能够稳定运行。
+:::

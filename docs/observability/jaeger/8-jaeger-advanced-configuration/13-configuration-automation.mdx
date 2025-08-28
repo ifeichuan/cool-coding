@@ -1,0 +1,149 @@
+---
+title: Jaeger 高级配置 - 配置自动化
+description: 学习如何通过自动化工具和脚本简化Jaeger的配置管理，提升分布式追踪系统的部署效率。
+---
+
+# 配置自动化
+
+## 介绍
+
+在分布式系统中，Jaeger作为一款流行的追踪工具，其配置可能涉及多个组件（如Agent、Collector、Query等）。手动配置不仅耗时，还容易出错。**配置自动化**通过脚本或工具（如Ansible、Terraform、Kubernetes Operator）实现一键部署和动态调整，尤其适合微服务架构下的规模化需求。
+
+:::tip 为什么需要自动化？
+- **一致性**：避免环境差异导致的配置错误<br />
+- **效率**：快速部署和更新配置<br />
+- **可维护性**：版本控制友好的配置变更记录
+:::
+
+---
+
+## 基础自动化方法
+
+### 1. 环境变量与配置文件
+
+Jaeger支持通过环境变量或YAML文件配置参数。以下是一个`jaeger-agent`的配置片段：
+
+```yaml
+# jaeger-agent-config.yaml
+agent:
+  http-server:
+    host-port: "0.0.0.0:5778"
+  reporters:
+    grpc:
+      host-port: "jaeger-collector:14250"
+```
+
+通过环境变量覆盖配置：
+```bash
+JAEGER_AGENT_HTTP_SERVER_HOST_PORT=0.0.0.0:5778 \
+JAEGER_REPORTERS_GRPC_HOST_PORT=jaeger-collector:14250 \
+./jaeger-agent
+```
+
+### 2. 脚本自动化
+
+使用Shell脚本批量设置环境变量并启动服务：
+
+```bash
+#!/bin/bash
+# deploy-jaeger.sh
+export JAEGER_SERVICE_NAME="order-service"
+export JAEGER_AGENT_HOST="jaeger-agent"
+./your-app --jaeger-config ./config.yaml
+```
+
+---
+
+## 进阶工具集成
+
+### 使用Terraform部署Jaeger
+
+以下示例展示如何用Terraform在AWS ECS上部署Jaeger Collector：
+
+```hcl
+resource "aws_ecs_task_definition" "jaeger_collector" {
+  family = "jaeger-collector"
+  container_definitions = jsonencode([{
+    name  = "jaeger-collector"
+    image = "jaegertracing/jaeger-collector:latest"
+    portMappings = [{ containerPort = 14250 }]
+    environment = [
+      { name = "SPAN_STORAGE_TYPE", value = "elasticsearch" },
+      { name = "ES_SERVER_URLS", value = "http://elasticsearch:9200" }
+    ]
+  }])
+}
+```
+
+### Kubernetes Operator
+
+Jaeger Operator可自动管理Kubernetes集群中的Jaeger实例。创建自定义资源：
+
+```yaml
+apiVersion: jaegertracing.io/v1
+kind: Jaeger
+metadata:
+  name: simplified
+spec:
+  strategy: allInOne
+  storage:
+    type: memory
+    options:
+      memory:
+        max-traces: 100000
+```
+
+---
+
+## 实际案例：CI/CD中的自动化配置
+
+### 场景描述
+在持续集成流程中，为每个测试环境动态生成Jaeger配置，确保隔离性。
+
+### 解决方案
+1. **生成配置模板**：
+   ```python
+   # generate_config.py
+   import yaml
+   config = {
+       "agent": {
+           "service_name": f"test-{os.getenv('BUILD_ID')}",
+           "endpoint": "jaeger-agent:6831"
+       }
+   }
+   with open('jaeger-config.yaml', 'w') as f:
+       yaml.dump(config, f)
+   ```
+
+2. **集成到Pipeline**：
+   ```groovy
+   // Jenkinsfile
+   stage('Deploy Jaeger') {
+     steps {
+       sh 'python generate_config.py'
+       sh 'kubectl apply -f jaeger-config.yaml'
+     }
+   }
+   ```
+
+---
+
+## 总结
+
+配置自动化能显著提升Jaeger的管理效率，关键步骤包括：
+1. 选择工具（脚本/Terraform/K8s Operator）<br />
+2. 将配置参数模板化<br />
+3. 集成到现有部署流程中
+
+:::warning 注意
+自动化前需充分测试，避免配置错误导致追踪数据丢失。
+:::
+
+## 延伸练习
+1. 尝试用Ansible编写一个部署Jaeger Agent的Playbook<br />
+2. 在本地Minikube中试用Jaeger Operator<br />
+3. 比较环境变量与配置文件加载的优先级差异
+
+## 资源推荐
+- [Jaeger官方文档 - 配置参考](https://www.jaegertracing.io/docs/latest/)
+- 《Infrastructure as Code》by Kief Morris

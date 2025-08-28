@@ -1,0 +1,127 @@
+---
+title: STM32 低功耗定时器
+description: 了解STM32低功耗定时器的基本原理、配置方法以及实际应用场景，帮助初学者掌握如何在低功耗模式下使用定时器。
+---
+
+## 介绍
+
+STM32微控制器广泛应用于嵌入式系统中，尤其是在需要低功耗的场景中。为了实现低功耗，STM32提供了多种低功耗模式，例如睡眠模式、停止模式和待机模式。在这些模式下，CPU和外设的功耗被显著降低，但某些任务仍然需要定时器来唤醒系统或执行周期性操作。这就是**低功耗定时器（Low-Power Timer, LPTIM）**的用武之地。
+
+低功耗定时器是一种专门为低功耗场景设计的定时器，能够在极低功耗模式下运行，同时提供精确的定时功能。它可以在系统进入低功耗模式后继续工作，并在需要时唤醒系统。
+
+## 低功耗定时器的特点
+
+- **低功耗运行**：LPTIM可以在低功耗模式下运行，消耗极少的电流。
+- **独立时钟源**：LPTIM可以使用内部低速时钟（LSI）或外部低速时钟（LSE），确保在低功耗模式下仍能正常工作。
+- **多种工作模式**：支持单次触发、连续触发和PWM输出等多种模式。
+- **唤醒功能**：可以在定时器溢出或比较匹配时唤醒系统。
+
+## 低功耗定时器的配置
+
+### 1. 时钟配置
+
+LPTIM的时钟源可以是内部低速时钟（LSI）或外部低速时钟（LSE）。通常，LSE的精度更高，适合需要高精度的应用场景。
+
+```c
+// 启用LSE时钟
+RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_LSE;
+RCC_OscInitStruct.LSEState = RCC_LSE_ON;
+HAL_RCC_OscConfig(&RCC_OscInitStruct);
+
+// 选择LSE作为LPTIM的时钟源
+RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
+PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_LPTIM1;
+PeriphClkInit.Lptim1ClockSelection = RCC_LPTIM1CLKSOURCE_LSE;
+HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit);
+```
+
+### 2. 初始化LPTIM
+
+在配置时钟源后，需要初始化LPTIM并设置其工作模式。
+
+```c
+LPTIM_HandleTypeDef hlptim1;
+
+hlptim1.Instance = LPTIM1;
+hlptim1.Init.Clock.Source = LPTIM_CLOCKSOURCE_APBCLOCK_LPOSC;
+hlptim1.Init.Clock.Prescaler = LPTIM_PRESCALER_DIV1;
+hlptim1.Init.Trigger.Source = LPTIM_TRIGSOURCE_SOFTWARE;
+hlptim1.Init.OutputPolarity = LPTIM_OUTPUTPOLARITY_HIGH;
+hlptim1.Init.UpdateMode = LPTIM_UPDATE_IMMEDIATE;
+hlptim1.Init.CounterSource = LPTIM_COUNTERSOURCE_INTERNAL;
+
+if (HAL_LPTIM_Init(&hlptim1) != HAL_OK) {
+    // 初始化错误处理
+}
+```
+
+### 3. 启动定时器
+
+初始化完成后，可以启动定时器并设置定时周期。
+
+```c
+// 设置定时周期为1秒
+uint32_t period = 1000; // 1秒
+HAL_LPTIM_Counter_Start_IT(&hlptim1, period);
+```
+
+### 4. 中断处理
+
+当定时器溢出时，会触发中断，可以在中断服务程序中进行相应的处理。
+
+```c
+void LPTIM1_IRQHandler(void) {
+    HAL_LPTIM_IRQHandler(&hlptim1);
+}
+
+void HAL_LPTIM_AutoReloadMatchCallback(LPTIM_HandleTypeDef *hlptim) {
+    // 定时器溢出处理
+    // 例如：唤醒系统或执行任务
+}
+```
+
+## 实际应用场景
+
+### 1. 周期性唤醒系统
+
+在低功耗模式下，系统可以通过LPTIM周期性唤醒，执行一些简单的任务，例如采集传感器数据或发送心跳包。这种方式可以显著降低系统的平均功耗。
+
+```c
+// 进入停止模式
+HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
+// 在LPTIM中断中唤醒系统
+void HAL_LPTIM_AutoReloadMatchCallback(LPTIM_HandleTypeDef *hlptim) {
+    // 唤醒系统
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+}
+```
+
+### 2. 低功耗PWM输出
+
+LPTIM还可以用于生成低功耗的PWM信号，控制LED亮度或驱动电机。由于LPTIM在低功耗模式下运行，这种方式非常适合电池供电的设备。
+
+```c
+// 配置LPTIM为PWM模式
+HAL_LPTIM_PWM_Start(&hlptim1, period, pulse);
+
+// 在需要时调整PWM占空比
+HAL_LPTIM_PWM_Start(&hlptim1, period, new_pulse);
+```
+
+## 总结
+
+STM32的低功耗定时器（LPTIM）是低功耗应用中的关键组件，能够在极低功耗模式下提供精确的定时功能。通过合理配置LPTIM，可以实现周期性唤醒系统、低功耗PWM输出等功能，从而显著降低系统的功耗。
+
+:::tip
+在实际应用中，建议根据具体需求选择合适的时钟源和工作模式，并优化定时器的配置，以进一步降低功耗。
+:::
+
+## 附加资源与练习
+
+- **练习1**：尝试配置LPTIM，使其每隔5秒唤醒系统一次，并打印一条消息。
+- **练习2**：使用LPTIM生成一个占空比为50%的PWM信号，控制LED的亮度。
+- **参考文档**：[STM32L4系列参考手册](https://www.st.com/resource/en/reference_manual/dm00151940-stm32l4-series-advanced-arm-based-32-bit-mcus-stmicroelectronics.pdf)中的低功耗定时器章节。
+
+通过以上内容的学习和实践，您将能够掌握STM32低功耗定时器的基本使用方法，并能够在实际项目中应用这些知识。

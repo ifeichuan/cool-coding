@@ -1,0 +1,135 @@
+---
+title: SkyWalking 后端服务优化
+description: 学习如何通过配置调整、存储优化和集群部署提升SkyWalking后端服务性能的完整指南
+---
+
+# SkyWalking 后端服务优化
+
+## 引言
+
+SkyWalking作为分布式系统的APM（应用性能监控）工具，其后端服务的性能直接影响监控数据的收集、存储和查询效率。本章将详细介绍如何通过配置优化、存储策略调整和集群部署等方式提升SkyWalking后端服务的性能表现。
+
+## 核心优化方向
+
+### 1. 配置参数调优
+
+#### 1.1 核心线程池配置
+
+修改`application.yml`中的线程池参数以适应高负载场景：
+
+```yaml
+core:
+  default:
+    # 处理请求的线程数
+    restExecutorThreadPoolSize: ${SW_CORE_REST_EXECUTOR_THREAD_POOL_SIZE:8} 
+    # 异步持久化线程数  
+    persistentExecutorThreadPoolSize: ${SW_CORE_PERSISTENT_EXECUTOR_THREAD_POOL_SIZE:4}
+```
+
+:::tip 建议值
+- 生产环境建议`restExecutorThreadPoolSize`设置为CPU核心数的1.5-2倍
+- `persistentExecutorThreadPoolSize`建议设置为物理磁盘数量的整数倍
+:::
+
+#### 1.2 缓存配置优化
+
+```yaml
+storage:
+  # 指标数据缓存时间(分钟)
+  metricsDataTTL: ${SW_STORAGE_METRICS_DATA_TTL:90}
+  # 原始数据缓存时间(分钟)
+  recordDataTTL: ${SW_STORAGE_RECORD_DATA_TTL:7}
+  # 每批次处理的最大记录数
+  maxSizeOfBatchWrite: ${SW_STORAGE_MAX_SIZE_OF_BATCH_WRITE:5000}
+```
+
+### 2. 存储层优化
+
+#### 2.1 Elasticsearch优化方案
+
+```yaml
+storage:
+  elasticsearch:
+    # 索引分片数设置
+    indexShardsNumber: ${SW_STORAGE_ES_INDEX_SHARDS_NUMBER:2}
+    # 索引副本数设置  
+    indexReplicasNumber: ${SW_STORAGE_ES_INDEX_REPLICAS_NUMBER:1}
+    # 批量处理配置
+    bulkActions: ${SW_STORAGE_ES_BULK_ACTIONS:5000}
+    bulkSizeMB: ${SW_STORAGE_ES_BULK_SIZE_MB:50}
+```
+
+:::note 分片策略
+- 单个分片大小建议控制在30-50GB
+- 分片数 = 每日数据量(GB) / 40GB
+:::
+
+#### 2.2 索引生命周期管理
+
+```mermaid
+graph LR
+    A[metrics-1day] -->|Rollover| B[metrics-7days]
+    B -->|Rollover| C[metrics-30days]
+    C -->|Delete| D[Expired]
+```
+
+### 3. 集群部署优化
+
+#### 3.1 节点角色分离
+
+```yaml
+core:
+  # 配置为混合节点
+  role: ${SW_CORE_ROLE:Mixed}
+  # 或指定为独立角色
+  # role: ${SW_CORE_ROLE:Receiver/Aggregator}
+```
+
+:::warning 注意
+生产环境建议将Receiver和Aggregator角色分离，Receiver节点负责数据接收，Aggregator节点负责数据聚合
+:::
+
+#### 3.2 负载均衡配置
+
+```yaml
+receiver-sharing-server:
+  # 接收器端口配置
+  restHost: ${SW_RECEIVER_SHARING_SERVER_REST_HOST:0.0.0.0}
+  restPort: ${SW_RECEIVER_SHARING_SERVER_REST_PORT:12800}
+  restContextPath: ${SW_RECEIVER_SHARING_SERVER_REST_CONTEXT_PATH:/}
+```
+
+## 实战案例
+
+### 电商平台优化实践
+
+某电商平台在双11期间SkyWalking出现性能瓶颈，通过以下优化措施提升性能：
+
+1. 将`restExecutorThreadPoolSize`从默认4调整为16
+2. 配置Elasticsearch索引生命周期策略：
+   - 热节点保留3天数据
+   - 温节点保留7天数据
+3. 部署独立的Aggregator节点处理聚合计算
+
+优化后指标：
+- P99延迟从1200ms降至350ms
+- 数据丢失率从5%降至0.1%
+
+## 总结
+
+SkyWalking后端优化需要从多个维度综合考虑：
+
+1. **资源配置**：合理分配CPU、内存和线程资源
+2. **存储策略**：根据数据保留需求设计存储方案
+3. **集群架构**：根据业务规模选择合适的部署模式
+
+## 延伸学习
+
+- 使用`jstack`和`jstat`监控OAP服务JVM状态
+- 通过SkyWalking的`/debugging`端点获取内部指标
+- 定期检查Elasticsearch的`_cat/indices?v`接口监控索引健康状态
+
+推荐练习：
+1. 在测试环境模拟高负载场景，调整线程池参数观察性能变化
+2. 为不同业务线配置独立的存储策略
+3. 实践Receiver和Aggregator角色的分离部署

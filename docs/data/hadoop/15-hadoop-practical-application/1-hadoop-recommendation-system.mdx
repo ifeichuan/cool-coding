@@ -1,0 +1,154 @@
+---
+title: Hadoop 推荐系统
+description: 了解如何使用Hadoop构建推荐系统，从基础概念到实际应用，适合初学者学习。
+---
+
+# Hadoop 推荐系统
+
+推荐系统是现代互联网应用中不可或缺的一部分，它通过分析用户行为数据，为用户提供个性化的推荐内容。Hadoop作为一个强大的分布式计算框架，能够处理大规模数据，因此非常适合用于构建推荐系统。本文将逐步介绍如何使用Hadoop构建一个简单的推荐系统。
+
+## 什么是推荐系统？
+
+推荐系统是一种信息过滤系统，它通过分析用户的历史行为、偏好和其他相关数据，预测用户可能感兴趣的内容或产品。常见的推荐系统应用包括电商网站的商品推荐、视频平台的视频推荐、音乐平台的歌曲推荐等。
+
+## 推荐系统的基本类型
+
+推荐系统通常分为以下几种类型：
+
+1. **基于内容的推荐**：根据用户过去喜欢的物品的特征，推荐具有相似特征的物品。
+2. **协同过滤推荐**：根据用户的行为数据（如评分、点击等），找到与目标用户相似的其他用户，推荐这些用户喜欢的物品。
+3. **混合推荐**：结合基于内容的推荐和协同过滤推荐，以提高推荐的准确性。
+
+在本文中，我们将重点介绍基于协同过滤的推荐系统。
+
+## Hadoop 在推荐系统中的应用
+
+Hadoop的核心组件包括HDFS（分布式文件系统）和MapReduce（分布式计算框架）。HDFS用于存储大规模数据，而MapReduce用于处理这些数据。在推荐系统中，Hadoop可以帮助我们处理用户行为数据，计算用户之间的相似度，并生成推荐结果。
+
+### 1. 数据准备
+
+假设我们有一个用户-物品评分数据集，格式如下：
+
+```
+用户ID,物品ID,评分
+1,101,5
+1,102,3
+2,101,4
+2,103,5
+3,102,2
+3,103,4
+```
+
+我们将这个数据集存储在HDFS中，路径为 `/input/ratings.csv`。
+
+### 2. 计算用户相似度
+
+协同过滤的核心是计算用户之间的相似度。常用的相似度计算方法包括余弦相似度和皮尔逊相关系数。在这里，我们使用余弦相似度。
+
+#### MapReduce任务：计算用户相似度
+
+```java
+// Mapper
+public class UserSimilarityMapper extends Mapper<LongWritable, Text, Text, Text> {
+    public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        String[] tokens = value.toString().split(",");
+        String userId = tokens[0];
+        String itemId = tokens[1];
+        String rating = tokens[2];
+        context.write(new Text(itemId), new Text(userId + ":" + rating));
+    }
+}
+
+// Reducer
+public class UserSimilarityReducer extends Reducer<Text, Text, Text, Text> {
+    public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+        Map<String, Double> userRatings = new HashMap<>();
+        for (Text value : values) {
+            String[] tokens = value.toString().split(":");
+            userRatings.put(tokens[0], Double.parseDouble(tokens[1]));
+        }
+        // 计算用户之间的相似度
+        for (Map.Entry<String, Double> entry1 : userRatings.entrySet()) {
+            for (Map.Entry<String, Double> entry2 : userRatings.entrySet()) {
+                if (!entry1.getKey().equals(entry2.getKey())) {
+                    double similarity = entry1.getValue() * entry2.getValue();
+                    context.write(new Text(entry1.getKey() + "," + entry2.getKey()), new Text(String.valueOf(similarity)));
+                }
+            }
+        }
+    }
+}
+```
+
+### 3. 生成推荐结果
+
+在计算出用户之间的相似度后，我们可以根据相似度高的用户喜欢的物品，为目标用户生成推荐列表。
+
+#### MapReduce任务：生成推荐结果
+
+```java
+// Mapper
+public class RecommendationMapper extends Mapper<LongWritable, Text, Text, Text> {
+    public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        String[] tokens = value.toString().split(",");
+        String user1 = tokens[0];
+        String user2 = tokens[1];
+        String similarity = tokens[2];
+        context.write(new Text(user1), new Text(user2 + ":" + similarity));
+    }
+}
+
+// Reducer
+public class RecommendationReducer extends Reducer<Text, Text, Text, Text> {
+    public void reduce(Text key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
+        Map<String, Double> similarUsers = new HashMap<>();
+        for (Text value : values) {
+            String[] tokens = value.toString().split(":");
+            similarUsers.put(tokens[0], Double.parseDouble(tokens[1]));
+        }
+        // 根据相似度生成推荐列表
+        List<String> recommendations = new ArrayList<>();
+        for (Map.Entry<String, Double> entry : similarUsers.entrySet()) {
+            if (entry.getValue() > 0.5) { // 假设相似度大于0.5的用户推荐
+                recommendations.add(entry.getKey());
+            }
+        }
+        context.write(key, new Text(String.join(",", recommendations)));
+    }
+}
+```
+
+### 4. 实际案例
+
+假设我们有一个电商网站，用户对商品的评分数据如下：
+
+```
+用户ID,商品ID,评分
+1,101,5
+1,102,3
+2,101,4
+2,103,5
+3,102,2
+3,103,4
+```
+
+通过上述MapReduce任务，我们可以计算出用户之间的相似度，并为每个用户生成推荐列表。例如，用户1可能会收到用户2喜欢的商品103的推荐。
+
+### 5. 总结
+
+通过本文，我们了解了如何使用Hadoop构建一个简单的推荐系统。我们从数据准备开始，逐步讲解了如何计算用户相似度并生成推荐结果。Hadoop的分布式计算能力使得处理大规模用户行为数据成为可能，从而为构建高效的推荐系统提供了强大的支持。
+
+### 6. 附加资源与练习
+
+- **附加资源**：
+  - [Hadoop官方文档](https://hadoop.apache.org/docs/current/)
+  - [MapReduce编程指南](https://hadoop.apache.org/docs/current/hadoop-mapreduce-client/hadoop-mapreduce-client-core/MapReduceTutorial.html)
+
+- **练习**：
+  1. 尝试使用不同的相似度计算方法（如皮尔逊相关系数）来改进推荐系统。
+  2. 扩展数据集，增加更多的用户和物品，观察推荐结果的变化。
+  3. 尝试将基于内容的推荐与协同过滤结合，构建一个混合推荐系统。
+
+:::tip
+在实际应用中，推荐系统通常会结合多种算法和技术，以提高推荐的准确性和多样性。Hadoop只是其中的一部分，你还可以结合机器学习算法（如矩阵分解）来进一步提升推荐效果。
+:::

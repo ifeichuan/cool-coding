@@ -1,0 +1,108 @@
+---
+title: 高基数问题解决
+description: 了解 Prometheus 中的高基数问题及其解决方法，帮助初学者优化监控系统的性能。
+---
+
+# 高基数问题解决
+
+在 Prometheus 中，**高基数问题**是指由于标签（labels）的取值过多，导致时间序列（time series）数量急剧增加，从而影响系统性能的现象。高基数问题不仅会占用大量存储空间，还会导致查询性能下降，甚至可能使 Prometheus 崩溃。本文将详细介绍高基数问题的成因、影响以及解决方法。
+
+## 什么是高基数问题？
+
+Prometheus 使用标签（labels）来区分不同的时间序列。每个标签的取值组合都会生成一个新的时间序列。例如，以下是一个简单的指标：
+
+```promql
+http_requests_total{method="GET", status="200", endpoint="/api/v1/users"}
+```
+
+在这个例子中，`method`、`status` 和 `endpoint` 是标签，它们的取值组合决定了时间序列的唯一性。如果这些标签的取值过多（例如 `endpoint` 标签包含了用户 ID），就会导致时间序列数量爆炸式增长，这就是高基数问题。
+
+### 高基数问题的影响
+
+- **存储压力**：每个时间序列都需要存储其数据点，高基数会导致存储需求急剧增加。
+- **查询性能下降**：查询大量时间序列时，Prometheus 需要处理更多的数据，导致查询变慢。
+- **系统崩溃风险**：如果时间序列数量过多，Prometheus 可能会因为内存不足而崩溃。
+
+## 如何解决高基数问题？
+
+### 1. 减少标签的基数
+
+最直接的解决方法是通过减少标签的基数来降低时间序列的数量。以下是一些常见的策略：
+
+- **避免使用高基数字段作为标签**：例如，避免将用户 ID、IP 地址等高基数字段作为标签。
+- **聚合标签**：将高基数字段聚合为低基数字段。例如，将用户 ID 聚合为用户类型（如 `admin`、`user` 等）。
+
+```promql
+# 不推荐：使用用户 ID 作为标签
+http_requests_total{user_id="12345"}
+
+# 推荐：使用用户类型作为标签
+http_requests_total{user_type="admin"}
+```
+
+### 2. 使用 `rate()` 和 `increase()` 函数
+
+Prometheus 提供了 `rate()` 和 `increase()` 函数，用于计算时间序列的变化率。这些函数可以帮助减少时间序列的数量，因为它们会将原始数据点聚合为更少的数据点。
+
+```promql
+# 计算 HTTP 请求的速率
+rate(http_requests_total[5m])
+```
+
+### 3. 使用 Recording Rules
+
+Recording Rules 允许你预先计算并存储常用的查询结果，从而减少查询时的计算量。通过使用 Recording Rules，你可以将高基数的查询结果聚合为低基数的结果。
+
+```yaml
+# prometheus.yml 配置示例
+rule_files:
+  - recording_rules.yml
+```
+
+```yaml
+# recording_rules.yml 示例
+groups:
+  - name: example
+    rules:
+      - record: http_requests_total:rate5m
+        expr: rate(http_requests_total[5m])
+```
+
+### 4. 使用 `histogram_quantile()` 函数
+
+如果你使用直方图（Histogram）来记录指标，可以使用 `histogram_quantile()` 函数来计算分位数，而不需要存储所有的时间序列。
+
+```promql
+# 计算 HTTP 请求延迟的 99 分位数
+histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+```
+
+## 实际案例
+
+假设你正在监控一个电子商务网站，并且你使用用户 ID 作为标签来记录每个用户的购买行为。由于用户数量庞大，这会导致高基数问题。为了解决这个问题，你可以将用户 ID 聚合为用户类型（如 `new_user`、`returning_user` 等），从而减少时间序列的数量。
+
+```promql
+# 不推荐：使用用户 ID 作为标签
+purchases_total{user_id="12345"}
+
+# 推荐：使用用户类型作为标签
+purchases_total{user_type="returning_user"}
+```
+
+## 总结
+
+高基数问题是 Prometheus 中常见的性能瓶颈之一。通过减少标签的基数、使用 `rate()` 和 `increase()` 函数、配置 Recording Rules 以及合理使用直方图，你可以有效地解决高基数问题，从而优化 Prometheus 的性能。
+
+## 附加资源
+
+- [Prometheus 官方文档](https://prometheus.io/docs/)
+- [Prometheus 最佳实践](https://prometheus.io/docs/practices/naming/)
+- [Prometheus Recording Rules 指南](https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/)
+
+## 练习
+
+1. 在你的 Prometheus 实例中，尝试使用 `rate()` 函数计算某个指标的变化率。
+2. 配置一个 Recording Rule，将高基数的查询结果聚合为低基数的结果。
+3. 分析你的监控指标，找出可能导致高基数问题的标签，并提出优化方案。
+
+通过以上步骤，你将能够更好地理解和解决 Prometheus 中的高基数问题。

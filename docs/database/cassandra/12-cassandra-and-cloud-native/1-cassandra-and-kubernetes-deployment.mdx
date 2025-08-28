@@ -1,0 +1,178 @@
+---
+title: Cassandra 与Kubernetes部署
+description: "了解如何在Kubernetes上部署Apache Cassandra，并探索其在云原生环境中的应用。"
+---
+
+## 介绍
+
+Apache Cassandra 是一个高度可扩展的分布式 NoSQL 数据库，广泛用于处理大规模数据。Kubernetes 是一个开源的容器编排平台，用于自动化应用程序的部署、扩展和管理。将 Cassandra 部署在 Kubernetes 上，可以充分利用 Kubernetes 的弹性、自动化和云原生特性，从而简化 Cassandra 集群的管理和扩展。
+
+在本教程中，我们将逐步讲解如何在 Kubernetes 上部署 Cassandra，并探讨其在实际应用中的优势。
+
+## 准备工作
+
+在开始之前，请确保你已经具备以下条件：
+
+1. 一个运行中的 Kubernetes 集群。
+2. 安装并配置好 `kubectl` 命令行工具。
+3. 对 Kubernetes 的基本概念（如 Pod、Service、StatefulSet 等）有一定的了解。
+
+## 部署 Cassandra
+
+### 1. 创建命名空间
+
+首先，我们为 Cassandra 创建一个独立的命名空间，以便更好地管理资源。
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cassandra
+```
+
+使用以下命令创建命名空间：
+
+```bash
+kubectl apply -f cassandra-namespace.yaml
+```
+
+### 2. 创建 StatefulSet
+
+Cassandra 是一个有状态的应用，因此我们使用 Kubernetes 的 `StatefulSet` 来管理 Cassandra 的 Pod。以下是一个简单的 StatefulSet 配置示例：
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra
+  namespace: cassandra
+spec:
+  serviceName: cassandra
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cassandra
+  template:
+    metadata:
+      labels:
+        app: cassandra
+    spec:
+      containers:
+      - name: cassandra
+        image: cassandra:4.0
+        ports:
+        - containerPort: 7000
+          name: intra-node
+        - containerPort: 7001
+          name: tls-intra-node
+        - containerPort: 7199
+          name: jmx
+        - containerPort: 9042
+          name: cql
+        env:
+        - name: CASSANDRA_SEEDS
+          value: "cassandra-0.cassandra.cassandra.svc.cluster.local"
+        volumeMounts:
+        - name: cassandra-data
+          mountPath: /var/lib/cassandra
+  volumeClaimTemplates:
+  - metadata:
+      name: cassandra-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+```
+
+使用以下命令创建 StatefulSet：
+
+```bash
+kubectl apply -f cassandra-statefulset.yaml
+```
+
+### 3. 创建 Service
+
+为了让 Cassandra 集群中的节点能够相互通信，我们需要创建一个 `Service`。以下是一个简单的 Service 配置示例：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra
+  namespace: cassandra
+spec:
+  clusterIP: None
+  ports:
+  - port: 7000
+    name: intra-node
+  - port: 7001
+    name: tls-intra-node
+  - port: 7199
+    name: jmx
+  - port: 9042
+    name: cql
+  selector:
+    app: cassandra
+```
+
+使用以下命令创建 Service：
+
+```bash
+kubectl apply -f cassandra-service.yaml
+```
+
+### 4. 验证部署
+
+部署完成后，你可以使用以下命令查看 Cassandra Pod 的状态：
+
+```bash
+kubectl get pods -n cassandra
+```
+
+你应该会看到类似以下的输出：
+
+```
+NAME          READY   STATUS    RESTARTS   AGE
+cassandra-0   1/1     Running   0          5m
+cassandra-1   1/1     Running   0          4m
+cassandra-2   1/1     Running   0          3m
+```
+
+### 5. 连接到 Cassandra
+
+你可以使用 `kubectl exec` 命令进入其中一个 Pod，并使用 `cqlsh` 连接到 Cassandra 集群：
+
+```bash
+kubectl exec -it cassandra-0 -n cassandra -- cqlsh
+```
+
+在 `cqlsh` 中，你可以执行 CQL 命令来创建表、插入数据等。
+
+## 实际应用场景
+
+### 场景：分布式日志存储
+
+假设你正在构建一个分布式日志系统，需要存储大量的日志数据。Cassandra 的高可用性和可扩展性使其成为存储日志数据的理想选择。通过将 Cassandra 部署在 Kubernetes 上，你可以轻松地扩展 Cassandra 集群以应对不断增长的日志数据量。
+
+### 场景：实时数据分析
+
+Cassandra 也可以用于实时数据分析场景。例如，你可以将实时生成的事件数据存储在 Cassandra 中，并使用 Spark 或其他分析工具进行实时分析。Kubernetes 可以帮助你动态调整 Cassandra 集群的规模，以应对不同的工作负载。
+
+## 总结
+
+在本教程中，我们学习了如何在 Kubernetes 上部署 Apache Cassandra。通过使用 Kubernetes 的 StatefulSet 和 Service，我们可以轻松地管理 Cassandra 集群，并充分利用 Kubernetes 的弹性、自动化和云原生特性。
+
+## 附加资源
+
+- [Apache Cassandra 官方文档](https://cassandra.apache.org/doc/latest/)
+- [Kubernetes 官方文档](https://kubernetes.io/docs/home/)
+- [Cassandra on Kubernetes: Best Practices](https://www.datastax.com/blog/cassandra-kubernetes-best-practices)
+
+## 练习
+
+1. 尝试扩展 Cassandra 集群的规模，将 `replicas` 增加到 5 个，并观察 Kubernetes 如何自动创建新的 Pod。
+2. 使用 `cqlsh` 创建一个简单的表，并插入一些数据，然后查询这些数据。
+3. 探索如何在 Kubernetes 上配置 Cassandra 的持久化存储，以确保数据在 Pod 重启后不会丢失。
+
+希望本教程对你有所帮助，祝你在 Cassandra 和 Kubernetes 的学习之旅中取得成功！

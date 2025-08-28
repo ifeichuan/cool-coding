@@ -1,0 +1,182 @@
+---
+title: Go 读写锁(RWMutex)
+description: 了解Go语言中的读写锁(RWMutex)，掌握如何通过读写锁实现并发安全的数据访问。
+---
+
+# Go 读写锁(RWMutex)
+
+在并发编程中，多个goroutine同时访问共享资源时，可能会导致数据竞争（data race）问题。为了解决这个问题，Go语言提供了多种同步机制，其中`sync.RWMutex`（读写锁）是一种高效的并发控制工具。本文将详细介绍`RWMutex`的概念、使用方法以及实际应用场景。
+
+## 什么是读写锁？
+
+`RWMutex`是Go语言标准库`sync`包中的一种锁机制，它允许多个读操作同时进行，但写操作是独占的。这意味着：
+
+- 当没有写操作时，多个goroutine可以同时获取读锁。
+- 当有写操作时，所有读操作和其他写操作都会被阻塞，直到写操作完成。
+
+这种机制非常适合读多写少的场景，因为它可以显著提高并发性能。
+
+## RWMutex的基本用法
+
+`RWMutex`提供了四个主要方法：
+
+- `RLock()`：获取读锁。
+- `RUnlock()`：释放读锁。
+- `Lock()`：获取写锁。
+- `Unlock()`：释放写锁。
+
+### 代码示例
+
+以下是一个简单的示例，展示了如何使用`RWMutex`来保护一个共享的计数器：
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+    "time"
+)
+
+var (
+    counter int
+    rwMutex sync.RWMutex
+)
+
+func readCounter() {
+    rwMutex.RLock()
+    defer rwMutex.RUnlock()
+    fmt.Println("Read counter:", counter)
+}
+
+func writeCounter() {
+    rwMutex.Lock()
+    defer rwMutex.Unlock()
+    counter++
+    fmt.Println("Write counter:", counter)
+}
+
+func main() {
+    for i := 0; i < 5; i++ {
+        go readCounter()
+    }
+
+    for i := 0; i < 2; i++ {
+        go writeCounter()
+    }
+
+    time.Sleep(time.Second)
+}
+```
+
+**输出：**
+```
+Read counter: 0
+Read counter: 0
+Read counter: 0
+Read counter: 0
+Read counter: 0
+Write counter: 1
+Write counter: 2
+```
+
+在这个示例中，多个`readCounter` goroutine可以同时读取`counter`的值，而`writeCounter` goroutine在修改`counter`时会独占锁。
+
+## RWMutex的实际应用场景
+
+`RWMutex`非常适合用于读多写少的场景，例如：
+
+- **缓存系统**：缓存中的数据通常会被频繁读取，但很少被修改。使用`RWMutex`可以允许多个goroutine同时读取缓存，而写操作则会独占锁。
+- **配置管理**：在配置管理中，配置数据可能会被多个goroutine读取，但只有在配置更新时才需要写操作。
+
+### 实际案例：缓存系统
+
+以下是一个简单的缓存系统示例，展示了如何使用`RWMutex`来保护缓存数据：
+
+```go
+package main
+
+import (
+    "fmt"
+    "sync"
+    "time"
+)
+
+type Cache struct {
+    data map[string]string
+    rwMutex sync.RWMutex
+}
+
+func NewCache() *Cache {
+    return &Cache{
+        data: make(map[string]string),
+    }
+}
+
+func (c *Cache) Get(key string) (string, bool) {
+    c.rwMutex.RLock()
+    defer c.rwMutex.RUnlock()
+    value, exists := c.data[key]
+    return value, exists
+}
+
+func (c *Cache) Set(key, value string) {
+    c.rwMutex.Lock()
+    defer c.rwMutex.Unlock()
+    c.data[key] = value
+}
+
+func main() {
+    cache := NewCache()
+
+    // 模拟并发读取
+    for i := 0; i < 5; i++ {
+        go func(i int) {
+            key := fmt.Sprintf("key%d", i)
+            value, exists := cache.Get(key)
+            if exists {
+                fmt.Printf("Read %s: %s\n", key, value)
+            } else {
+                fmt.Printf("Key %s not found\n", key)
+            }
+        }(i)
+    }
+
+    // 模拟并发写入
+    for i := 0; i < 2; i++ {
+        go func(i int) {
+            key := fmt.Sprintf("key%d", i)
+            cache.Set(key, fmt.Sprintf("value%d", i))
+            fmt.Printf("Write %s: %s\n", key, fmt.Sprintf("value%d", i))
+        }(i)
+    }
+
+    time.Sleep(time.Second)
+}
+```
+
+**输出：**
+```
+Key key0 not found
+Key key1 not found
+Key key2 not found
+Key key3 not found
+Key key4 not found
+Write key0: value0
+Write key1: value1
+```
+
+在这个示例中，多个goroutine可以同时读取缓存中的数据，而写操作则会独占锁。
+
+## 总结
+
+`RWMutex`是Go语言中一种高效的并发控制机制，特别适合读多写少的场景。通过允许多个读操作同时进行，`RWMutex`可以显著提高并发性能。在实际应用中，`RWMutex`常用于缓存系统、配置管理等场景。
+
+## 附加资源与练习
+
+- **练习**：尝试修改上面的缓存系统示例，使其支持并发删除操作。
+- **进一步学习**：阅读Go语言官方文档中关于`sync.RWMutex`的详细说明，了解更多高级用法和注意事项。
+
+:::tip
+在使用`RWMutex`时，务必确保每个`RLock()`都有对应的`RUnlock()`，每个`Lock()`都有对应的`Unlock()`，以避免死锁或资源泄漏。
+:::

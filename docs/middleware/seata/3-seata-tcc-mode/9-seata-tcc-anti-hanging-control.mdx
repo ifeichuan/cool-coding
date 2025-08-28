@@ -1,0 +1,106 @@
+---
+title: Seata TCC防悬挂控制
+description: 了解Seata TCC模式中的防悬挂控制机制，掌握其原理、实现方式以及在实际应用中的使用场景。
+---
+
+# Seata TCC防悬挂控制
+
+## 介绍
+
+在分布式事务中，TCC（Try-Confirm-Cancel）模式是一种常见的事务处理方式。它通过将事务分为三个阶段（Try、Confirm、Cancel）来保证事务的最终一致性。然而，在实际应用中，可能会遇到一种称为“悬挂”的问题，即事务在某个阶段被卡住，无法继续执行。Seata TCC模式通过引入防悬挂控制机制来解决这一问题。
+
+### 什么是悬挂问题？
+
+悬挂问题通常发生在TCC模式的Cancel阶段。当一个事务在Try阶段成功执行，但由于某些原因（如网络故障、服务宕机等）导致Confirm或Cancel阶段未能及时执行时，事务可能会被“悬挂”在某个状态，无法继续推进。这种情况下，事务的状态可能会一直处于未完成状态，导致资源无法释放，甚至引发数据不一致的问题。
+
+## Seata TCC防悬挂控制机制
+
+Seata TCC模式通过引入防悬挂控制机制来避免悬挂问题的发生。该机制的核心思想是：在Try阶段，事务会记录一个“悬挂检查点”，并在Confirm或Cancel阶段执行时，检查该检查点是否存在。如果检查点存在，则说明事务可能被悬挂，系统会采取相应的措施来避免悬挂。
+
+### 防悬挂控制的实现
+
+Seata TCC模式的防悬挂控制主要通过以下步骤实现：
+
+1. **Try阶段**：在Try阶段，事务会记录一个“悬挂检查点”。这个检查点通常是一个唯一标识符，用于标识当前事务的状态。
+
+2. **Confirm/Cancel阶段**：在Confirm或Cancel阶段执行时，系统会检查是否存在与当前事务相关的悬挂检查点。如果存在，则说明事务可能被悬挂，系统会采取相应的措施（如重试、回滚等）来避免悬挂。
+
+3. **悬挂检查点的清理**：在Confirm或Cancel阶段成功执行后，系统会清理悬挂检查点，确保事务状态的一致性。
+
+### 代码示例
+
+以下是一个简单的Seata TCC模式防悬挂控制的代码示例：
+
+```java
+public class OrderService {
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        // Try阶段
+        orderService.tryCreateOrder(order);
+        
+        // Confirm阶段
+        orderService.confirmCreateOrder(order);
+    }
+
+    @TwoPhaseBusinessAction(name = "tryCreateOrder", commitMethod = "confirmCreateOrder", rollbackMethod = "cancelCreateOrder")
+    public void tryCreateOrder(Order order) {
+        // 记录悬挂检查点
+        order.setCheckpoint("checkpoint_" + order.getId());
+        orderService.saveOrder(order);
+    }
+
+    public void confirmCreateOrder(Order order) {
+        // 检查悬挂检查点
+        if (order.getCheckpoint() != null) {
+            // 执行Confirm逻辑
+            orderService.updateOrderStatus(order.getId(), "CONFIRMED");
+            // 清理悬挂检查点
+            order.setCheckpoint(null);
+            orderService.saveOrder(order);
+        }
+    }
+
+    public void cancelCreateOrder(Order order) {
+        // 检查悬挂检查点
+        if (order.getCheckpoint() != null) {
+            // 执行Cancel逻辑
+            orderService.updateOrderStatus(order.getId(), "CANCELLED");
+            // 清理悬挂检查点
+            order.setCheckpoint(null);
+            orderService.saveOrder(order);
+        }
+    }
+}
+```
+
+### 输入与输出
+
+- **输入**：一个订单对象 `Order`，包含订单的基本信息和悬挂检查点。
+- **输出**：订单状态被更新为 `CONFIRMED` 或 `CANCELLED`，并且悬挂检查点被清理。
+
+## 实际应用场景
+
+### 场景描述
+
+假设我们有一个电商平台，用户在下单后，系统需要同时更新库存和订单状态。如果在这个过程中发生网络故障或服务宕机，可能会导致订单状态和库存状态不一致。通过使用Seata TCC模式的防悬挂控制机制，可以确保即使在异常情况下，订单和库存状态也能保持一致。
+
+### 场景实现
+
+1. **Try阶段**：系统尝试减少库存并创建订单，同时记录悬挂检查点。
+2. **Confirm阶段**：如果Try阶段成功，系统确认订单并清理悬挂检查点。
+3. **Cancel阶段**：如果Try阶段失败，系统取消订单并清理悬挂检查点。
+
+## 总结
+
+Seata TCC模式的防悬挂控制机制通过引入悬挂检查点，有效避免了事务在TCC模式中的悬挂问题。通过合理的悬挂检查点管理和清理，可以确保事务的最终一致性，避免资源浪费和数据不一致的问题。
+
+## 附加资源与练习
+
+- **资源**：
+  - [Seata官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+  - [TCC模式详解](https://dubbo.apache.org/zh/docs/advanced/tcc-transaction/)
+
+- **练习**：
+  - 尝试在一个简单的分布式系统中实现Seata TCC模式的防悬挂控制机制。
+  - 模拟网络故障或服务宕机，观察防悬挂控制机制的效果。

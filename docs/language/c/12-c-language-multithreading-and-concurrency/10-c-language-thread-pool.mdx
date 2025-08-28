@@ -1,0 +1,198 @@
+---
+title: C 语言线程池
+description: 了解C语言中线程池的概念、实现方式及其在多线程编程中的应用场景。
+---
+
+# C 语言线程池
+
+## 介绍
+
+在多线程编程中，线程池（Thread Pool）是一种管理和复用线程的技术。它通过预先创建一组线程并维护一个任务队列，来避免频繁创建和销毁线程的开销。线程池特别适用于需要处理大量短任务的场景，例如网络服务器、任务调度系统等。
+
+在C语言中，线程池的实现通常依赖于POSIX线程库（pthread）。通过线程池，我们可以更高效地管理线程资源，减少系统开销，并提高程序的响应速度。
+
+## 线程池的基本概念
+
+线程池的核心思想是“线程复用”。它由以下几个主要组件组成：
+
+1. **线程池管理器**：负责创建、销毁和管理线程池。
+2. **工作线程**：线程池中的线程，负责执行任务。
+3. **任务队列**：存放待执行的任务，通常是一个先进先出（FIFO）的队列。
+4. **任务接口**：定义任务的执行方式，通常是一个函数指针。
+
+线程池的工作流程如下：
+
+1. 初始化线程池，创建一组工作线程。
+2. 将任务添加到任务队列中。
+3. 工作线程从任务队列中取出任务并执行。
+4. 任务执行完毕后，工作线程继续等待新的任务。
+
+## 线程池的实现
+
+下面是一个简单的C语言线程池实现示例。我们将使用POSIX线程库（pthread）来创建和管理线程。
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+
+#define THREAD_POOL_SIZE 4
+
+typedef struct {
+    void (*function)(void *);
+    void *arg;
+} task_t;
+
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t notify;
+    pthread_t *threads;
+    task_t *queue;
+    int queue_size;
+    int head;
+    int tail;
+    int count;
+    int shutdown;
+} thread_pool_t;
+
+void *thread_pool_worker(void *arg) {
+    thread_pool_t *pool = (thread_pool_t *)arg;
+    while (1) {
+        pthread_mutex_lock(&(pool->lock));
+        while (pool->count == 0 && !pool->shutdown) {
+            pthread_cond_wait(&(pool->notify), &(pool->lock));
+        }
+        if (pool->shutdown) {
+            pthread_mutex_unlock(&(pool->lock));
+            pthread_exit(NULL);
+        }
+        task_t task = pool->queue[pool->head];
+        pool->head = (pool->head + 1) % pool->queue_size;
+        pool->count--;
+        pthread_mutex_unlock(&(pool->lock));
+
+        (*(task.function))(task.arg);
+    }
+    return NULL;
+}
+
+thread_pool_t *thread_pool_create(int queue_size) {
+    thread_pool_t *pool = (thread_pool_t *)malloc(sizeof(thread_pool_t));
+    pool->queue = (task_t *)malloc(sizeof(task_t) * queue_size);
+    pool->queue_size = queue_size;
+    pool->head = pool->tail = pool->count = 0;
+    pool->shutdown = 0;
+    pool->threads = (pthread_t *)malloc(sizeof(pthread_t) * THREAD_POOL_SIZE);
+
+    pthread_mutex_init(&(pool->lock), NULL);
+    pthread_cond_init(&(pool->notify), NULL);
+
+    for (int i = 0; i < THREAD_POOL_SIZE; i++) {
+        pthread_create(&(pool->threads[i]), NULL, thread_pool_worker, (void *)pool);
+    }
+
+    return pool;
+}
+
+void thread_pool_add_task(thread_pool_t *pool, void (*function)(void *), void *arg) {
+    pthread_mutex_lock(&(pool->lock));
+    if (pool->count == pool->queue_size) {
+        pthread_mutex_unlock(&(pool->lock));
+        return;
+    }
+    pool->queue[pool->tail].function = function;
+    pool->queue[pool->tail].arg = arg;
+    pool->tail = (pool->tail + 1) % pool->queue_size;
+    pool->count++;
+    pthread_cond_signal(&(pool->notify));
+    pthread_mutex_unlock(&(pool->lock));
+}
+
+void thread_pool_destroy(thread_pool_t *pool) {
+    pthread_mutex_lock(&(pool->lock));
+    pool->shutdown = 1;
+    pthread_cond_broadcast(&(pool->notify));
+    pthread_mutex_unlock(&(pool->lock));
+
+    for (int i = 0; i < THREAD_POOL_SIZE; i++) {
+        pthread_join(pool->threads[i], NULL);
+    }
+
+    free(pool->threads);
+    free(pool->queue);
+    free(pool);
+}
+
+void example_task(void *arg) {
+    int *num = (int *)arg;
+    printf("Task %d is being processed by thread %lu\n", *num, pthread_self());
+    sleep(1);
+}
+
+int main() {
+    thread_pool_t *pool = thread_pool_create(10);
+
+    for (int i = 0; i < 10; i++) {
+        int *arg = (int *)malloc(sizeof(int));
+        *arg = i;
+        thread_pool_add_task(pool, example_task, arg);
+    }
+
+    sleep(5); // Wait for tasks to complete
+    thread_pool_destroy(pool);
+
+    return 0;
+}
+```
+
+### 代码解释
+
+1. **线程池结构体**：`thread_pool_t` 结构体包含了线程池的所有必要信息，如任务队列、线程数组、互斥锁和条件变量等。
+2. **工作线程函数**：`thread_pool_worker` 是每个工作线程的执行函数，它从任务队列中取出任务并执行。
+3. **线程池创建**：`thread_pool_create` 函数初始化线程池，创建一组工作线程。
+4. **任务添加**：`thread_pool_add_task` 函数将任务添加到任务队列中。
+5. **线程池销毁**：`thread_pool_destroy` 函数销毁线程池，释放所有资源。
+
+### 输出示例
+
+运行上述代码后，输出可能如下：
+
+```
+Task 0 is being processed by thread 140735680970496
+Task 1 is being processed by thread 140735680970496
+Task 2 is being processed by thread 140735680970496
+Task 3 is being processed by thread 140735680970496
+Task 4 is being processed by thread 140735680970496
+Task 5 is being processed by thread 140735680970496
+Task 6 is being processed by thread 140735680970496
+Task 7 is being processed by thread 140735680970496
+Task 8 is being processed by thread 140735680970496
+Task 9 is being processed by thread 140735680970496
+```
+
+:::note
+注意：实际输出中的线程ID可能会有所不同，因为线程是由操作系统调度的。
+:::
+
+## 实际应用场景
+
+线程池在许多实际应用中都有广泛的使用，例如：
+
+1. **网络服务器**：处理大量并发的客户端请求时，线程池可以有效地管理连接和处理任务。
+2. **任务调度系统**：在需要执行大量短任务的系统中，线程池可以减少线程创建和销毁的开销。
+3. **并行计算**：在需要并行处理数据的场景中，线程池可以分配任务给多个线程，提高计算效率。
+
+## 总结
+
+线程池是一种高效的多线程管理技术，特别适用于需要处理大量短任务的场景。通过预先创建一组线程并复用它们，线程池可以减少系统开销，提高程序的响应速度。在C语言中，我们可以使用POSIX线程库（pthread）来实现线程池。
+
+## 附加资源与练习
+
+1. **进一步学习**：阅读POSIX线程库的官方文档，了解更多关于线程管理的细节。
+2. **练习**：尝试修改上述代码，增加线程池的动态扩展功能，使其能够根据任务数量动态调整线程数量。
+3. **扩展阅读**：研究其他编程语言中的线程池实现，例如Java的`ExecutorService`，比较它们与C语言实现的异同。
+
+:::tip
+提示：在实际项目中，使用线程池时要注意线程安全和资源管理，避免内存泄漏和死锁等问题。
+:::

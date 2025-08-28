@@ -1,0 +1,158 @@
+---
+title: LogQL常见查询模式
+description: 学习Grafana Loki中LogQL的常用查询模式，掌握日志分析的核心技巧
+---
+
+# LogQL常见查询模式
+
+LogQL是Grafana Loki专用的查询语言，它结合了PromQL的语法特性和日志处理能力。本指南将介绍最实用的查询模式，帮助您快速从日志中提取有价值的信息。
+
+## 基础概念
+
+LogQL查询由两个主要部分组成：
+1. **日志流选择器** - 使用标签过滤日志流（类似PromQL）
+2. **日志处理管道** - 对选中的日志进行转换和过滤
+
+基本语法结构：
+```logql
+{label_selector} | log_pipeline
+```
+
+## 1. 基础过滤模式
+
+### 精确字符串匹配
+```logql
+{app="frontend"} |= "error"
+```
+这会返回`frontend`应用中所有包含"error"字符串的日志行。
+
+### 正则表达式匹配
+```logql
+{namespace="production"} |~ "(?i)timeout"
+```
+使用`|~`操作符进行正则匹配，`(?i)`表示不区分大小写，查找所有包含"timeout"的日志。
+
+### 多条件过滤
+```logql
+{job="api-server"} |= "error" != "connection refused"
+```
+组合多个过滤条件：包含"error"但不包含"connection refused"的日志。
+
+## 2. 日志解析模式
+
+### 提取结构化字段
+```logql
+{app="auth-service"} | logfmt | duration > 500ms
+```
+`logfmt`解析器可以提取键值对格式的日志字段，然后我们可以基于字段值过滤（如响应时间>500ms）。
+
+### JSON日志解析
+```logql
+{cluster="us-west"} | json | latency_ms >= 1000
+```
+对于JSON格式的日志，使用`json`解析器提取字段。
+
+### 正则表达式提取
+```logql
+{service="payment"} | regexp `(?P<ip>\\d+\\.\\d+\\.\\d+\\.\\d+)` | ip = "192.168.1.1"
+```
+使用命名捕获组从非结构化日志中提取特定模式（如IP地址）。
+
+## 3. 聚合分析模式
+
+### 计数统计
+```logql
+sum by (level) (
+  count_over_time(
+    {app="backend"} | json | level=~"(error|warn)"
+    [5m]
+  )
+)
+```
+统计5分钟内`backend`应用的错误和警告数量，按日志级别分组。
+
+### 速率分析
+```logql
+rate(
+  {job="nginx"} |~ "HTTP/1.1\" (4|5)[0-9]{2}" [1m]
+)
+```
+计算Nginx服务每分钟的HTTP 4xx/5xx错误率。
+
+### 时序聚合
+```logql
+quantile_over_time(0.95,
+  {service="checkout"} | json | latency_ms [5m]
+) by (endpoint)
+```
+计算各API端点95%分位的响应延迟（假设日志中包含`latency_ms`字段）。
+
+## 4. 高级模式
+
+### 多阶段处理
+```logql
+{app="frontend"} 
+  | json 
+  | latency_ms > 1000 
+  | label_format new_label=`{{.existing_label}}_suffix`
+  | line_format `{{.timestamp}} {{.new_label}}: {{.message}}`
+```
+这个查询展示了多阶段处理：
+1. 解析JSON日志
+2. 过滤高延迟请求
+3. 添加/修改标签
+4. 重新格式化输出行
+
+### 日志关联
+```logql
+{app="service-a"} |= "transaction_id=12345"
+  or
+{app="service-b"} |= "transaction_id=12345"
+```
+通过事务ID关联跨服务的相关日志。
+
+## 实际案例
+
+### 案例1：API错误分析
+```logql
+sum by (status, method) (
+  count_over_time(
+    {job="api-gateway"} 
+    | json 
+    | status_code >= 400 
+    [15m]
+  )
+)
+```
+按HTTP状态码和方法统计15分钟内的API错误分布。
+
+### 案例2：用户行为追踪
+```logql
+{app="user-service"} 
+  | logfmt 
+  | user_id="UA5421" 
+  | line_format `{{.timestamp}} {{.method}} {{.path}}`
+```
+追踪特定用户ID的所有操作记录，并简化输出格式。
+
+## 总结
+
+LogQL提供了强大的日志处理能力，关键模式包括：
+
+- **过滤**：使用`|=`, `|~`, `!=`等操作符精确查找日志
+- **解析**：通过`logfmt`, `json`, `regexp`提取结构化字段
+- **聚合**：使用`count_over_time`, `rate`, `quantile_over_time`等函数进行统计分析
+- **格式化**：利用`label_format`和`line_format`定制输出
+
+:::tip 练习建议
+1. 尝试从您的应用日志中找出所有5xx错误
+2. 统计不同日志级别的出现频率
+3. 提取特定字段并计算P99延迟
+4. 创建一个显示错误率随时间变化的仪表板
+:::
+
+## 延伸阅读
+
+- [官方LogQL文档](https://grafana.com/docs/loki/latest/logql/)
+- [Loki查询优化指南](https://grafana.com/docs/loki/latest/optimize/)
+- [PromQL与LogQL对比](https://grafana.com/blog/2020/10/05/comparing-promql-and-logql-prometheus-query-language-vs.-loki-query-language/)

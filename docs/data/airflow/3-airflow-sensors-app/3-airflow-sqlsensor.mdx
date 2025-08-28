@@ -1,0 +1,101 @@
+---
+title: Airflow SqlSensor
+description: "了解如何使用 Apache Airflow 中的 SqlSensor 来监控数据库中的条件，并在满足条件时触发任务。"
+---
+
+# Airflow SqlSensor
+
+Apache Airflow 是一个强大的工作流调度工具，广泛用于数据管道的编排和管理。在 Airflow 中，**Sensor** 是一种特殊类型的任务，用于等待某些外部条件满足后再继续执行后续任务。**SqlSensor** 是 Airflow 提供的一种传感器，专门用于监控数据库中的条件。
+
+## 什么是 SqlSensor？
+
+SqlSensor 是 Airflow 中的一种传感器，它会定期执行指定的 SQL 查询，并根据查询结果决定是否继续执行后续任务。如果查询返回的结果满足预设条件（例如，返回非空结果），SqlSensor 将标记为成功，并允许工作流继续执行。
+
+SqlSensor 非常适合用于以下场景：
+- 等待数据库中的某个表达到预期的行数。
+- 监控某个特定的数据是否已经准备好。
+- 等待某个外部系统更新数据库中的状态。
+
+## SqlSensor 的基本用法
+
+要使用 SqlSensor，首先需要确保你已经配置了 Airflow 的连接（Connection），以便 SqlSensor 能够连接到目标数据库。接下来，你可以通过以下步骤来定义和使用 SqlSensor。
+
+### 1. 配置数据库连接
+
+在 Airflow 中，数据库连接是通过 **Connection** 来管理的。你可以在 Airflow 的 Web UI 中创建和管理连接。假设你已经创建了一个名为 `my_db_conn` 的连接，指向你的目标数据库。
+
+### 2. 定义 SqlSensor
+
+在 DAG 文件中，你可以通过以下代码定义一个 SqlSensor：
+
+```python
+from airflow import DAG
+from airflow.sensors.sql_sensor import SqlSensor
+from airflow.operators.dummy_operator import DummyOperator
+from airflow.utils.dates import days_ago
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': days_ago(1),
+}
+
+with DAG('sql_sensor_example', default_args=default_args, schedule_interval=None) as dag:
+    wait_for_data = SqlSensor(
+        task_id='wait_for_data',
+        conn_id='my_db_conn',
+        sql="SELECT COUNT(*) FROM my_table WHERE status = 'ready'",
+        mode='poke',
+        timeout=600,  # 10 minutes
+        poke_interval=60,  # 60 seconds
+    )
+
+    process_data = DummyOperator(task_id='process_data')
+
+    wait_for_data >> process_data
+```
+
+在这个例子中，`SqlSensor` 会每隔 60 秒执行一次 SQL 查询，检查 `my_table` 表中 `status` 为 `'ready'` 的记录数量。如果查询返回的结果大于 0，SqlSensor 将标记为成功，并触发 `process_data` 任务。
+
+### 3. 参数解释
+
+- `conn_id`: 数据库连接的 ID。
+- `sql`: 要执行的 SQL 查询。
+- `mode`: 传感器的模式，通常为 `'poke'`，表示定期检查。
+- `timeout`: 传感器的超时时间（秒），超过此时间后传感器将失败。
+- `poke_interval`: 每次检查之间的间隔时间（秒）。
+
+## 实际应用场景
+
+假设你有一个数据管道，需要等待某个外部系统将数据写入数据库中的特定表后，才能继续处理数据。你可以使用 SqlSensor 来监控该表，直到数据准备好。
+
+例如，假设你有一个表 `orders`，外部系统会在每天凌晨将订单数据写入该表。你可以使用 SqlSensor 来等待订单数据写入完成：
+
+```python
+wait_for_orders = SqlSensor(
+    task_id='wait_for_orders',
+    conn_id='my_db_conn',
+    sql="SELECT COUNT(*) FROM orders WHERE order_date = CURRENT_DATE",
+    mode='poke',
+    timeout=3600,  # 1 hour
+    poke_interval=300,  # 5 minutes
+)
+```
+
+在这个例子中，SqlSensor 会每隔 5 分钟检查一次 `orders` 表，直到当天的订单数据写入完成。
+
+## 总结
+
+SqlSensor 是 Airflow 中一个非常有用的工具，可以帮助你在数据管道中等待数据库中的条件满足后再继续执行任务。通过合理配置 SqlSensor，你可以轻松实现复杂的依赖关系和工作流控制。
+
+### 附加资源
+
+- [Airflow 官方文档 - Sensors](https://airflow.apache.org/docs/apache-airflow/stable/concepts/sensors.html)
+- [Airflow 官方文档 - SqlSensor](https://airflow.apache.org/docs/apache-airflow/stable/_api/airflow/sensors/sql_sensor/index.html)
+
+### 练习
+
+1. 创建一个 DAG，使用 SqlSensor 监控一个表中的数据，并在数据准备好后触发一个任务。
+2. 修改 SqlSensor 的 `poke_interval` 和 `timeout` 参数，观察其对任务执行的影响。
+3. 尝试使用不同的 SQL 查询，例如检查某个字段的值是否达到预期。
+
+通过以上练习，你将更好地理解 SqlSensor 的工作原理和应用场景。

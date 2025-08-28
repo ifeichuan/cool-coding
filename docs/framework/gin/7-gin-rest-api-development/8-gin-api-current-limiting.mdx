@@ -1,0 +1,115 @@
+---
+title: Gin API限流
+description: 了解如何在Gin框架中实现API限流，以保护您的REST API免受滥用和过载。
+---
+
+# Gin API限流
+
+在现代Web开发中，API限流（Rate Limiting）是一种重要的机制，用于保护服务器免受滥用和过载。通过限制客户端在一定时间内可以发出的请求数量，API限流可以防止恶意用户或失控的客户端对服务器造成过大的负载。本文将介绍如何在Gin框架中实现API限流。
+
+## 什么是API限流？
+
+API限流是一种控制客户端请求频率的技术。它通过限制客户端在一定时间内可以发出的请求数量，来保护服务器资源不被过度消耗。例如，您可以设置一个规则，允许每个IP地址每分钟最多发出100个请求。如果某个IP地址在短时间内发出了过多的请求，服务器将拒绝这些请求，直到时间窗口重置。
+
+## 为什么需要API限流？
+
+API限流的主要目的是保护服务器免受滥用和过载。以下是一些常见的应用场景：
+
+1. **防止DDoS攻击**：通过限制请求频率，可以防止恶意用户发起分布式拒绝服务（DDoS）攻击。
+2. **保护资源**：限制请求频率可以防止某些客户端过度消耗服务器资源，例如数据库连接、CPU和内存。
+3. **公平使用**：在多用户环境中，API限流可以确保每个用户都能公平地使用服务器资源。
+
+## 在Gin中实现API限流
+
+Gin框架本身并不提供内置的限流功能，但我们可以使用第三方库来实现这一功能。本文将使用`github.com/ulule/limiter/v3`库来实现API限流。
+
+### 安装依赖
+
+首先，我们需要安装`ulule/limiter`库：
+
+```bash
+go get github.com/ulule/limiter/v3
+```
+
+### 配置限流器
+
+接下来，我们需要配置限流器。以下是一个简单的配置示例：
+
+```go
+package main
+
+import (
+    "github.com/gin-gonic/gin"
+    "github.com/ulule/limiter/v3"
+    "github.com/ulule/limiter/v3/drivers/store/memory"
+    "net/http"
+    "time"
+)
+
+func main() {
+    r := gin.Default()
+
+    // 配置限流器
+    rate := limiter.Rate{
+        Period: 1 * time.Minute,
+        Limit:  100,
+    }
+    store := memory.NewStore()
+    limiter := limiter.New(store, rate)
+
+    // 限流中间件
+    r.Use(func(c *gin.Context) {
+        context, err := limiter.Get(c, c.ClientIP())
+        if err != nil {
+            c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Internal Server Error"})
+            return
+        }
+
+        if context.Reached {
+            c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too Many Requests"})
+            return
+        }
+
+        c.Next()
+    })
+
+    r.GET("/api/resource", func(c *gin.Context) {
+        c.JSON(http.StatusOK, gin.H{"message": "Resource accessed successfully"})
+    })
+
+    r.Run(":8080")
+}
+```
+
+### 代码解释
+
+1. **限流器配置**：我们定义了一个`limiter.Rate`结构体，其中`Period`表示时间窗口的长度（1分钟），`Limit`表示在该时间窗口内允许的最大请求数量（100次）。
+2. **存储**：我们使用`memory.NewStore()`创建一个内存存储，用于存储每个客户端的请求计数。
+3. **限流中间件**：我们创建了一个Gin中间件，用于在每个请求到达时检查客户端的请求计数。如果客户端在时间窗口内发出的请求数量超过了限制，服务器将返回`429 Too Many Requests`状态码。
+
+### 测试限流
+
+启动服务器后，您可以尝试多次访问`/api/resource`端点。如果在一分钟内访问超过100次，服务器将返回`429 Too Many Requests`错误。
+
+## 实际应用场景
+
+假设您正在开发一个公共API，允许用户查询天气信息。为了防止恶意用户滥用API，您可以设置一个限流规则，例如每个IP地址每分钟最多可以发出60个请求。这样，您可以确保API的稳定性和公平性。
+
+## 总结
+
+API限流是保护服务器资源的重要手段。通过在Gin框架中实现API限流，您可以有效地防止滥用和过载，确保服务器的稳定运行。本文介绍了如何使用`ulule/limiter`库在Gin中实现API限流，并提供了一个简单的示例代码。
+
+## 附加资源
+
+- [Gin框架官方文档](https://gin-gonic.com/docs/)
+- [ulule/limiter GitHub仓库](https://github.com/ulule/limiter)
+
+## 练习
+
+1. 修改示例代码，将限流规则改为每小时最多1000个请求。
+2. 尝试使用Redis作为限流器的存储后端，而不是内存存储。
+3. 为不同的API端点设置不同的限流规则。
+
+:::tip
+在实际生产环境中，建议将限流器的存储后端设置为分布式存储（如Redis），以便在多个服务器实例之间共享限流状态。
+:::

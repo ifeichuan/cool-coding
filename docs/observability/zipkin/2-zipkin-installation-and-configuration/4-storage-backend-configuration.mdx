@@ -1,0 +1,183 @@
+---
+title: Zipkin 存储后端配置
+description: 学习如何为Zipkin配置不同的存储后端，包括内存、MySQL、Elasticsearch和Cassandra，并了解它们的适用场景。
+---
+
+# 存储后端配置
+
+## 介绍
+
+Zipkin是一个分布式跟踪系统，用于收集、存储和可视化微服务架构中的请求链路数据。默认情况下，Zipkin使用内存存储，但这种方式仅适用于开发和测试环境，因为数据会在服务重启后丢失。在生产环境中，我们需要配置持久化存储后端，如MySQL、Elasticsearch或Cassandra。
+
+本文将详细介绍如何为Zipkin配置不同的存储后端，并提供实际案例和配置示例。
+
+## 支持的存储后端
+
+Zipkin支持以下几种存储后端：
+
+1. **内存（In-Memory）**：默认配置，适用于开发和测试。
+2. **MySQL**：关系型数据库，适合小规模部署。
+3. **Elasticsearch**：高性能搜索引擎，适合大规模和高吞吐量场景。
+4. **Cassandra**：分布式NoSQL数据库，适合高可用性和大规模数据存储。
+
+## 配置存储后端
+
+### 1. 内存存储（默认）
+
+内存存储是Zipkin的默认配置，无需额外设置。启动Zipkin服务时，数据将保存在内存中，但重启后数据会丢失。
+
+```bash
+java -jar zipkin-server-{version}-exec.jar
+```
+
+:::caution
+内存存储仅适用于开发和测试环境，不推荐在生产环境中使用。
+:::
+
+### 2. MySQL存储
+
+MySQL是一种关系型数据库，适合小规模部署。以下是配置步骤：
+
+#### 步骤1：创建数据库表
+Zipkin提供了MySQL的初始化脚本。首先，创建一个数据库并执行以下SQL脚本：
+
+```sql
+CREATE TABLE IF NOT EXISTS zipkin_spans (
+  `trace_id_high` BIGINT NOT NULL DEFAULT 0 COMMENT 'If non zero, this means the trace uses 128 bit traceIds instead of 64 bit',
+  `trace_id` BIGINT NOT NULL,
+  `id` BIGINT NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `remote_service_name` VARCHAR(255),
+  `parent_id` BIGINT,
+  `debug` BIT(1),
+  `start_ts` BIGINT COMMENT 'Span.timestamp(): epoch micros used for endTs query and to implement TTL',
+  `duration` BIGINT COMMENT 'Span.duration(): micros used for minDuration and maxDuration query',
+  PRIMARY KEY (`trace_id_high`, `trace_id`, `id`)
+) ENGINE=InnoDB ROW_FORMAT=COMPRESSED;
+
+-- 其他表结构请参考Zipkin官方文档
+```
+
+#### 步骤2：启动Zipkin并配置MySQL
+使用以下命令启动Zipkin并指定MySQL作为存储后端：
+
+```bash
+java -jar zipkin-server-{version}-exec.jar \
+  --STORAGE_TYPE=mysql \
+  --MYSQL_HOST=localhost \
+  --MYSQL_TCP_PORT=3306 \
+  --MYSQL_USER=zipkin \
+  --MYSQL_PASS=zipkin \
+  --MYSQL_DB=zipkin
+```
+
+### 3. Elasticsearch存储
+
+Elasticsearch适合大规模和高吞吐量的场景。以下是配置步骤：
+
+#### 步骤1：启动Elasticsearch
+确保Elasticsearch服务已启动并运行。
+
+#### 步骤2：启动Zipkin并配置Elasticsearch
+使用以下命令启动Zipkin并指定Elasticsearch作为存储后端：
+
+```bash
+java -jar zipkin-server-{version}-exec.jar \
+  --STORAGE_TYPE=elasticsearch \
+  --ES_HOSTS=http://localhost:9200
+```
+
+:::tip
+如果Elasticsearch集群有多个节点，可以用逗号分隔多个地址：
+`--ES_HOSTS=http://node1:9200,http://node2:9200`
+:::
+
+### 4. Cassandra存储
+
+Cassandra适合高可用性和大规模数据存储的场景。以下是配置步骤：
+
+#### 步骤1：创建Keyspace和表
+使用Zipkin提供的CQL脚本初始化Cassandra：
+
+```sql
+CREATE KEYSPACE IF NOT EXISTS zipkin
+  WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}
+  AND durable_writes = true;
+
+USE zipkin;
+
+CREATE TABLE IF NOT EXISTS zipkin_spans (
+    trace_id text,
+    id text,
+    l_service text,
+    parent_id text,
+    duration bigint,
+    debug boolean,
+    name text,
+    ts bigint,
+    annotations list<frozen<tuple<bigint, text, text>>>,
+    binary_annotations list<frozen<tuple<text, text, text, text>>>,
+    PRIMARY KEY (trace_id, id)
+) WITH compaction = {'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy'};
+```
+
+#### 步骤2：启动Zipkin并配置Cassandra
+使用以下命令启动Zipkin并指定Cassandra作为存储后端：
+
+```bash
+java -jar zipkin-server-{version}-exec.jar \
+  --STORAGE_TYPE=cassandra3 \
+  --CASSANDRA_KEYSPACE=zipkin \
+  --CASSANDRA_CONTACT_POINTS=localhost
+```
+
+## 实际案例
+
+### 案例1：使用Elasticsearch存储高吞吐量数据
+
+假设你有一个高吞吐量的微服务架构，每天产生数百万条跟踪数据。使用Elasticsearch作为存储后端可以提供高效的查询性能和水平扩展能力。
+
+```bash
+java -jar zipkin-server-{version}-exec.jar \
+  --STORAGE_TYPE=elasticsearch \
+  --ES_HOSTS=http://elastic1:9200,http://elastic2:9200 \
+  --ES_INDEX=zipkin \
+  --ES_DATE_SEPARATOR=-
+```
+
+### 案例2：使用Cassandra实现高可用性
+
+假设你的服务需要跨多个数据中心部署，Cassandra的多数据中心复制功能可以确保数据的高可用性。
+
+```bash
+java -jar zipkin-server-{version}-exec.jar \
+  --STORAGE_TYPE=cassandra3 \
+  --CASSANDRA_KEYSPACE=zipkin \
+  --CASSANDRA_CONTACT_POINTS=dc1-node1,dc1-node2,dc2-node1,dc2-node2 \
+  --CASSANDRA_LOCAL_DC=dc1 \
+  --CASSANDRA_USERNAME=zipkin \
+  --CASSANDRA_PASSWORD=zipkin
+```
+
+## 总结
+
+Zipkin支持多种存储后端，每种后端都有其适用的场景：
+
+- **内存**：开发和测试环境。
+- **MySQL**：小规模部署，简单易用。
+- **Elasticsearch**：大规模、高吞吐量场景。
+- **Cassandra**：高可用性、多数据中心部署。
+
+根据你的需求选择合适的存储后端，并参考本文的配置步骤进行设置。
+
+## 附加资源
+
+1. [Zipkin官方文档](https://zipkin.io/)
+2. [Elasticsearch配置指南](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
+3. [Cassandra配置指南](https://cassandra.apache.org/doc/latest/)
+
+## 练习
+
+1. 尝试在本地环境中配置Zipkin使用MySQL作为存储后端。
+2. 使用Docker启动Elasticsearch，并配置Zipkin使用它。
+3. 比较不同存储后端在查询性能上的差异。

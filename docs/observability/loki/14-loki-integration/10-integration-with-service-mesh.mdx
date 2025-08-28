@@ -1,0 +1,108 @@
+---
+title: 与服务网格集成
+description: 学习如何将Grafana Loki与Istio、Linkerd等服务网格集成，实现高效的日志收集与分析。
+---
+
+# 与服务网格集成
+
+## 介绍
+
+服务网格（Service Mesh）是现代微服务架构中的关键组件，用于管理服务间通信、监控和安全。将Grafana Loki与服务网格集成，可以集中收集和分析服务网格中产生的日志数据，帮助开发者快速定位问题并优化系统性能。本章将介绍如何与Istio、Linkerd等主流服务网格集成。
+
+:::note
+**适用场景**：需要统一日志管理的Kubernetes环境，尤其是使用了Istio或Linkerd的服务网格架构。
+:::
+
+---
+
+## 核心概念
+
+### 1. Loki与服务网格的协作模式
+服务网格的Sidecar代理（如Envoy）会生成访问日志，Loki通过以下方式捕获这些日志：
+- **直接采集**：通过Promtail抓取Sidecar容器的日志文件。
+- **间接转发**：通过Fluentd/Logstash等工具将日志推送到Loki。
+
+```mermaid
+graph LR
+  A[Service Mesh] -->|生成日志| B(Sidecar容器)
+  B -->|写入文件| C(Promtail)
+  C -->|推送日志| D[Loki]
+```
+
+### 2. 关键配置项
+- **日志标签**：利用服务网格的元数据（如`namespace`、`pod_name`）标记日志流。
+- **日志格式**：解析JSON或文本格式的访问日志。
+
+---
+
+## 实战：与Istio集成
+
+### 步骤1：配置Istio日志输出
+修改Istio ConfigMap，启用Envoy的JSON日志格式：
+```yaml
+# istio-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+data:
+  mesh: |-
+    accessLogFile: /dev/stdout
+    accessLogEncoding: JSON
+```
+
+### 步骤2：部署Promtail
+使用以下配置抓取Istio Sidecar日志：
+```yaml
+# promtail-config.yaml
+scrape_configs:
+- job_name: istio-proxies
+  kubernetes_sd_configs:
+  - role: pod
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_pod_container_name]
+    action: keep
+    regex: "istio-proxy"
+  pipeline_stages:
+  - json:
+      expressions:
+        latency: response.duration
+        status: response.code
+```
+
+### 步骤3：验证日志查询
+在Grafana中执行LogQL查询：
+```logql
+{container="istio-proxy"} |= "500"
+```
+
+---
+
+## 案例：Linkerd的日志分析
+
+### 场景描述
+某电商平台使用Linkerd管理支付服务，需要监控失败请求的延迟分布。
+
+### 解决方案
+1. 通过Promtail收集Linkerd代理日志。
+2. 使用以下LogQL计算P99延迟：
+```logql
+quantile_over_time(0.99,
+  {container="linkerd-proxy"} | json | latency > 0 [5m]
+)
+```
+
+---
+
+## 总结
+
+- **核心价值**：统一服务网格日志，提升可观测性。
+- **最佳实践**：始终使用结构化日志（如JSON）并合理设置标签。
+- **扩展思考**：如何结合Prometheus指标实现更全面的监控？
+
+:::tip 延伸练习
+1. 在本地Minikube中部署Istio+Loki，重现本章示例。
+2. 尝试编写LogQL查询，统计各命名空间的错误率。
+:::
+
+**扩展阅读**：
+- [Loki官方文档-服务网格集成](https://grafana.com/docs/loki/latest/integrations/)
+- 《Istio实战指南》第6章日志管理

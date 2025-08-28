@@ -1,0 +1,162 @@
+---
+title: 自定义报告生成
+description: 学习如何利用Zipkin的高级功能创建自定义报告，以便更好地分析和可视化分布式追踪数据。
+---
+
+# 自定义报告生成
+
+## 介绍
+
+Zipkin是一个开源的分布式追踪系统，用于收集、存储和分析微服务架构中的请求链路数据。虽然Zipkin提供了默认的UI和报告功能，但在实际应用中，您可能需要根据业务需求生成**自定义报告**。这些报告可以帮助您更深入地分析性能瓶颈、错误率或特定服务的调用模式。
+
+在本章节中，您将学习如何利用Zipkin的API和工具生成自定义报告，包括：
+- 通过Zipkin API查询原始追踪数据
+- 使用脚本或工具处理数据
+- 生成可视化报告（如表格、图表）
+
+:::tip
+自定义报告特别适合需要长期监控或定期汇报的场景，比如周报、月报或特定服务的性能分析。
+:::
+
+---
+
+## 基础步骤
+
+### 1. 查询Zipkin数据
+
+Zipkin提供了RESTful API，允许您以编程方式查询追踪数据。以下是一个通过`curl`获取最近1小时追踪数据的示例：
+
+```bash
+curl -X GET "http://your-zipkin-server:9411/api/v2/traces?endTs=$(date +%s%3N)&lookback=3600000&limit=10"
+```
+
+- `endTs`: 查询的结束时间（Unix时间戳，毫秒）
+- `lookback`: 回溯时间（毫秒）
+- `limit`: 返回的追踪数量
+
+输出示例（简化）：
+```json
+[
+  [
+    {
+      "traceId": "abc123",
+      "name": "GET /api/users",
+      "duration": 45,
+      "tags": {"http.status_code": "200"}
+    }
+  ]
+]
+```
+
+### 2. 处理数据
+
+您可以使用Python、JavaScript等语言处理返回的JSON数据。以下是一个Python示例，计算平均响应时间：
+
+```python
+import requests
+import json
+
+response = requests.get("http://your-zipkin-server:9411/api/v2/traces?lookback=3600000")
+traces = response.json()
+
+durations = [span['duration'] for trace in traces for span in trace if 'duration' in span]
+avg_duration = sum(durations) / len(durations) if durations else 0
+
+print(f"Average duration: {avg_duration} ms")
+```
+
+### 3. 生成报告
+
+将处理后的数据转换为报告格式。以下是生成Markdown表格的Python代码：
+
+```python
+print("| Trace ID | Duration (ms) | Status |")
+print("|----------|--------------:|--------|")
+for trace in traces:
+    for span in trace:
+        print(f"| {span.get('traceId', '')[:6]}... | {span.get('duration', 0)} | {span.get('tags', {}).get('http.status_code', '')} |")
+```
+
+输出示例：
+```
+| Trace ID | Duration (ms) | Status |
+|----------|--------------:|--------|
+| abc123... | 45           | 200    |
+```
+
+---
+
+## 实际案例：生成服务错误率报告
+
+假设您需要监控服务`payment-service`的错误率（HTTP 5xx状态码）。
+
+### 步骤1：过滤数据
+```python
+error_spans = [
+    span for trace in traces
+    for span in trace
+    if span.get('name') == 'payment-service'
+    and span.get('tags', {}).get('http.status_code', '').startswith('5')
+]
+```
+
+### 步骤2：计算错误率
+```python
+total_requests = len([span for trace in traces for span in trace if span.get('name') == 'payment-service'])
+error_rate = (len(error_spans) / total_requests * 100 if total_requests > 0 else 0
+```
+
+### 步骤3：生成可视化
+使用`matplotlib`生成柱状图：
+```python
+import matplotlib.pyplot as plt
+
+plt.bar(['Success', 'Errors'], [total_requests - len(error_spans), len(error_spans)])
+plt.title('Payment Service Requests')
+plt.savefig('error_report.png')
+```
+
+---
+
+## 高级技巧
+
+### 定时报告生成
+您可以使用`cron`（Linux）或任务计划程序（Windows）定期运行脚本：
+
+```bash
+# 每天上午8点运行
+0 8 * * * /usr/bin/python3 /path/to/your/script.py
+```
+
+### 集成到CI/CD
+在Jenkins或GitHub Actions中，添加一个步骤将报告作为构建产物保存：
+
+```yaml
+# GitHub Actions示例
+- name: Generate Zipkin Report
+  run: python3 generate_report.py
+- name: Upload Report
+  uses: actions/upload-artifact@v2
+  with:
+    name: zipkin-report
+    path: report.html
+```
+
+---
+
+## 总结
+
+自定义报告生成是Zipkin的高级功能，能够帮助您：
+- 提取特定业务指标
+- 自动化监控流程
+- 创建更适合团队需求的视觉化效果
+
+:::note 练习
+1. 尝试修改Python脚本，生成按服务名称分组的平均延迟报告。
+2. 将报告集成到Slack或电子邮件中，实现自动通知。
+:::
+
+## 附加资源
+- [Zipkin API官方文档](https://zipkin.io/zipkin-api/)
+- [Python requests库文档](https://docs.python-requests.org/)
+- [Mermaid图表语法](https://mermaid-js.github.io/mermaid/)

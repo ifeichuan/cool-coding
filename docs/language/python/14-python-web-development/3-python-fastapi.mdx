@@ -1,0 +1,332 @@
+---
+title: Python FastAPI
+description: 深入了解Python FastAPI框架，从基础知识到实践应用，帮助初学者快速掌握现代Web API开发。
+---
+
+# Python FastAPI
+
+## FastAPI简介
+
+FastAPI是一个现代、快速（高性能）的Web框架，用于构建API，基于Python 3.6+标准类型提示。它是当前最快的Python Web框架之一，拥有与NodeJS和Go相当的性能。
+
+FastAPI具有以下主要特点：
+
+- **快速**：可与NodeJS和Go相媲美的高性能
+- **快速编码**：提高功能开发速度约200%~300%
+- **更少的错误**：减少约40%的人为错误
+- **直观**：强大的编辑器支持，自动补全无处不在
+- **简单**：易于学习和使用
+- **简短**：最小化代码重复
+- **稳健**：获取可用于生产环境的代码，并附带自动交互式文档
+
+:::note 为什么选择FastAPI？
+FastAPI结合了Flask的简单性和Django的功能性，同时提供了现代Python特性。它非常适合构建微服务、RESTful API和实时应用。
+:::
+
+## 安装与设置
+
+要开始使用FastAPI，我们首先需要安装它和一个ASGI服务器（如Uvicorn）：
+
+```bash
+pip install fastapi uvicorn
+```
+
+## 创建第一个API
+
+让我们创建一个简单的Hello World应用程序：
+
+```python
+from fastapi import FastAPI
+
+# 创建FastAPI实例
+app = FastAPI()
+
+# 定义根路由
+@app.get("/")
+def read_root():
+    return {"Hello": "World"}
+
+# 带路径参数的路由
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    return {"item_id": item_id}
+```
+
+要运行此应用程序，请在命令行中执行：
+
+```bash
+uvicorn main:app --reload
+```
+
+这里，`main`是Python文件名（main.py），`app`是在文件中创建的FastAPI实例，`--reload`标志使服务器在代码更改时自动重新启动。
+
+现在，在浏览器中访问：
+- http://127.0.0.1:8000/ 将返回 `{"Hello": "World"}`
+- http://127.0.0.1:8000/items/5 将返回 `{"item_id": 5}`
+
+## 请求体和参数
+
+FastAPI可以轻松处理请求体和查询参数。让我们看一个例子：
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+app = FastAPI()
+
+# 定义数据模型
+class Item(BaseModel):
+    name: str
+    description: str = None
+    price: float
+    tax: float = None
+
+@app.post("/items/")
+def create_item(item: Item):
+    item_dict = item.dict()
+    if item.tax:
+        price_with_tax = item.price + item.tax
+        item_dict.update({"price_with_tax": price_with_tax})
+    return item_dict
+
+@app.get("/items/")
+def read_items(skip: int = 0, limit: int = 10):
+    return {"skip": skip, "limit": limit}
+```
+
+在这个例子中：
+- 我们使用Pydantic定义了`Item`数据模型
+- 使用`@app.post`装饰器定义了一个接受POST请求的端点
+- 使用`@app.get`装饰器定义了一个接受GET请求的端点，带有查询参数
+
+## 自动文档
+
+FastAPI自动生成交互式API文档。启动应用后，可以访问：
+
+- http://127.0.0.1:8000/docs - 使用Swagger UI的交互式文档
+- http://127.0.0.1:8000/redoc - 使用ReDoc的替代文档
+
+这些文档会根据你的代码自动更新，包括函数的注释。
+
+## 路径参数和查询参数
+
+```python
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/users/{user_id}")
+def read_user(user_id: int, query: str = None):
+    if query:
+        return {"user_id": user_id, "query": query}
+    return {"user_id": user_id}
+```
+
+在此示例中：
+- `user_id`是路径参数，是URL的一部分
+- `query`是查询参数，通过`?query=something`添加到URL
+
+## 状态码和错误处理
+
+FastAPI提供了处理HTTP状态码和错误的简便方法：
+
+```python
+from fastapi import FastAPI, HTTPException, status
+
+app = FastAPI()
+
+items = {"foo": "The Foo"}
+
+@app.get("/items/{item_id}")
+def read_item(item_id: str):
+    if item_id not in items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Item not found"
+        )
+    return {"item": items[item_id]}
+```
+
+## 依赖注入系统
+
+FastAPI的依赖注入系统允许你声明某个函数依赖于另一个组件：
+
+```python
+from fastapi import Depends, FastAPI, Header, HTTPException
+
+app = FastAPI()
+
+async def verify_token(x_token: str = Header(...)):
+    if x_token != "fake-super-secret-token":
+        raise HTTPException(status_code=400, detail="X-Token header invalid")
+    return x_token
+
+@app.get("/items/", dependencies=[Depends(verify_token)])
+async def read_items():
+    return [{"item": "Portal Gun"}, {"item": "Plumbus"}]
+```
+
+## 实际案例：构建简单的TODO API
+
+让我们创建一个简单的TODO API，展示FastAPI的真实应用：
+
+```python
+from fastapi import FastAPI, HTTPException, Depends, status
+from pydantic import BaseModel
+from typing import List, Optional
+import uuid
+
+app = FastAPI(title="TODO API")
+
+# 数据模型
+class TodoBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    completed: bool = False
+
+class TodoCreate(TodoBase):
+    pass
+
+class Todo(TodoBase):
+    id: str
+
+    class Config:
+        orm_mode = True
+
+# 内存数据存储
+todos = {}
+
+# 获取单个TODO的依赖项
+def get_todo(todo_id: str):
+    if todo_id not in todos:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return todos[todo_id]
+
+# API路由
+@app.post("/todos/", response_model=Todo, status_code=status.HTTP_201_CREATED)
+def create_todo(todo: TodoCreate):
+    todo_id = str(uuid.uuid4())
+    todos[todo_id] = Todo(id=todo_id, **todo.dict())
+    return todos[todo_id]
+
+@app.get("/todos/", response_model=List[Todo])
+def read_todos(skip: int = 0, limit: int = 100):
+    return list(todos.values())[skip : skip + limit]
+
+@app.get("/todos/{todo_id}", response_model=Todo)
+def read_todo(todo: Todo = Depends(get_todo)):
+    return todo
+
+@app.put("/todos/{todo_id}", response_model=Todo)
+def update_todo(todo_data: TodoCreate, todo: Todo = Depends(get_todo)):
+    updated_todo = todo.copy(update=todo_data.dict())
+    todos[todo.id] = updated_todo
+    return updated_todo
+
+@app.delete("/todos/{todo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_todo(todo: Todo = Depends(get_todo)):
+    del todos[todo.id]
+    return None
+```
+
+## 高级功能：后台任务与WebSocket
+
+FastAPI支持后台任务和WebSocket，使其非常适合处理长时间运行的操作和实时应用：
+
+### 后台任务
+
+```python
+from fastapi import BackgroundTasks, FastAPI
+
+app = FastAPI()
+
+def write_log(message: str):
+    with open("log.txt", "a") as log:
+        log.write(message + "\n")
+
+@app.post("/send-notification/")
+async def send_notification(
+    email: str, background_tasks: BackgroundTasks
+):
+    background_tasks.add_task(write_log, f"Notification sent to {email}")
+    return {"message": "Notification sent in the background"}
+```
+
+### WebSocket
+
+```python
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import HTMLResponse
+
+app = FastAPI()
+
+html = """
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chat</title>
+    </head>
+    <body>
+        <h1>WebSocket Chat</h1>
+        <input type="text" id="messageText" autocomplete="off"/>
+        <button onclick="sendMessage()">Send</button>
+        <ul id="messages"></ul>
+        <script>
+            var ws = new WebSocket("ws://localhost:8000/ws");
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages');
+                var message = document.createElement('li');
+                message.textContent = event.data;
+                messages.appendChild(message);
+            };
+            function sendMessage() {
+                var input = document.getElementById("messageText");
+                ws.send(input.value);
+                input.value = '';
+            }
+        </script>
+    </body>
+</html>
+"""
+
+@app.get("/")
+async def get():
+    return HTMLResponse(html)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        await websocket.send_text(f"Message received: {data}")
+```
+
+## 总结
+
+FastAPI是一个功能强大、高效且易于使用的Python Web框架，特别适合构建API。它结合了现代Python特性，如类型提示和异步支持，提供了出色的性能和开发体验。
+
+主要优势：
+- 快速、高效的性能
+- 自动生成的文档
+- 基于类型提示的数据验证
+- 依赖注入系统
+- 支持异步编程
+
+对于初学者来说，FastAPI是一个很好的选择，因为它简单直观，同时又具备构建复杂应用程序所需的所有功能。
+
+## 练习与挑战
+
+1. 创建一个简单的博客API，支持创建、读取、更新和删除博客文章
+2. 扩展TODO API，添加用户认证功能
+3. 使用WebSocket创建一个简单的聊天应用
+4. 实现一个文件上传和下载的API
+5. 将您的API连接到数据库（如SQLite或PostgreSQL）
+
+## 附加资源
+
+- [FastAPI官方文档](https://fastapi.tiangolo.com/)
+- [Uvicorn ASGI服务器](https://www.uvicorn.org/)
+- [Pydantic数据验证](https://pydantic-docs.helpmanual.io/)
+- [Starlette ASGI框架](https://www.starlette.io/)
+
+通过这些资源和实践，你将能够掌握FastAPI并开始构建高效、可靠的Web API。

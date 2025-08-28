@@ -1,0 +1,121 @@
+---
+title: Grafana日志可视化
+description: 学习如何使用Grafana对Loki收集的日志进行高效可视化，包括面板配置、查询语法和实际案例分析。
+---
+
+# Grafana日志可视化
+
+## 介绍
+
+Grafana是一个开源的指标分析和可视化平台，与Loki深度集成后，能够将日志数据转化为直观的图表和仪表盘。本章将指导初学者通过Grafana探索Loki存储的日志数据，实现从原始日志到可视化洞察的完整流程。
+
+## 基础概念
+
+### 1. Loki数据源配置
+首先需在Grafana中添加Loki数据源：
+```yaml
+# grafana配置示例 (datasources.yaml)
+datasources:
+  - name: Loki
+    type: loki
+    url: http://loki:3100
+    access: proxy
+```
+
+### 2. LogQL查询语言
+通过LogQL筛选日志：
+```logql
+{app="nginx"} |= "error" | json | latency > 500ms
+```
+:::tip
+`|=` 是字符串匹配操作符，`| json` 会自动解析JSON格式日志字段
+:::
+
+## 可视化实战
+
+### 1. 时间序列日志统计
+```logql
+sum by (level) (
+  count_over_time(
+    {app="myapp"} | json | level=~"(error|warn)" [1h]
+  )
+)
+```
+
+```mermaid
+%% 示例查询结果可视化
+barChart
+    title 错误级别分布(最近1小时)
+    xAxis 时间
+    yAxis 数量
+    series "error"
+    series "warn"
+```
+
+### 2. 日志字段提取表格
+使用`line_format`格式化输出：
+```logql
+{container="frontend"} 
+| json 
+| line_format "{{.user}} ({{.ip}}) - {{.method}} {{.path}}"
+```
+
+## 实际案例：电商系统监控
+
+### 场景需求
+监控用户下单流程中的异常日志：
+1. 支付超时（包含"payment timeout"）
+2. 库存校验失败（statusCode=500且path包含"/stock"）
+
+### 解决方案
+```logql
+{app="ecommerce"} 
+|~ "payment timeout" 
+or 
+(statusCode=500 and path=~"/stock/.*")
+| rate [5m]
+```
+
+:::note 最佳实践
+建议为高频查询添加缓存：<br />
+`Loki配置 -> query_range -> max_entries`
+:::
+
+## 高级技巧
+
+### 1. 多数据源关联
+将日志指标与Prometheus指标联合查询：
+```logql
+# 关联错误日志与CPU负载
+(avg_over_time({app="api"} |= "panic" [5m])) by (pod)
++
+on(pod) group_left
+(container_cpu_usage_seconds_total)
+```
+
+### 2. 变量模板化
+创建可交互的仪表盘：
+```grafana
+# 在Dashboard设置中添加变量
+Variables -> name=level -> Query: label_values(logs, level)
+```
+
+## 总结
+
+关键知识点回顾：
+- Loki数据源的基础配置方法
+- LogQL的过滤/统计语法
+- 时间序列与表格两种可视化形式
+- 实际业务场景的查询设计模式
+
+## 延伸学习
+
+推荐练习：
+1. 创建一个显示不同namespace错误率的趋势图
+2. 设计包含日志样本和统计数据的混合面板
+3. 实现基于日志内容的告警规则
+
+附加资源：
+- Grafana官方日志可视化教程
+- LogQL语法速查手册
+- 性能优化白皮书

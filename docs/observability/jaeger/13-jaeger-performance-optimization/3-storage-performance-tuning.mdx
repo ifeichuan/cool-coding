@@ -1,0 +1,109 @@
+---
+title: 存储性能调优
+description: 学习如何通过优化存储配置和查询策略提升Jaeger的存储性能，适合分布式追踪系统的初学者。
+---
+
+# 存储性能调优
+
+## 介绍
+
+在分布式追踪系统中，Jaeger的存储性能直接影响查询速度和系统稳定性。存储性能调优的核心目标是减少I/O操作、降低存储负载，同时保证数据的完整性和可查询性。本文将介绍常见的优化策略，包括存储后端选择、索引优化和批量写入等。
+
+:::note
+**关键概念**  
+Jaeger支持多种存储后端（如Cassandra、Elasticsearch），不同后端需采用不同的优化手段。
+:::
+
+---
+
+## 存储后端选择
+
+### 1. Cassandra优化
+Cassandra是Jaeger的默认存储后端，适合高吞吐场景。优化建议：
+- **压缩策略**：使用`LZ4Compressor`减少磁盘占用。
+  ```yaml
+  # cassandra.yaml 配置示例
+  compressor:
+    class_name: LZ4Compressor
+  ```
+- **分片策略**：根据追踪数据量调整`replication_factor`（通常设为3）。
+
+### 2. Elasticsearch优化
+若使用Elasticsearch作为后端，需注意：
+- **分片数**：分片数建议与节点数一致，避免过度分配。
+- **冷热数据分离**：通过`ILM（Index Lifecycle Management）`自动迁移旧数据到廉价存储。
+
+---
+
+## 索引优化
+
+### 创建高效索引
+为高频查询字段（如`service.name`或`operation`）添加索引：
+```sql
+-- Elasticsearch示例：创建服务名索引
+PUT /jaeger-span-*/_mapping
+{
+  "properties": {
+    "service.name": { "type": "keyword" }
+  }
+}
+```
+
+:::caution
+过多的索引会降低写入速度！仅对关键字段建立索引。
+:::
+
+---
+
+## 批量写入与缓存
+
+### 批量写入配置
+通过调整Jaeger Collector的批量参数减少I/O压力：
+```yaml
+# jaeger-collector.yaml
+processor:
+  workers: 50
+  queue-size: 2000
+  es:
+    bulk:
+      size: 5000000  # 5MB批量大小
+      flush-interval: "1s"
+```
+
+### 查询缓存
+启用Redis缓存查询结果（需集成外部缓存组件）：
+```go
+// 示例：Go代码中集成Redis
+cache := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+```
+
+---
+
+## 实际案例
+
+### 案例：电商平台性能提升
+某电商平台使用Jaeger追踪订单流程，优化前查询延迟高达5秒。通过以下改进：
+1. 将Cassandra的`replication_factor`从5调整为3。
+2. 为`order_id`字段添加索引。
+3. 启用Collector批量写入（批量大小从1MB提升到10MB）。
+
+**结果**：查询延迟降至200ms，存储成本降低40%。
+
+---
+
+## 总结
+
+存储性能调优需要结合业务场景选择后端，并通过索引、批量操作和缓存综合提升效率。关键步骤：
+1. **评估需求**：根据数据量和查询模式选择存储后端。
+2. **配置优化**：调整批量大小、压缩和索引策略。
+3. **监控迭代**：使用Jaeger自带的指标监控性能变化。
+
+---
+
+## 延伸练习
+1. 在本地部署Jaeger+Cassandra，尝试调整`replication_factor`并观察写入速度变化。
+2. 使用`jaeger-query`的`/metrics`端点监控查询延迟。
+
+## 资源推荐
+- [Jaeger官方文档：存储配置](https://www.jaegertracing.io/docs/latest/deployment/#storage-backends)
+- 《Cassandra权威指南》第七章“性能调优”

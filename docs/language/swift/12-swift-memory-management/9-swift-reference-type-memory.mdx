@@ -1,0 +1,181 @@
+---
+title: Swift 引用类型内存
+description: 了解Swift中引用类型的内存管理机制，掌握如何通过引用计数管理内存，避免内存泄漏和循环引用。
+---
+
+## 介绍
+
+在Swift中，内存管理是一个重要的概念，尤其是对于引用类型（如类）来说。与值类型（如结构体和枚举）不同，引用类型在内存中是通过引用传递的，这意味着多个变量或常量可以指向同一个实例。为了管理这些实例的内存，Swift使用了**自动引用计数（ARC, Automatic Reference Counting）**机制。
+
+本文将详细介绍Swift中引用类型的内存管理，包括ARC的工作原理、强引用、弱引用和无主引用，以及如何避免常见的内存问题。
+
+## 引用类型与内存管理
+
+在Swift中，类是引用类型。当你创建一个类的实例时，系统会在堆内存中分配一块空间来存储该实例的数据。由于引用类型的实例可以被多个变量或常量共享，因此需要一种机制来跟踪这些引用，以便在不再需要时释放内存。
+
+### 自动引用计数（ARC）
+
+Swift使用ARC来管理引用类型的内存。ARC会自动跟踪每个类实例的引用计数，并在引用计数降为0时释放内存。具体来说：
+
+- 当你创建一个新的类实例时，ARC会为其分配内存，并将引用计数设置为1。
+- 当你将该实例赋值给另一个变量或常量时，引用计数会增加1。
+- 当某个变量或常量不再指向该实例时，引用计数会减少1。
+- 当引用计数降为0时，ARC会自动释放该实例的内存。
+
+### 强引用
+
+默认情况下，Swift中的引用是**强引用**。这意味着只要有一个强引用指向某个实例，该实例就不会被释放。
+
+```swift
+class Person {
+    let name: String
+    init(name: String) {
+        self.name = name
+        print("\(name) is being initialized")
+    }
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+var reference1: Person?
+var reference2: Person?
+
+reference1 = Person(name: "John")  // 输出: John is being initialized
+reference2 = reference1            // 引用计数增加到2
+
+reference1 = nil                   // 引用计数减少到1
+reference2 = nil                   // 引用计数减少到0，输出: John is being deinitialized
+```
+
+在上面的例子中，`Person`类的实例在`reference2`被设置为`nil`时被释放。
+
+### 弱引用
+
+在某些情况下，强引用会导致**循环引用**，即两个或多个实例相互持有强引用，导致它们的引用计数永远不会降为0，从而造成内存泄漏。为了避免这种情况，Swift提供了**弱引用**。
+
+弱引用不会增加引用计数，因此不会阻止ARC释放实例。弱引用通常用于避免循环引用。
+
+```swift
+class Person {
+    let name: String
+    init(name: String) {
+        self.name = name
+        print("\(name) is being initialized")
+    }
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+class Apartment {
+    let unit: String
+    weak var tenant: Person?  // 弱引用
+    init(unit: String) {
+        self.unit = unit
+        print("Apartment \(unit) is being initialized")
+    }
+    deinit {
+        print("Apartment \(unit) is being deinitialized")
+    }
+}
+
+var john: Person?
+var unit4A: Apartment?
+
+john = Person(name: "John")  // 输出: John is being initialized
+unit4A = Apartment(unit: "4A")  // 输出: Apartment 4A is being initialized
+
+unit4A?.tenant = john  // 弱引用，不会增加引用计数
+
+john = nil  // 输出: John is being deinitialized
+unit4A = nil  // 输出: Apartment 4A is being deinitialized
+```
+
+在这个例子中，`Apartment`类的`tenant`属性是一个弱引用，因此当`john`被设置为`nil`时，`Person`实例会被释放。
+
+### 无主引用
+
+与弱引用类似，**无主引用**也不会增加引用计数。但与弱引用不同的是，无主引用假定引用的实例永远不会被释放。如果引用的实例被释放，访问无主引用会导致运行时错误。
+
+无主引用通常用于确保两个实例的生命周期相同的情况。
+
+```swift
+class Customer {
+    let name: String
+    var card: CreditCard?
+    init(name: String) {
+        self.name = name
+        print("\(name) is being initialized")
+    }
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+class CreditCard {
+    let number: UInt64
+    unowned let customer: Customer  // 无主引用
+    init(number: UInt64, customer: Customer) {
+        self.number = number
+        self.customer = customer
+        print("CreditCard #\(number) is being initialized")
+    }
+    deinit {
+        print("CreditCard #\(number) is being deinitialized")
+    }
+}
+
+var john: Customer?
+john = Customer(name: "John")  // 输出: John is being initialized
+john?.card = CreditCard(number: 1234_5678_9012_3456, customer: john!)  // 输出: CreditCard #1234567890123456 is being initialized
+
+john = nil  // 输出: John is being deinitialized
+            // 输出: CreditCard #1234567890123456 is being deinitialized
+```
+
+在这个例子中，`CreditCard`类的`customer`属性是一个无主引用，因此当`john`被设置为`nil`时，`Customer`实例和`CreditCard`实例都会被释放。
+
+## 实际应用场景
+
+### 避免循环引用
+
+在开发中，循环引用是一个常见的内存管理问题。例如，在一个视图控制器中持有一个闭包，而闭包又捕获了视图控制器的强引用，这会导致循环引用。为了避免这种情况，可以使用弱引用或无主引用。
+
+```swift
+class ViewController {
+    var onButtonTap: (() -> Void)?
+
+    func setupButton() {
+        onButtonTap = { [weak self] in
+            guard let self = self else { return }
+            self.doSomething()
+        }
+    }
+
+    func doSomething() {
+        print("Button tapped")
+    }
+
+    deinit {
+        print("ViewController is being deinitialized")
+    }
+}
+
+var vc: ViewController? = ViewController()
+vc?.setupButton()
+vc = nil  // 输出: ViewController is being deinitialized
+```
+
+在这个例子中，闭包捕获了`self`的弱引用，因此当`vc`被设置为`nil`时，`ViewController`实例会被释放。
+
+## 总结
+
+Swift的引用类型内存管理依赖于自动引用计数（ARC）。通过理解强引用、弱引用和无主引用的区别，你可以有效地管理内存，避免内存泄漏和循环引用。在实际开发中，合理使用弱引用和无主引用是确保应用性能的关键。
+
+## 附加资源与练习
+
+- **练习1**：创建一个包含两个相互引用的类的示例，并尝试使用弱引用或无主引用来避免循环引用。
+- **练习2**：在一个闭包中捕获`self`，并观察使用弱引用和不使用弱引用时的内存管理行为。
+
+通过实践这些练习，你将更好地掌握Swift中的引用类型内存管理机制。

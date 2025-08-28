@@ -1,0 +1,337 @@
+---
+title: Java wait方法
+description: 深入了解Java中的wait方法，包含其用途、用法、注意事项及常见应用场景
+---
+
+# Java wait方法
+
+## 什么是wait方法？
+
+在Java的多线程编程中，`wait()`是Object类中定义的一个方法，它允许一个线程进入等待状态，直到其他线程调用相同对象的`notify()`或`notifyAll()`方法来唤醒它。这是Java中实现线程间通信和协作的基础机制之一。
+
+`wait()`方法是实现**生产者-消费者模式**等多线程协作场景的关键。
+
+:::note
+`wait()`、`notify()`和`notifyAll()`方法都必须在同步代码块或同步方法中使用，即必须先获得对象的监视器锁。
+:::
+
+## wait方法的基本语法
+
+`wait()`方法有三种重载形式：
+
+```java
+public final void wait() throws InterruptedException
+public final void wait(long timeout) throws InterruptedException
+public final void wait(long timeout, int nanos) throws InterruptedException
+```
+
+- 不带参数的`wait()`：线程将一直等待，直到被notify或notifyAll唤醒
+- 带`timeout`参数的`wait(long timeout)`：线程等待指定的毫秒数，如果在超时前被通知，则立即返回
+- 带`timeout`和`nanos`参数的`wait(long timeout, int nanos)`：线程等待指定的毫秒数加纳秒数
+
+## wait方法的工作原理
+
+当一个线程调用对象的`wait()`方法时，会发生以下事情：
+
+```mermaid
+flowchart TD
+    A[线程调用obj.wait()] --> B[线程释放obj的锁]
+    B --> C[线程进入等待状态]
+    C --> D{被唤醒条件}
+    D -->|其他线程调用obj.notify()| E[线程被唤醒]
+    D -->|其他线程调用obj.notifyAll()| E
+    D -->|等待超时| E
+    D -->|线程被中断| E
+    E --> F[线程重新竞争obj的锁]
+    F --> G[获得锁后从wait()方法返回]
+```
+
+:::warning
+永远要在循环中使用wait方法，而不是if语句。这可以防止虚假唤醒问题。
+:::
+
+## 基本使用示例
+
+下面是一个简单的例子，展示了`wait()`和`notify()`方法的基本用法：
+
+```java
+public class WaitNotifyExample {
+    public static void main(String[] args) {
+        final Object lock = new Object();
+        
+        // 创建等待线程
+        Thread waiter = new Thread(() -> {
+            synchronized (lock) {
+                System.out.println("等待线程获取了锁");
+                System.out.println("等待线程开始等待...");
+                try {
+                    lock.wait(); // 释放锁并等待
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                System.out.println("等待线程被唤醒，继续执行");
+            }
+        });
+        
+        // 创建通知线程
+        Thread notifier = new Thread(() -> {
+            try {
+                Thread.sleep(2000); // 等待2秒后再通知
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            
+            synchronized (lock) {
+                System.out.println("通知线程获取了锁");
+                System.out.println("通知线程正在通知等待线程...");
+                lock.notify(); // 通知一个在此对象上等待的线程
+                System.out.println("通知完成，但通知线程仍然持有锁");
+            }
+            System.out.println("通知线程释放了锁");
+        });
+        
+        waiter.start();
+        notifier.start();
+    }
+}
+```
+
+**输出：**
+```
+等待线程获取了锁
+等待线程开始等待...
+通知线程获取了锁
+通知线程正在通知等待线程...
+通知完成，但通知线程仍然持有锁
+通知线程释放了锁
+等待线程被唤醒，继续执行
+```
+
+## wait与sleep的区别
+
+初学者容易混淆`wait()`和`Thread.sleep()`方法，但它们有很大的不同：
+
+| 特性 | wait() | sleep() |
+|------|--------|---------|
+| 所属类 | Object | Thread |
+| 释放锁 | 是 | 否 |
+| 使用位置 | 必须在同步块内 | 任何位置 |
+| 唤醒条件 | notify/notifyAll调用或超时 | 时间到期或interrupt() |
+| 使用目的 | 线程间通信 | 线程控制 |
+
+## 经典应用场景：生产者-消费者模式
+
+生产者-消费者是`wait()`和`notify()`方法最经典的应用场景之一：
+
+```java
+public class ProducerConsumerExample {
+    private static final int BUFFER_SIZE = 5;
+    private static final Queue<Integer> queue = new LinkedList<>();
+    private static final Object lock = new Object();
+    private static int value = 0;
+    
+    public static void main(String[] args) {
+        Thread producer = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(1000); // 生产速度
+                    produce();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    break;
+                }
+            }
+        });
+        
+        Thread consumer = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(2000); // 消费速度
+                    consume();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                    break;
+                }
+            }
+        });
+        
+        producer.start();
+        consumer.start();
+    }
+    
+    private static void produce() throws InterruptedException {
+        synchronized (lock) {
+            while (queue.size() == BUFFER_SIZE) {
+                System.out.println("缓冲区满了，生产者等待...");
+                lock.wait();
+            }
+            
+            value++;
+            queue.offer(value);
+            System.out.println("生产: " + value + ", 队列大小: " + queue.size());
+            
+            // 唤醒可能在等待的消费者
+            lock.notifyAll();
+        }
+    }
+    
+    private static void consume() throws InterruptedException {
+        synchronized (lock) {
+            while (queue.isEmpty()) {
+                System.out.println("缓冲区空了，消费者等待...");
+                lock.wait();
+            }
+            
+            int val = queue.poll();
+            System.out.println("消费: " + val + ", 队列大小: " + queue.size());
+            
+            // 唤醒可能在等待的生产者
+            lock.notifyAll();
+        }
+    }
+}
+```
+
+**部分输出：**
+```
+生产: 1, 队列大小: 1
+消费: 1, 队列大小: 0
+生产: 2, 队列大小: 1
+生产: 3, 队列大小: 2
+消费: 2, 队列大小: 1
+生产: 4, 队列大小: 2
+消费: 3, 队列大小: 1
+生产: 5, 队列大小: 2
+生产: 6, 队列大小: 3
+消费: 4, 队列大小: 2
+```
+
+## 使用wait方法时的注意事项
+
+1. **永远在循环中使用wait**：
+   ```java
+   synchronized (obj) {
+       while (condition) { // 不要使用if
+           obj.wait();
+       }
+   }
+   ```
+
+2. **处理InterruptedException**：wait方法会抛出InterruptedException，需要适当处理。
+
+3. **虚假唤醒**：线程可能在没有被notify的情况下被唤醒，这是为什么要在循环中使用wait的原因。
+
+4. **必须在synchronized块中调用**：否则会抛出IllegalMonitorStateException。
+
+5. **notifyAll vs notify**：一般情况下使用notifyAll比notify更安全，因为notify只会唤醒一个随机线程。
+
+## 实际应用案例：实现简单的线程安全计数器
+
+```java
+public class ThreadSafeCounter {
+    private int count = 0;
+    private final int limit;
+    private final Object lock = new Object();
+    private boolean reachedLimit = false;
+
+    public ThreadSafeCounter(int limit) {
+        this.limit = limit;
+    }
+
+    public void increment() throws InterruptedException {
+        synchronized (lock) {
+            while (reachedLimit) {
+                System.out.println(Thread.currentThread().getName() + " 等待，计数器已达上限");
+                lock.wait();
+            }
+            
+            count++;
+            System.out.println(Thread.currentThread().getName() + " 计数: " + count);
+            
+            if (count >= limit) {
+                reachedLimit = true;
+            }
+        }
+    }
+    
+    public void reset() {
+        synchronized (lock) {
+            count = 0;
+            reachedLimit = false;
+            System.out.println(Thread.currentThread().getName() + " 重置计数器");
+            lock.notifyAll(); // 唤醒所有等待的线程
+        }
+    }
+    
+    public static void main(String[] args) {
+        ThreadSafeCounter counter = new ThreadSafeCounter(5);
+        
+        // 创建多个递增线程
+        for (int i = 0; i < 3; i++) {
+            new Thread(() -> {
+                try {
+                    while (true) {
+                        counter.increment();
+                        Thread.sleep(500);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "Incrementer-" + i).start();
+        }
+        
+        // 创建一个重置线程
+        new Thread(() -> {
+            try {
+                while (true) {
+                    Thread.sleep(3000);
+                    counter.reset();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "Resetter").start();
+    }
+}
+```
+
+**部分输出：**
+```
+Incrementer-0 计数: 1
+Incrementer-1 计数: 2
+Incrementer-2 计数: 3
+Incrementer-0 计数: 4
+Incrementer-1 计数: 5
+Incrementer-2 等待，计数器已达上限
+Incrementer-0 等待，计数器已达上限
+Resetter 重置计数器
+Incrementer-2 计数: 1
+Incrementer-0 计数: 2
+Incrementer-1 计数: 3
+```
+
+## 总结
+
+`wait()`方法是Java多线程编程中的基础工具，用于线程间的协作和通信：
+
+1. `wait()`使调用线程进入等待状态，并释放锁
+2. 线程可以通过`notify()`、`notifyAll()`或超时来被唤醒
+3. 必须在同步块中使用`wait()`和`notify()`方法
+4. `wait()`方法应该始终在循环中使用，以防止虚假唤醒
+5. 生产者-消费者模式是`wait()`和`notify()`方法的经典应用
+
+掌握`wait()`方法的使用对于开发复杂的多线程应用程序至关重要，它可以帮助我们实现线程之间的有效协作，避免忙等待，提高程序的效率和响应性。
+
+## 练习
+
+1. 修改生产者-消费者示例，添加多个生产者和消费者，观察程序行为。
+2. 实现一个简单的线程池，使用`wait()`和`notify()`来管理工作线程。
+3. 创建一个资源管理器，限制同时访问资源的线程数量。
+4. 尝试不在循环中使用`wait()`，观察可能出现的问题。
+5. 比较使用`wait()/notify()`和Java 5引入的`java.util.concurrent`包中的工具实现同样功能的差异。
+
+## 进一步阅读
+
+- Java API文档中的[Object.wait()](https://docs.oracle.com/javase/8/docs/api/java/lang/Object.html#wait--)方法
+- 《Java并发编程实战》第14章：构建自定义同步工具
+- [Java内存模型](https://docs.oracle.com/javase/specs/jls/se8/html/jls-17.html#jls-17.4)，了解wait/notify的底层工作原理

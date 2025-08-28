@@ -1,0 +1,162 @@
+---
+title: Promtail排错指南
+description: 学习如何诊断和解决Promtail日志收集代理的常见问题，包括配置错误、连接问题和日志丢失等场景。
+---
+
+# Promtail排错指南
+
+## 介绍
+
+Promtail是Grafana Loki生态系统中负责收集、标记和推送日志的代理工具。当它与Loki服务器集成时，可能会出现配置错误、网络问题或日志处理异常。本指南将帮助初学者识别并修复常见问题。
+
+:::note 关键概念
+Promtail通过`scrape_configs`定义日志来源，使用`clients`配置将日志发送到Loki。排错时需重点关注这两个部分。
+:::
+
+---
+
+## 基础检查
+
+### 1. 验证Promtail服务状态
+```bash
+systemctl status promtail  # Systemd系统
+journalctl -u promtail -f  # 查看日志
+```
+
+**预期输出**：
+```
+Active: active (running)
+```
+
+### 2. 检查配置文件语法
+```bash
+promtail --config.file=/path/to/config.yaml --check-config
+```
+
+**错误示例**：
+```
+error parsing config: yaml: unmarshal errors:
+  line 15: field unknown_field not found in type config.Config
+```
+
+---
+
+## 常见问题与解决方案
+
+### 问题1：日志未出现在Loki中
+**可能原因**：
+- Promtail无法连接Loki
+- 错误的标签配置
+- 文件路径未匹配
+
+**排查步骤**：
+1. 检查Loki连接：
+```yaml
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+```
+
+2. 使用`curl`测试连通性：
+```bash
+curl -v http://loki:3100/ready
+```
+
+3. 验证文件抓取配置：
+```yaml
+scrape_configs:
+- job_name: system
+  static_configs:
+  - targets: [localhost]
+    labels:
+      job: varlogs
+      __path__: /var/log/*.log
+```
+
+:::warning 路径权限
+确保Promtail进程有权限读取目标日志文件：
+```bash
+ls -la /var/log/syslog
+```
+:::
+
+---
+
+### 问题2：高内存/CPU占用
+**优化方案**：
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0  # 禁用GRPC可减少资源消耗
+
+positions:
+  sync_period: 15s     # 减少位置文件写入频率
+```
+
+---
+
+## 高级调试技巧
+
+### 1. 启用调试日志
+```yaml
+logging:
+  level: debug
+```
+
+**示例输出**：
+```
+level=debug msg="tailer started" path=/var/log/nginx.log
+level=error msg="error sending batch" error="context deadline exceeded"
+```
+
+### 2. 使用Promtail API
+```bash
+curl http://localhost:9080/metrics  # 查看指标
+curl http://localhost:9080/config  # 导出当前配置
+```
+
+---
+
+## 实际案例
+
+### 案例：Docker日志收集失败
+**错误配置**：
+```yaml
+scrape_configs:
+- job_name: docker
+  docker_sd_configs:
+    - host: unix:///var/run/docker.sock
+```
+
+**修复方案**：
+1. 添加必要的标签：
+```yaml
+  relabel_configs:
+  - source_labels: ['__meta_docker_container_name']
+    regex: '/(.*)'
+    target_label: 'container'
+```
+
+2. 验证Docker socket权限：
+```bash
+ls -la /var/run/docker.sock
+```
+
+---
+
+## 总结
+
+通过本指南，你学会了：
+- 检查Promtail服务状态和配置
+- 诊断日志传输问题
+- 优化资源使用
+- 使用调试工具
+
+**延伸练习**：
+1. 故意修改配置使其出错，观察日志输出
+2. 创建一个模拟高负载场景，测试性能调整参数
+3. 比较不同`batchwait`设置对日志延迟的影响
+
+:::tip 附加资源
+- [官方文档](https://grafana.com/docs/loki/latest/clients/promtail/)
+- [配置参考手册](https://grafana.com/docs/loki/latest/configuration/examples/)
+:::

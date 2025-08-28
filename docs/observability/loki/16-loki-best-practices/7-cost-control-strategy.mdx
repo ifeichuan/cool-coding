@@ -1,0 +1,129 @@
+---
+title: Loki 成本控制策略
+description: "学习如何通过优化配置和存储策略降低 Grafana Loki 的运营成本，适合初学者掌握的核心实践方法。"
+---
+
+# Loki 成本控制策略
+
+## 介绍
+
+Grafana Loki 是一个高效的日志聚合系统，专为云原生环境设计。随着日志量的增长，存储和查询成本可能迅速上升。本章将介绍如何通过**索引优化**、**存储策略**和**查询优化**控制 Loki 的使用成本，同时保持系统可靠性。
+
+:::tip 核心原则
+Loki 成本控制的核心是：**减少不必要的数据存储**，**优化查询效率**，**合理选择存储后端**。
+:::
+
+---
+
+## 1. 优化日志采集
+
+### 1.1 过滤非必要日志
+通过 `Promtail` 配置仅采集关键日志，减少数据摄入量：
+
+```yaml
+# promtail-config.yaml
+scrape_configs:
+  - job_name: application
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx
+          __path__: /var/log/nginx/*.log
+    pipeline_stages:
+      - drop:
+          expression: ".*DEBUG.*"  # 丢弃 DEBUG 级别日志
+```
+
+### 1.2 使用动态标签
+避免过度使用标签，优先使用 `查询过滤器` 而非标签：
+
+```yaml
+# 推荐方式（少标签 + 过滤器）
+labels:
+  job: nginx
+  environment: prod
+
+# 不推荐（标签爆炸）
+labels:
+  job: nginx
+  user_id: {{.UserID}}  # 高基数标签会导致性能下降
+```
+
+---
+
+## 2. 存储优化策略
+
+### 2.1 选择适当的存储后端
+根据成本需求选择存储类型：
+
+| 后端类型       | 成本 | 适用场景                |
+|----------------|------|-------------------------|
+| 本地存储       | 低   | 开发环境/小规模部署     |
+| S3/GCS         | 中   | 云环境，需长期存储      |
+| 块存储（如PD） | 高   | 高性能要求的生产环境    |
+
+### 2.2 配置保留策略
+在 `loki.yaml` 中设置自动清理旧日志：
+
+```yaml
+compactor:
+  working_directory: /tmp/loki/compactor
+  shared_store: s3
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 10
+
+limits_config:
+  retention_period: 720h  # 保留30天日志
+```
+
+---
+
+## 3. 查询优化
+
+### 3.1 使用 LogQL 过滤器
+精确缩小查询范围：
+
+```sql
+{job="nginx"} |= "error" != "timeout" | json | latency > 500ms
+```
+
+### 3.2 限制查询时间范围
+避免全量扫描：
+
+```sql
+{job="nginx"} |= "login failed" [15m]  # 仅查询最近15分钟
+```
+
+---
+
+## 4. 实际案例
+
+### 案例：电商平台日志优化
+**问题**：日增 1TB 日志，S3 成本每月 $3000+  
+**解决方案**：
+1. 通过 `drop` 阶段过滤健康检查日志（减少40%数据）
+2. 将 `user_id` 从标签改为查询过滤器
+3. 设置 7 天热存储 + 30 天冷存储分层  
+**结果**：成本降低至每月 $800，查询性能提升 2 倍。
+
+---
+
+## 总结
+
+| 策略          | 关键动作                          | 预期效果               |
+|---------------|-----------------------------------|------------------------|
+| 采集优化      | 过滤非关键日志，控制标签基数      | 减少摄入量 30%-50%     |
+| 存储优化      | 分层存储，设置保留策略            | 降低存储成本 40%-70%   |
+| 查询优化      | 精确时间范围，使用 LogQL 过滤器   | 减少查询延迟 60%+      |
+
+:::warning 注意
+所有修改应先在生产环境的隔离副本中测试，避免意外数据丢失！
+:::
+
+## 延伸学习
+
+- 官方文档：[Loki Storage Retention](https://grafana.com/docs/loki/latest/operations/storage/retention/)
+- 实践练习：
+  1. 在测试环境配置日志保留策略为 24 小时
+  2. 对比使用 `|= "error"` 和不加过滤器的查询速度差异

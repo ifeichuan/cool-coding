@@ -1,0 +1,137 @@
+---
+title: 收集器实现
+description: 了解如何在 Prometheus 自定义导出器中实现收集器，以收集和暴露自定义指标。
+---
+
+# 收集器实现
+
+在 Prometheus 中，**收集器（Collector）** 是一个核心概念，用于从目标系统中收集指标数据并将其暴露给 Prometheus 服务器。通过实现自定义收集器，您可以扩展 Prometheus 的功能，使其能够监控特定的应用程序或系统。
+
+本文将逐步介绍如何实现一个自定义收集器，并通过实际案例展示其应用场景。
+
+## 什么是收集器？
+
+收集器是 Prometheus 客户端库中的一个接口，用于定义如何收集和暴露指标。每个收集器负责从目标系统中获取数据，并将其转换为 Prometheus 可以理解的格式（即指标）。
+
+Prometheus 提供了多种语言的客户端库（如 Go、Python、Java 等），这些库通常已经内置了一些常见的收集器（如 CPU 使用率、内存使用率等）。然而，如果您需要监控自定义指标，则需要实现自己的收集器。
+
+## 实现自定义收集器
+
+### 1. 选择客户端库
+
+首先，您需要选择一个适合您编程语言的 Prometheus 客户端库。本文将以 Go 语言为例，使用 [Prometheus Go 客户端库](https://github.com/prometheus/client_golang)。
+
+### 2. 定义指标
+
+在实现收集器之前，您需要定义要收集的指标。指标可以是计数器（Counter）、仪表盘（Gauge）、直方图（Histogram）或摘要（Summary）。
+
+例如，假设我们要监控一个应用程序的请求数量，我们可以定义一个计数器：
+
+```go
+var (
+    requestsTotal = prometheus.NewCounter(
+        prometheus.CounterOpts{
+            Name: "myapp_requests_total",
+            Help: "Total number of requests.",
+        },
+    )
+)
+```
+
+### 3. 实现收集器接口
+
+在 Go 中，收集器需要实现 `prometheus.Collector` 接口，该接口包含两个方法：
+
+- `Describe(chan<- *prometheus.Desc)`：用于描述收集器暴露的指标。
+- `Collect(chan<- prometheus.Metric)`：用于收集实际的指标数据。
+
+以下是一个简单的收集器实现示例：
+
+```go
+type MyCollector struct{}
+
+func (c *MyCollector) Describe(ch chan<- *prometheus.Desc) {
+    ch <- requestsTotal.Desc()
+}
+
+func (c *MyCollector) Collect(ch chan<- prometheus.Metric) {
+    // 模拟收集请求数量
+    requestsTotal.Inc()
+    ch <- requestsTotal
+}
+```
+
+### 4. 注册收集器
+
+最后，您需要将收集器注册到 Prometheus 中：
+
+```go
+func main() {
+    // 创建自定义收集器实例
+    myCollector := &MyCollector{}
+
+    // 注册收集器
+    prometheus.MustRegister(myCollector)
+
+    // 启动 HTTP 服务器以暴露指标
+    http.Handle("/metrics", promhttp.Handler())
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+### 5. 运行并测试
+
+运行上述代码后，您可以通过访问 `http://localhost:8080/metrics` 来查看暴露的指标。您应该会看到类似以下的输出：
+
+```
+# HELP myapp_requests_total Total number of requests.
+# TYPE myapp_requests_total counter
+myapp_requests_total 1
+```
+
+## 实际应用场景
+
+假设您正在开发一个 Web 应用程序，并希望监控每个 API 端点的请求数量。您可以为每个端点实现一个自定义收集器，并在每次请求时增加相应的计数器。
+
+例如：
+
+```go
+var (
+    endpointRequestsTotal = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "myapp_endpoint_requests_total",
+            Help: "Total number of requests per endpoint.",
+        },
+        []string{"endpoint"},
+    )
+)
+
+func handleRequest(endpoint string) {
+    // 处理请求逻辑
+    endpointRequestsTotal.WithLabelValues(endpoint).Inc()
+}
+```
+
+通过这种方式，您可以轻松地监控每个端点的请求量，并在 Prometheus 中进行分析和告警。
+
+## 总结
+
+实现自定义收集器是扩展 Prometheus 监控能力的关键步骤。通过定义指标、实现收集器接口并注册收集器，您可以轻松地将自定义指标暴露给 Prometheus。
+
+:::tip
+在实际应用中，建议将收集器的实现与业务逻辑分离，以保持代码的清晰和可维护性。
+:::
+
+## 附加资源
+
+- [Prometheus 官方文档](https://prometheus.io/docs/)
+- [Prometheus Go 客户端库](https://github.com/prometheus/client_golang)
+- [Prometheus 指标类型](https://prometheus.io/docs/concepts/metric_types/)
+
+## 练习
+
+1. 尝试实现一个自定义收集器，用于监控您的应用程序的内存使用情况。
+2. 修改上述示例，使其能够监控多个端点的请求延迟（使用直方图或摘要）。
+3. 将您的自定义收集器集成到一个现有的应用程序中，并通过 Prometheus 进行监控。
+
+通过完成这些练习，您将更深入地理解 Prometheus 收集器的实现和应用。

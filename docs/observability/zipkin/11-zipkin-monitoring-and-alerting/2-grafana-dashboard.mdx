@@ -1,0 +1,152 @@
+---
+title: Grafana仪表盘
+description: 学习如何使用Grafana创建可视化Zipkin监控数据的仪表盘，实现分布式追踪系统的告警与分析。
+---
+
+# Grafana仪表盘
+
+## 介绍
+
+Grafana是一个开源的指标分析和可视化平台，常与Zipkin等分布式追踪系统集成。通过Grafana仪表盘，你可以将Zipkin收集的追踪数据转化为直观的图表和告警，帮助团队快速发现性能瓶颈和系统异常。
+
+:::tip 为什么需要Grafana？
+- **可视化**：将原始追踪数据转化为折线图、热力图等
+- **告警**：基于阈值设置自动通知
+- **聚合分析**：跨服务统计延迟、错误率等关键指标
+:::
+
+## 前置条件
+
+在开始前，请确保：
+1. 已部署Zipkin服务并收集追踪数据
+2. 安装Grafana（推荐v9.0+）
+3. Zipkin数据已存储到Prometheus/Elasticsearch等Grafana支持的数据源
+
+## 基础配置
+
+### 1. 添加数据源
+
+在Grafana界面配置Zipkin的数据存储后端（以Prometheus为例）：
+
+```yaml
+# 示例：Grafana的Prometheus数据源配置
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+```
+
+### 2. 创建仪表盘
+
+通过Grafana UI或JSON模型创建仪表盘：
+
+```json
+{
+  "title": "Zipkin性能监控",
+  "panels": [
+    {
+      "title": "请求延迟",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum(rate(zipkin_latency_bucket[5m])) by (le))"
+      }]
+    }
+  ]
+}
+```
+
+## 核心功能实现
+
+### 延迟监控面板
+
+使用PromQL查询展示P95延迟：
+
+```promql
+histogram_quantile(0.95, 
+  sum(rate(zipkin_latency_bucket{service="payment-service"}[5m])) 
+by (le)
+```
+
+### 错误率告警
+
+创建告警规则监控错误率突增：
+
+```sql
+100 * sum(rate(zipkin_spans_total{http_status_code=~"5.."}[1m]))
+/
+sum(rate(zipkin_spans_total[1m]))
+```
+
+:::warning 注意
+阈值建议：
+- Warning: > 1%
+- Critical: > 5%
+:::
+
+## 实战案例：电商系统监控
+
+### 场景描述
+监控以下服务的交互：
+1. `order-service` 订单服务
+2. `payment-service` 支付服务
+3. `inventory-service` 库存服务
+
+### 关键仪表盘配置
+
+```mermaid
+flowchart LR
+    A[订单创建] --> B[支付处理]
+    B --> C[库存扣减]
+    C --> D[完成通知]
+```
+
+对应的监控指标：
+- 各服务P99延迟
+- 跨服务调用错误率
+- 慢查询追踪（>500ms）
+
+## 高级技巧
+
+### 变量模板化
+
+使用Grafana变量实现动态过滤：
+
+```text
+$service = order-service,payment-service,inventory-service
+```
+
+然后在查询中引用：
+```promql
+histogram_quantile(0.99, 
+  sum(rate(zipkin_latency_bucket{service=~"$service"}[5m])) 
+by (service, le)
+```
+
+### 关联日志
+
+在图表中添加跳转到对应追踪详情的链接：
+```text
+https://zipkin.example.com/trace/${__data.fields.traceId}
+```
+
+## 总结
+
+通过本指南你学会了：
+- 配置Grafana与Zipkin数据源的连接
+- 创建延迟、错误率等关键指标仪表盘
+- 设置基于业务场景的告警规则
+- 使用高级功能提升监控效率
+
+## 延伸学习
+
+推荐练习：
+1. 为你的测试环境部署Grafana+Zipkin
+2. 创建一个包含3个关键指标的仪表盘
+3. 设置当错误率>5%时触发Slack通知
+
+附加资源：
+- [Grafana官方文档](https://grafana.com/docs/)
+- [Zipkin指标说明](https://zipkin.io/pages/metrics.html)

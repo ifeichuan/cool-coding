@@ -1,0 +1,335 @@
+---
+title: JavaScript 跨域安全
+description: 了解JavaScript中的同源策略、跨域安全问题及其解决方案，适合前端开发初学者的全面指南。
+---
+
+# JavaScript 跨域安全
+
+## 什么是跨域安全？
+
+在Web开发中，"跨域"是一个经常被讨论的安全概念。当我们谈论"跨域"时，实际上是在讨论浏览器的**同源策略(Same-Origin Policy)**所带来的限制以及如何安全地绕过这些限制。
+
+### 同源策略
+
+同源策略是浏览器实施的一种安全机制，它限制了从一个源加载的文档或脚本如何与来自另一个源的资源进行交互。这是为了防止恶意网站读取另一个网站的数据。
+
+当我们说两个URL是"同源"的，意味着它们具有相同的：
+- 协议（如HTTP或HTTPS）
+- 主机名（域名）
+- 端口号
+
+:::note 同源示例
+以下URL是否与 `https://example.com/page.html` 同源？
+
+- `https://example.com/other.html` ✅ 同源（只是路径不同）
+- `http://example.com/page.html` ❌ 不同源（协议不同）
+- `https://api.example.com/page.html` ❌ 不同源（子域名不同）
+- `https://example.com:8080/page.html` ❌ 不同源（端口不同）
+:::
+
+## 跨域安全问题的表现
+
+在实际开发中，跨域安全限制主要表现在以下几方面：
+
+1. **Ajax请求限制**：不能从一个源发起对另一个源的Ajax请求（XHR或Fetch API）
+2. **DOM访问限制**：不能从一个源的页面访问或操作另一个源的DOM
+3. **Cookie、LocalStorage和IndexDB限制**：它们受到源的限制，一个源的页面不能访问另一个源的存储数据
+
+## 跨域解决方案
+
+### 1. CORS（Cross-Origin Resource Sharing，跨域资源共享）
+
+CORS是W3C标准，允许服务器声明哪些源可以访问资源。这是最常用且最推荐的跨域解决方案。
+
+#### 简单请求
+
+对于简单的GET、POST或HEAD请求，只需服务器设置响应头：
+
+```
+Access-Control-Allow-Origin: https://example.com
+```
+
+或允许所有来源（不建议在生产环境使用）：
+
+```
+Access-Control-Allow-Origin: *
+```
+
+#### 预检请求
+
+对于更复杂的请求（如使用PUT方法或自定义头），浏览器会先发送一个OPTIONS预检请求。
+
+**服务端实现示例（Node.js Express）：**
+
+```javascript
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://example.com');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  // 处理OPTIONS预检请求
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+```
+
+**前端代码（使用Fetch API）：**
+
+```javascript
+// 这是一个会触发预检请求的复杂请求
+fetch('https://api.example.com/data', {
+  method: 'PUT',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer token123'
+  },
+  body: JSON.stringify({ key: 'value' })
+})
+.then(response => response.json())
+.then(data => console.log(data))
+.catch(error => console.error('Error:', error));
+```
+
+### 2. JSONP（JSON with Padding）
+
+JSONP利用`<script>`标签不受同源策略限制的特性，但只支持GET请求。
+
+**前端代码：**
+
+```javascript
+function handleResponse(data) {
+  console.log('收到的数据:', data);
+}
+
+const script = document.createElement('script');
+script.src = 'https://api.example.com/data?callback=handleResponse';
+document.body.appendChild(script);
+```
+
+**服务端返回（示例为PHP）：**
+
+```php
+<?php
+$callback = $_GET['callback'];
+$data = array('name' => 'John', 'age' => 30);
+echo $callback . '(' . json_encode($data) . ')';
+?>
+```
+
+:::caution
+JSONP有重大安全隐患，因为它将服务器返回的内容作为JavaScript执行。如果服务器被攻击者控制，可能会执行任意JavaScript代码。
+:::
+
+### 3. 代理服务器
+
+在自己的服务器上创建代理，由服务器发起请求，再将结果返回给前端。
+
+**前端代码：**
+
+```javascript
+// 请求自己的服务器
+fetch('/api/proxy?url=https://api.example.com/data')
+  .then(response => response.json())
+  .then(data => console.log(data));
+```
+
+**Node.js代理服务器示例：**
+
+```javascript
+const express = require('express');
+const axios = require('axios');
+const app = express();
+
+app.get('/api/proxy', async (req, res) => {
+  try {
+    const response = await axios.get(req.query.url);
+    res.json(response.data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.listen(3000, () => {
+  console.log('代理服务器运行在 3000 端口');
+});
+```
+
+### 4. WebSocket
+
+WebSocket协议提供了一种全双工通信通道，在建立连接后不受同源策略限制。
+
+```javascript
+const socket = new WebSocket('wss://api.example.com/socket');
+
+socket.onopen = function(e) {
+  console.log('连接已建立');
+  socket.send(JSON.stringify({type: 'getData', id: 123}));
+};
+
+socket.onmessage = function(event) {
+  console.log('收到数据:', JSON.parse(event.data));
+};
+
+socket.onclose = function(event) {
+  if (event.wasClean) {
+    console.log('连接正常关闭');
+  } else {
+    console.log('连接意外断开');
+  }
+};
+
+socket.onerror = function(error) {
+  console.error('WebSocket错误:', error);
+};
+```
+
+### 5. postMessage API
+
+`window.postMessage()`允许安全地实现跨域通信，特别适合iframe之间的通信。
+
+**父窗口代码：**
+
+```javascript
+const iframe = document.getElementById('myIframe');
+iframe.onload = function() {
+  // 向iframe发送消息
+  iframe.contentWindow.postMessage({
+    message: 'Hello from parent!'
+  }, 'https://trusted-iframe.com');
+};
+
+// 接收来自iframe的消息
+window.addEventListener('message', function(event) {
+  // 检查源以确保安全
+  if (event.origin !== 'https://trusted-iframe.com') return;
+  
+  console.log('从iframe收到消息:', event.data);
+});
+```
+
+**iframe代码（位于trusted-iframe.com）：**
+
+```javascript
+// 接收来自父窗口的消息
+window.addEventListener('message', function(event) {
+  // 检查源以确保安全
+  if (event.origin !== 'https://parent-site.com') return;
+  
+  console.log('从父窗口收到消息:', event.data);
+  
+  // 回复父窗口
+  event.source.postMessage({
+    message: 'Hello from iframe!'
+  }, event.origin);
+});
+```
+
+## 跨域安全的实际案例
+
+### 案例1：后端API与前端分离架构
+
+现代Web应用常常将前端和后端分离部署，例如：
+- 前端部署在：`https://myapp.com`
+- API部署在：`https://api.myapp.com`
+
+这种情况下，前端发起的所有API请求都会面临跨域问题。
+
+**解决方案：**
+后端API实现CORS，允许来自`https://myapp.com`的请求：
+
+```javascript
+// Node.js Express 后端
+app.use(cors({
+  origin: 'https://myapp.com',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+```
+
+### 案例2：第三方服务集成
+
+假设你正在开发一个需要集成第三方支付服务的电商网站。
+
+```mermaid
+sequenceDiagram
+    参与者 用户
+    参与者 电商网站 (yourstore.com)
+    参与者 支付服务 (payment.com)
+    
+    用户->>电商网站: 1. 浏览商品并下单
+    电商网站->>支付服务: 2. 创建支付请求
+    支付服务-->>电商网站: 3. 返回支付链接
+    电商网站-->>用户: 4. 重定向到支付页面
+    用户->>支付服务: 5. 完成支付
+    支付服务->>电商网站: 6. 支付成功回调(跨域)
+    电商网站-->>用户: 7. 显示支付成功
+```
+
+**解决方案：**
+1. 支付服务提供的回调需要服务端处理，不在前端处理
+2. 电商网站需要提供专门的后端API接收支付回调
+3. 前端通过轮询或WebSocket获取支付状态
+
+## 安全最佳实践
+
+在实现跨域通信时，请记住以下安全最佳实践：
+
+1. **精确指定允许的域**：避免使用`Access-Control-Allow-Origin: *`，而是明确列出允许的域
+   
+2. **验证来源**：在使用`postMessage`或处理来自其他窗口的消息时，始终检查`event.origin`
+
+3. **使用HTTPS**：跨域通信应在HTTPS环境下进行，以防止中间人攻击
+
+4. **设置适当的CORS头**：只允许必要的HTTP方法和头部
+
+5. **避免使用JSONP**：如非必要，避免使用JSONP，因为它有严重的安全风险
+
+6. **考虑使用CSP**：内容安全策略(Content Security Policy)可以进一步限制可加载资源的来源
+
+```javascript
+// 示例：检查postMessage来源的安全方式
+window.addEventListener('message', function(event) {
+  // 维护一个可信来源白名单
+  const trustedOrigins = [
+    'https://trusted-site.com',
+    'https://api.myapp.com'
+  ];
+  
+  if (!trustedOrigins.includes(event.origin)) {
+    console.error('收到来自不信任源的消息:', event.origin);
+    return;
+  }
+  
+  // 处理来自可信源的消息
+  console.log('处理来自可信源的消息:', event.data);
+});
+```
+
+## 总结
+
+JavaScript跨域安全是Web开发中的重要概念：
+
+1. **同源策略**是浏览器的安全机制，限制跨源请求和资源访问
+2. **CORS**是最标准、最安全的跨域解决方案
+3. 其他解决方案包括**JSONP**、**代理服务器**、**WebSocket**和**postMessage**
+4. 实现跨域解决方案时必须注意安全性，避免引入新的安全漏洞
+5. 根据具体应用场景选择最合适的跨域解决方案
+
+## 练习与延伸阅读
+
+### 练习
+
+1. 创建一个简单的网页，尝试通过Fetch API访问一个跨域资源，观察控制台错误
+2. 使用Node.js搭建一个支持CORS的简单API服务器
+3. 实现两个不同域的页面之间使用postMessage进行通信
+
+### 延伸阅读
+
+1. MDN Web文档上关于[同源策略](https://developer.mozilla.org/zh-CN/docs/Web/Security/Same-origin_policy)的详细解释
+2. [CORS完全指南](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/CORS)
+3. [内容安全策略(CSP)](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/CSP)如何增强网站安全
+4. Web应用中的[跨站脚本攻击(XSS)](https://owasp.org/www-community/attacks/xss/)和如何防范
+
+通过理解并正确实施跨域安全措施，你可以构建既能满足现代Web应用需求，又能保护用户数据安全的系统。

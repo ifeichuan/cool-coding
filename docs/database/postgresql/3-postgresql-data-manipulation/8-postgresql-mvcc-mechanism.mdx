@@ -1,0 +1,102 @@
+---
+title: PostgreSQL MVCC机制
+description: 了解 PostgreSQL 的多版本并发控制（MVCC）机制，掌握其工作原理、优势以及实际应用场景。
+---
+
+# PostgreSQL MVCC机制
+
+PostgreSQL 是一个功能强大的开源关系型数据库管理系统，其核心特性之一是多版本并发控制（MVCC，Multi-Version Concurrency Control）。MVCC 是 PostgreSQL 实现高并发和数据一致性的关键技术。本文将详细介绍 MVCC 的工作原理、优势以及实际应用场景。
+
+## 什么是 MVCC？
+
+MVCC 是一种并发控制机制，允许多个事务同时访问数据库，而不会相互阻塞。它通过为每个事务创建数据的“快照”来实现这一点，从而避免了传统锁机制带来的性能瓶颈。
+
+在 MVCC 中，每个事务看到的数据都是在其开始时的一个一致版本。这意味着即使其他事务正在修改数据，当前事务也不会受到影响。
+
+## MVCC 的工作原理
+
+### 1. 版本控制
+
+PostgreSQL 中的每一行数据都有一个隐藏的系统列 `xmin` 和 `xmax`，分别表示插入和删除该行的事务 ID。当一个事务插入一行数据时，`xmin` 被设置为该事务的 ID。当一个事务删除一行数据时，`xmax` 被设置为该事务的 ID。
+
+### 2. 事务快照
+
+每个事务在开始时都会创建一个快照，记录当前所有活动事务的 ID。这个快照用于确定哪些数据版本对当前事务可见。
+
+### 3. 可见性规则
+
+PostgreSQL 使用以下规则来确定一行数据是否对当前事务可见：
+
+- 如果 `xmin` 小于当前事务的 ID，并且 `xmax` 为空或大于当前事务的 ID，则该行对当前事务可见。
+- 如果 `xmin` 大于当前事务的 ID，则该行对当前事务不可见。
+- 如果 `xmax` 小于当前事务的 ID，则该行已被删除，对当前事务不可见。
+
+### 4. 清理旧版本
+
+随着时间的推移，数据库中会积累大量旧版本的数据。PostgreSQL 通过 `VACUUM` 命令来清理这些不再需要的旧版本数据，以释放存储空间。
+
+## 实际案例
+
+假设我们有一个简单的表 `accounts`，包含用户的账户余额：
+
+```sql
+CREATE TABLE accounts (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    balance NUMERIC
+);
+```
+
+现在，我们插入一些初始数据：
+
+```sql
+INSERT INTO accounts (name, balance) VALUES ('Alice', 1000), ('Bob', 500);
+```
+
+接下来，我们模拟两个并发事务：
+
+1. 事务 A 开始，并查询 Alice 的余额：
+
+```sql
+BEGIN;
+SELECT balance FROM accounts WHERE name = 'Alice';
+```
+
+2. 事务 B 开始，并更新 Alice 的余额：
+
+```sql
+BEGIN;
+UPDATE accounts SET balance = 1500 WHERE name = 'Alice';
+COMMIT;
+```
+
+3. 事务 A 再次查询 Alice 的余额：
+
+```sql
+SELECT balance FROM accounts WHERE name = 'Alice';
+COMMIT;
+```
+
+在事务 A 中，第一次查询会返回 `1000`，因为事务 A 开始时 Alice 的余额是 `1000`。即使事务 B 已经更新了 Alice 的余额，事务 A 仍然看到的是旧版本的数据。
+
+## MVCC 的优势
+
+- **高并发**：MVCC 允许多个事务同时读取和写入数据，而不会相互阻塞。
+- **一致性**：每个事务看到的数据都是一致的，不会受到其他事务的影响。
+- **减少锁争用**：MVCC 减少了传统锁机制带来的锁争用问题，提高了数据库的性能。
+
+## 总结
+
+PostgreSQL 的 MVCC 机制是实现高并发和数据一致性的关键技术。通过版本控制和事务快照，MVCC 允许多个事务同时访问数据库，而不会相互阻塞。理解 MVCC 的工作原理对于优化数据库性能和设计高并发应用至关重要。
+
+## 附加资源
+
+- [PostgreSQL 官方文档 - MVCC](https://www.postgresql.org/docs/current/mvcc.html)
+- [PostgreSQL 事务隔离级别](https://www.postgresql.org/docs/current/transaction-iso.html)
+- [PostgreSQL VACUUM 命令](https://www.postgresql.org/docs/current/sql-vacuum.html)
+
+## 练习
+
+1. 创建一个包含多个版本的表，并使用 `VACUUM` 命令清理旧版本数据。
+2. 模拟多个并发事务，观察 MVCC 如何保证数据一致性。
+3. 研究 PostgreSQL 的事务隔离级别，了解它们如何影响 MVCC 的行为。

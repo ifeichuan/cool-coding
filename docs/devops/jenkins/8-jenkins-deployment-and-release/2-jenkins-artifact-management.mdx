@@ -1,0 +1,173 @@
+---
+title: Jenkins 制品管理
+description: 了解如何在Jenkins中管理构建生成的制品，包括存储、归档和分发的最佳实践。
+---
+
+# Jenkins 制品管理
+
+在持续集成和持续交付（CI/CD）流程中，**制品管理**是一个至关重要的环节。制品是指构建过程中生成的可部署文件，例如JAR包、WAR包、Docker镜像等。Jenkins提供了强大的功能来管理这些制品，确保它们能够被安全存储、归档和分发。
+
+本文将逐步介绍如何在Jenkins中管理制品，并通过实际案例展示其应用场景。
+
+## 什么是制品管理？
+
+制品管理是指在CI/CD流程中对构建生成的输出文件进行存储、版本控制和分发的管理过程。Jenkins通过插件和内置功能，帮助开发者轻松管理这些制品。
+
+### 为什么需要制品管理？
+
+1. **版本控制**：确保每个构建生成的制品都有唯一的标识，便于追踪和回滚。
+2. **存储与归档**：将制品存储在安全的位置，避免丢失或损坏。
+3. **分发与部署**：将制品分发到测试环境或生产环境，确保部署的一致性。
+
+## Jenkins 中的制品管理
+
+Jenkins提供了多种方式来管理制品，以下是常见的几种方法：
+
+### 1. 使用 `archiveArtifacts` 步骤归档制品
+
+Jenkins Pipeline提供了 `archiveArtifacts` 步骤，用于将构建生成的制品归档到Jenkins服务器上。以下是一个简单的示例：
+
+```groovy
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Archive Artifacts') {
+            steps {
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+        }
+    }
+}
+```
+
+在这个示例中，`mvn clean package` 命令生成一个JAR文件，然后通过 `archiveArtifacts` 步骤将其归档。`artifacts` 参数指定了要归档的文件路径，`fingerprint` 参数用于生成制品的唯一标识。
+
+:::tip
+`archiveArtifacts` 步骤会将制品存储在Jenkins的构建目录中，你可以通过Jenkins的Web界面访问这些制品。
+:::
+
+### 2. 使用 `stash` 和 `unstash` 共享制品
+
+在多个阶段之间共享制品时，可以使用 `stash` 和 `unstash` 步骤。`stash` 用于临时存储制品，`unstash` 用于在后续阶段中恢复这些制品。
+
+```groovy
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+                stash name: 'app-jar', includes: 'target/*.jar'
+            }
+        }
+        stage('Test') {
+            steps {
+                unstash 'app-jar'
+                sh 'java -jar target/app.jar'
+            }
+        }
+    }
+}
+```
+
+在这个示例中，`stash` 步骤将生成的JAR文件临时存储，然后在 `Test` 阶段通过 `unstash` 步骤恢复并使用。
+
+:::caution
+`stash` 和 `unstash` 适用于在同一Pipeline中共享制品。如果需要跨Pipeline共享制品，建议使用外部存储（如Nexus或Artifactory）。
+:::
+
+### 3. 使用外部制品仓库
+
+对于大型项目，建议将制品存储在外部制品仓库中，例如Nexus、Artifactory或AWS S3。Jenkins可以通过插件与这些仓库集成，实现制品的上传和下载。
+
+以下是一个使用Nexus插件上传制品的示例：
+
+```groovy
+pipeline {
+    agent any
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Upload to Nexus') {
+            steps {
+                nexusArtifactUploader(
+                    nexusVersion: 'nexus3',
+                    protocol: 'http',
+                    nexusUrl: 'nexus.example.com',
+                    groupId: 'com.example',
+                    version: '1.0.0',
+                    repository: 'maven-releases',
+                    credentialsId: 'nexus-credentials',
+                    artifacts: [
+                        [artifactId: 'app',
+                         type: 'jar',
+                         file: 'target/app.jar']
+                    ]
+                )
+            }
+        }
+    }
+}
+```
+
+在这个示例中，`nexusArtifactUploader` 步骤将生成的JAR文件上传到Nexus仓库。
+
+:::note
+使用外部制品仓库可以提高制品的可用性和安全性，同时支持版本控制和依赖管理。
+:::
+
+## 实际案例：Docker镜像管理
+
+在现代CI/CD流程中，Docker镜像是一种常见的制品。以下是一个使用Jenkins构建并推送Docker镜像的示例：
+
+```groovy
+pipeline {
+    agent any
+    stages {
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("my-app:${env.BUILD_ID}")
+                }
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    docker.withRegistry('https://registry.example.com', 'docker-credentials') {
+                        docker.image("my-app:${env.BUILD_ID}").push()
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+在这个示例中，Jenkins首先构建Docker镜像，然后将其推送到Docker仓库。通过这种方式，Docker镜像可以被其他环境或团队使用。
+
+## 总结
+
+Jenkins提供了多种方式来管理制品，包括归档、共享和使用外部仓库。通过合理使用这些功能，可以确保制品的可追溯性、安全性和可用性。
+
+### 附加资源
+
+- [Jenkins官方文档：归档制品](https://www.jenkins.io/doc/pipeline/steps/core/#archiveartifacts-archive-the-artifacts)
+- [Nexus Repository Manager](https://www.sonatype.com/nexus-repository-oss)
+- [Artifactory](https://jfrog.com/artifactory/)
+
+### 练习
+
+1. 创建一个Jenkins Pipeline，使用 `archiveArtifacts` 步骤归档一个简单的Java项目生成的JAR文件。
+2. 修改Pipeline，使用 `stash` 和 `unstash` 步骤在多个阶段之间共享制品。
+3. 尝试将制品上传到Nexus或Artifactory仓库。
+
+通过这些练习，你将更好地掌握Jenkins中的制品管理技巧。

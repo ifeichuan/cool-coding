@@ -1,0 +1,145 @@
+---
+title: Airflow SSHOperator 详解
+description: 了解如何使用 Airflow 的 SSHOperator 在远程服务器上执行命令，并掌握其实际应用场景。
+---
+
+## 介绍
+
+Apache Airflow 是一个强大的工作流管理工具，允许用户以编程方式定义、调度和监控复杂的工作流。Airflow 提供了多种 Operator（操作符），用于执行不同的任务。其中，`SSHOperator` 是一个非常有用的操作符，它允许你通过 SSH 连接到远程服务器并执行命令。
+
+在本教程中，我们将详细介绍 `SSHOperator` 的使用方法，并通过实际案例展示其应用场景。
+
+## SSHOperator 的基本概念
+
+`SSHOperator` 是 Airflow 提供的一个操作符，用于通过 SSH 连接到远程服务器并执行命令。它基于 `paramiko` 库实现，支持通过 SSH 密钥或密码进行身份验证。
+
+### 主要参数
+
+- `ssh_conn_id`: 指定 SSH 连接的 ID，该连接需要在 Airflow 的 Connections 中预先配置。
+- `command`: 要在远程服务器上执行的命令。
+- `remote_host`: 远程服务器的地址（可选，如果 SSH 连接中已配置）。
+- `timeout`: SSH 连接的超时时间（可选，默认为 10 秒）。
+
+## 配置 SSH 连接
+
+在使用 `SSHOperator` 之前，你需要在 Airflow 的 Connections 中配置 SSH 连接。可以通过 Airflow 的 UI 或 CLI 来完成此操作。
+
+### 通过 UI 配置
+
+1. 登录 Airflow UI。
+2. 导航到 **Admin > Connections**。
+3. 点击 **Create** 按钮。
+4. 填写以下字段：
+   - **Conn Id**: 例如 `my_ssh_connection`。
+   - **Conn Type**: 选择 `SSH`。
+   - **Host**: 远程服务器的地址。
+   - **Login**: SSH 用户名。
+   - **Password**: SSH 密码（如果使用密钥认证，则留空）。
+   - **Extra**: 如果需要使用密钥认证，可以在此处指定私钥文件路径，例如 `{"key_file": "/path/to/private_key"}`。
+
+### 通过 CLI 配置
+
+你也可以使用 Airflow CLI 来创建 SSH 连接：
+
+```bash
+airflow connections add my_ssh_connection \
+    --conn-type ssh \
+    --conn-host remote.server.com \
+    --conn-login myuser \
+    --conn-extra '{"key_file": "/path/to/private_key"}'
+```
+
+## 使用 SSHOperator
+
+### 基本用法
+
+以下是一个简单的 `SSHOperator` 示例，它通过 SSH 连接到远程服务器并执行 `ls` 命令：
+
+```python
+from airflow import DAG
+from airflow.providers.ssh.operators.ssh import SSHOperator
+from airflow.utils.dates import days_ago
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': days_ago(1),
+}
+
+with DAG('ssh_example', default_args=default_args, schedule_interval=None) as dag:
+    ssh_task = SSHOperator(
+        task_id='ssh_task',
+        ssh_conn_id='my_ssh_connection',
+        command='ls -l /tmp',
+    )
+```
+
+在这个示例中，`ssh_conn_id` 指定了之前配置的 SSH 连接，`command` 指定了要在远程服务器上执行的命令。
+
+### 处理输出
+
+`SSHOperator` 会将远程命令的输出存储在 XCom 中，你可以在后续任务中访问这些输出。例如：
+
+```python
+from airflow.operators.python_operator import PythonOperator
+
+def print_output(**kwargs):
+    ti = kwargs['ti']
+    output = ti.xcom_pull(task_ids='ssh_task')
+    print(f"Command output: {output}")
+
+print_task = PythonOperator(
+    task_id='print_output',
+    python_callable=print_output,
+    provide_context=True,
+    dag=dag,
+)
+
+ssh_task >> print_task
+```
+
+在这个示例中，`print_output` 函数从 XCom 中提取 `ssh_task` 的输出并打印。
+
+## 实际应用场景
+
+### 自动化部署
+
+`SSHOperator` 可以用于自动化部署流程。例如，你可以通过 SSH 连接到生产服务器并执行部署脚本：
+
+```python
+deploy_task = SSHOperator(
+    task_id='deploy_task',
+    ssh_conn_id='production_server',
+    command='/opt/deploy.sh',
+)
+```
+
+### 远程日志收集
+
+你可以使用 `SSHOperator` 从远程服务器收集日志文件并将其传输到中央存储：
+
+```python
+collect_logs_task = SSHOperator(
+    task_id='collect_logs_task',
+    ssh_conn_id='log_server',
+    command='tar -czf /tmp/logs.tar.gz /var/log/myapp',
+)
+```
+
+## 总结
+
+`SSHOperator` 是 Airflow 中一个非常强大的工具，允许你通过 SSH 连接到远程服务器并执行命令。它适用于各种场景，如自动化部署、远程日志收集等。通过本教程，你应该已经掌握了 `SSHOperator` 的基本用法，并能够在实际项目中应用它。
+
+## 附加资源
+
+- [Airflow 官方文档](https://airflow.apache.org/docs/)
+- [Paramiko 文档](http://www.paramiko.org/)
+
+## 练习
+
+1. 配置一个 SSH 连接，并使用 `SSHOperator` 在远程服务器上执行 `df -h` 命令。
+2. 修改示例代码，将命令输出保存到本地文件。
+3. 尝试使用 `SSHOperator` 执行一个需要交互式输入的脚本，并观察其行为。
+
+:::tip
+如果你在使用 `SSHOperator` 时遇到问题，可以检查 Airflow 的日志以获取更多信息。通常，SSH 连接问题是由于配置错误或网络问题引起的。
+:::

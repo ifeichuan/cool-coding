@@ -1,0 +1,239 @@
+---
+title: Loki 配置基础
+description: 学习如何配置Grafana Loki日志聚合系统的基础知识，包括配置文件结构、常用选项和实际应用示例。
+---
+
+## 介绍
+
+Grafana Loki是一个高效的日志聚合系统，专为云原生环境设计。与传统的日志系统不同，Loki通过索引日志的元数据而不是内容本身来优化存储和查询性能。理解Loki的配置是部署和管理它的关键第一步。
+
+在本指南中，我们将介绍Loki配置的基础知识，包括：
+
+- Loki配置文件的结构
+- 常用配置选项
+- 如何配置存储后端
+- 实际应用示例
+
+## Loki 配置文件结构
+
+Loki的配置通常通过YAML文件定义。配置文件包含多个部分，每个部分控制Loki的不同功能。以下是基本结构：
+
+```yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /tmp/loki
+  storage:
+    filesystem:
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+ruler:
+  alertmanager_url: http://localhost:9093
+```
+
+:::note
+上面的配置是一个最小化的本地开发配置，不适合生产环境使用。
+:::
+
+## 主要配置部分详解
+
+### 1. 服务器配置
+
+`server`部分控制Loki的HTTP和gRPC服务设置：
+
+```yaml
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+```
+
+- `http_listen_port`: Loki HTTP API的监听端口
+- `grpc_listen_port`: 用于内部通信的gRPC端口
+- `log_level`: 日志级别(debug, info, warn, error)
+
+### 2. 存储配置
+
+Loki的存储配置分为多个部分：
+
+```yaml
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /tmp/loki/boltdb-shipper-active
+    cache_location: /tmp/loki/boltdb-shipper-cache
+    shared_store: filesystem
+```
+
+:::tip
+在生产环境中，你应该使用分布式存储如S3、GCS或Cassandra，而不是本地文件系统。
+:::
+
+### 3. 查询前端配置
+
+查询前端可以改善查询性能：
+
+```yaml
+query_frontend:
+  log_queries_longer_than: 5s
+  max_retries: 5
+  split_queries_by_interval: 30m
+```
+
+## 实际配置示例
+
+让我们看一个更完整的开发环境配置示例：
+
+```yaml
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+
+common:
+  path_prefix: /tmp/loki
+  storage:
+    filesystem:
+      chunks_directory: /tmp/loki/chunks
+      rules_directory: /tmp/loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v11
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  boltdb_shipper:
+    active_index_directory: /tmp/loki/boltdb-shipper-active
+    cache_location: /tmp/loki/boltdb-shipper-cache
+    shared_store: filesystem
+    cache_ttl: 24h
+
+limits_config:
+  enforce_metric_name: false
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+
+chunk_store_config:
+  max_look_back_period: 0s
+
+table_manager:
+  retention_deletes_enabled: false
+  retention_period: 0s
+
+ruler:
+  alertmanager_url: http://localhost:9093
+```
+
+## 配置验证
+
+在启动Loki前，可以使用以下命令验证配置文件：
+
+```bash
+loki -config.file=loki-config.yaml -verify-config
+```
+
+如果配置有效，你会看到类似输出：
+
+```
+Verified config file loki-config.yaml
+```
+
+## 配置Loki与Promtail
+
+要让Loki接收日志，你需要配置Promtail（Loki的日志收集代理）。以下是Promtail的基本配置示例：
+
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://localhost:3100/loki/api/v1/push
+
+scrape_configs:
+- job_name: system
+  static_configs:
+  - targets:
+      - localhost
+    labels:
+      job: varlogs
+      __path__: /var/log/*log
+```
+
+## 配置Loki与Grafana
+
+在Grafana中添加Loki数据源：
+
+1. 导航到Configuration > Data Sources
+2. 点击"Add data source"
+3. 选择Loki
+4. 设置URL为`http://localhost:3100`（或你的Loki地址）
+5. 点击"Save & Test"
+
+## 总结
+
+在本指南中，我们介绍了：
+
+- Loki配置文件的基本结构和语法
+- 主要配置部分及其作用
+- 如何验证配置
+- 如何将Loki与Promtail和Grafana集成
+
+配置Loki时，记住：
+
+1. 始终从简单配置开始，逐步添加复杂性
+2. 开发和生产环境需要不同的配置
+3. 定期验证你的配置文件
+4. 监控Loki的性能并根据需要调整配置
+
+## 下一步学习
+
+要进一步探索Loki配置：
+
+1. 尝试不同的存储后端配置（S3、GCS等）
+2. 实验不同的保留策略
+3. 配置多租户支持
+4. 调整查询性能参数
+
+:::tip 练习
+1. 创建一个本地Loki开发配置
+2. 配置Promtail向你的Loki实例发送日志
+3. 在Grafana中设置Loki数据源并查询日志
+:::
+
+祝你Loki学习之旅顺利！

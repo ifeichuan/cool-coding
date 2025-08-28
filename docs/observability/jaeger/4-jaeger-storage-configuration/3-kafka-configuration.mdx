@@ -1,0 +1,150 @@
+---
+title: Kafka配置
+description: 学习如何为Jaeger配置Kafka作为存储后端，实现高效分布式追踪数据的处理。
+---
+
+# Kafka配置
+
+## 介绍
+
+Kafka是一个分布式流处理平台，常用于构建实时数据管道和流应用。在Jaeger中配置Kafka作为存储后端，可以将追踪数据异步传输到持久化存储（如Elasticsearch），提高系统的可靠性和扩展性。本指南将逐步介绍如何配置Jaeger与Kafka的集成。
+
+:::tip 为什么选择Kafka？
+- **缓冲作用**：在高负载时防止数据丢失<br />
+- **解耦**：分离数据生产（收集器）和消费（存储）过程<br />
+- **横向扩展**：通过增加Kafka节点处理更大数据量
+:::
+
+## 基础配置
+
+### 1. 前置条件
+确保已部署以下服务：
+- 运行中的Kafka集群（至少1个broker）
+- Zookeeper（Kafka依赖项）
+- Jaeger Collector服务
+
+### 2. Jaeger Collector配置
+修改Jaeger Collector的启动参数或环境变量：
+
+```sh
+SPAN_STORAGE_TYPE=kafka \
+KAFKA_PRODUCER_BROKERS=localhost:9092 \
+KAFKA_TOPIC=jaeger-spans \
+jaeger-collector
+```
+
+### 3. 关键参数说明
+| 参数 | 描述 | 示例值 |
+|------|------|--------|
+| `KAFKA_PRODUCER_BROKERS` | Kafka broker地址列表 | `broker1:9092,broker2:9092` |
+| `KAFKA_TOPIC` | 存储span数据的主题 | `jaeger-spans` |
+| `KAFKA_PRODUCER_ENCODING` | 数据编码格式 | `json`或`protobuf` |
+
+## 高级配置
+
+### 1. 认证配置
+如果Kafka需要SASL认证：
+
+```sh
+KAFKA_PRODUCER_BROKERS=broker1:9092 \
+KAFKA_PRODUCER_AUTH_USERNAME=admin \
+KAFKA_PRODUCER_AUTH_PASSWORD=secret \
+KAFKA_PRODUCER_AUTH_MECHANISM=SCRAM-SHA-256
+```
+
+### 2. 生产者参数调优
+优化高吞吐场景：
+
+```sh
+KAFKA_PRODUCER_BATCH_SIZE=16384 \
+KAFKA_PRODUCER_BATCH_LINGER_MS=50 \
+KAFKA_PRODUCER_MAX_MESSAGE_BYTES=1048576
+```
+
+### 3. 消费者配置示例
+Jaeger Ingestor消费数据的配置：
+
+```sh
+SPAN_STORAGE_TYPE=elasticsearch \
+KAFKA_CONSUMER_BROKERS=localhost:9092 \
+KAFKA_CONSUMER_TOPIC=jaeger-spans \
+KAFKA_CONSUMER_GROUP_ID=jaeger-ingester \
+ES_SERVER_URLS=http://elasticsearch:9200
+```
+
+## 实际案例
+
+### 电商平台追踪架构
+```mermaid
+graph LR
+  A[Jaeger Agent] --> B[Jaeger Collector]
+  B --> C[Kafka Cluster]
+  C --> D[Jaeger Ingester]
+  D --> E[Elasticsearch]
+  E --> F[Jaeger UI]
+```
+
+**场景说明**：
+1. 用户请求通过Agent收集
+2. Collector将span批量写入Kafka
+3. Ingester从Kafka消费并存入Elasticsearch
+4. 最终通过UI展示追踪数据
+
+### 配置验证
+检查Kafka主题是否正常接收数据：
+
+```sh
+kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic jaeger-spans \
+  --from-beginning
+```
+
+预期输出（JSON格式示例）：
+```json
+{
+  "traceID": "3a8b1c7d5f2e4091",
+  "spans": [
+    {
+      "operationName": "checkout",
+      "startTime": "2023-07-15T08:00:00Z"
+    }
+  ]
+}
+```
+
+## 常见问题解决
+
+:::caution 注意
+遇到问题时检查以下方面：
+1. Kafka服务是否运行 `systemctl status kafka`
+2. 网络连通性 `telnet broker-address 9092`
+3. 主题是否自动创建（或需手动创建）
+:::
+
+**错误示例**：
+```
+ERROR: failed to create Kafka producer: dial tcp: lookup kafka on 127.0.0.11:53: no such host
+```
+**解决方案**：
+- 确认`KAFKA_PRODUCER_BROKERS`使用正确的主机名/IP
+- 检查DNS解析或使用IP地址
+
+## 总结
+
+通过本指南，你已学会：
+✓ 基础Kafka生产者配置<br />
+✓ 安全认证设置方法<br />
+✓ 生产环境参数调优技巧<br />
+✓ 完整数据流验证方案
+
+## 扩展学习
+
+推荐下一步：
+1. [Kafka官方文档](https://kafka.apache.org/documentation/)
+2. 尝试配置多broker集群
+3. 学习Kafka消息保留策略配置
+
+练习任务：
+1. 创建新主题`jaeger-spans-dev`并配置Collector使用它
+2. 配置Ingester同时消费生产和开发环境主题

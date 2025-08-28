@@ -1,0 +1,206 @@
+---
+title: Seata 事务模式对比
+description: 本文详细介绍了Seata支持的三种事务模式：AT模式、TCC模式和Saga模式，并对比了它们的优缺点及适用场景，帮助初学者理解如何选择合适的事务模式。
+---
+
+# Seata 事务模式对比
+
+Seata（Simple Extensible Autonomous Transaction Architecture）是一个开源的分布式事务解决方案，支持多种事务模式。本文将详细介绍Seata支持的三种主要事务模式：**AT模式**、**TCC模式**和**Saga模式**，并对它们的优缺点及适用场景进行对比。
+
+## 什么是Seata事务模式？
+
+Seata事务模式是Seata框架提供的分布式事务解决方案。在分布式系统中，多个服务可能涉及多个数据库操作，如何保证这些操作的一致性是一个挑战。Seata通过提供不同的事务模式，帮助开发者在分布式环境下实现事务的一致性。
+
+Seata支持以下三种主要事务模式：
+
+1. **AT模式（Auto Transaction Mode）**：基于本地事务的自动补偿机制。
+2. **TCC模式（Try-Confirm-Cancel Mode）**：基于业务逻辑的补偿机制。
+3. **Saga模式**：基于长事务的最终一致性机制。
+
+接下来，我们将逐一介绍这三种模式，并对比它们的优缺点。
+
+---
+
+## AT模式（Auto Transaction Mode）
+
+AT模式是Seata的默认事务模式，它基于本地事务的自动补偿机制。AT模式的核心思想是通过代理数据库操作，自动记录事务前后的数据快照，并在事务失败时自动回滚。
+
+### 工作原理
+
+1. **阶段一：执行本地事务**  
+   在AT模式下，Seata会代理数据库操作，记录事务执行前的数据快照（`before image`）和执行后的数据快照（`after image`）。
+   
+2. **阶段二：提交或回滚**  
+   如果所有分支事务都成功，Seata会提交所有事务；如果某个分支事务失败，Seata会根据`before image`自动回滚。
+
+### 代码示例
+
+```java
+@GlobalTransactional
+public void purchase() {
+    // 扣减库存
+    inventoryService.deduct();
+    // 创建订单
+    orderService.create();
+}
+```
+
+### 优点
+
+- **简单易用**：开发者无需编写额外的补偿逻辑。
+- **高性能**：基于本地事务，性能较高。
+
+### 缺点
+
+- **依赖数据库**：需要数据库支持本地事务。
+- **锁冲突**：在高并发场景下可能出现锁冲突问题。
+
+### 适用场景
+
+- 适合对性能要求较高、业务逻辑简单的场景。
+
+---
+
+## TCC模式（Try-Confirm-Cancel Mode）
+
+TCC模式是一种基于业务逻辑的补偿机制，它将事务分为三个阶段：**Try**、**Confirm**和**Cancel**。
+
+### 工作原理
+
+1. **Try阶段**：预留资源，执行业务检查。
+2. **Confirm阶段**：提交事务，确认资源。
+3. **Cancel阶段**：回滚事务，释放资源。
+
+### 代码示例
+
+```java
+@TwoPhaseBusinessAction(name = "deduct", commitMethod = "confirm", rollbackMethod = "cancel")
+public boolean deduct(BusinessActionContext context) {
+    // Try阶段：预留库存
+    inventoryService.reserve();
+    return true;
+}
+
+public boolean confirm(BusinessActionContext context) {
+    // Confirm阶段：确认扣减库存
+    inventoryService.confirmReserve();
+    return true;
+}
+
+public boolean cancel(BusinessActionContext context) {
+    // Cancel阶段：释放库存
+    inventoryService.releaseReserve();
+    return true;
+}
+```
+
+### 优点
+
+- **灵活性高**：开发者可以自定义补偿逻辑。
+- **无锁冲突**：通过资源预留避免锁冲突。
+
+### 缺点
+
+- **开发复杂度高**：需要编写Try、Confirm和Cancel逻辑。
+- **业务侵入性强**：需要对业务逻辑进行改造。
+
+### 适用场景
+
+- 适合对一致性要求高、业务逻辑复杂的场景。
+
+---
+
+## Saga模式
+
+Saga模式是一种基于长事务的最终一致性机制，它将事务拆分为多个子事务，每个子事务都有对应的补偿操作。
+
+### 工作原理
+
+1. **正向操作**：依次执行各个子事务。
+2. **补偿操作**：如果某个子事务失败，依次执行已完成的子事务的补偿操作。
+
+### 代码示例
+
+```java
+@SagaStart
+public void purchase() {
+    // 扣减库存
+    inventoryService.deduct();
+    // 创建订单
+    orderService.create();
+}
+
+@Compensable
+public void deduct() {
+    // 扣减库存逻辑
+}
+
+@Compensable
+public void create() {
+    // 创建订单逻辑
+}
+```
+
+### 优点
+
+- **适合长事务**：支持长时间运行的事务。
+- **最终一致性**：通过补偿操作实现最终一致性。
+
+### 缺点
+
+- **补偿逻辑复杂**：需要为每个子事务编写补偿逻辑。
+- **数据一致性延迟**：最终一致性可能导致数据短暂不一致。
+
+### 适用场景
+
+- 适合长事务、对实时一致性要求不高的场景。
+
+---
+
+## 事务模式对比
+
+以下是对三种事务模式的对比：
+
+| 特性          | AT模式                  | TCC模式                  | Saga模式                |
+|---------------|-------------------------|--------------------------|-------------------------|
+| **开发复杂度** | 低                      | 高                       | 中                      |
+| **性能**       | 高                      | 中                       | 低                      |
+| **一致性**     | 强一致性                | 强一致性                 | 最终一致性              |
+| **适用场景**   | 简单业务、高并发        | 复杂业务、高一致性要求   | 长事务、最终一致性      |
+
+---
+
+## 实际案例
+
+### 案例1：电商订单系统
+
+在电商订单系统中，用户下单时需要扣减库存、创建订单和支付。如果使用AT模式，可以快速完成事务；如果使用TCC模式，可以确保高一致性；如果使用Saga模式，可以支持长时间运行的支付流程。
+
+### 案例2：机票预订系统
+
+在机票预订系统中，用户预订机票时需要锁定座位、创建订单和支付。如果某个步骤失败，Saga模式可以通过补偿操作释放座位，确保最终一致性。
+
+---
+
+## 总结
+
+Seata提供了多种事务模式，开发者可以根据业务需求选择合适的事务模式：
+
+- **AT模式**：适合简单业务、高并发场景。
+- **TCC模式**：适合复杂业务、高一致性场景。
+- **Saga模式**：适合长事务、最终一致性场景。
+
+---
+
+## 附加资源
+
+- [Seata官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务解决方案对比](https://dzone.com/articles/distributed-transaction-solutions-comparison)
+
+---
+
+## 练习
+
+1. 尝试在本地搭建一个Seata环境，并使用AT模式实现一个简单的分布式事务。
+2. 修改上述代码示例，尝试使用TCC模式实现库存扣减和订单创建。
+3. 思考在什么场景下Saga模式比TCC模式更适合。

@@ -1,0 +1,156 @@
+---
+title: LogQL高级技巧
+description: 学习LogQL的高级查询技巧，包括日志解析、模式匹配、指标提取和性能优化，提升Grafana Loki日志分析效率。
+---
+
+# LogQL高级技巧
+
+LogQL是Grafana Loki的查询语言，专为日志分析设计。它不仅支持基础的日志过滤和搜索，还提供了一系列高级功能，帮助用户更高效地提取、转换和分析日志数据。本文将介绍LogQL的高级技巧，包括日志解析、模式匹配、指标提取和性能优化。
+
+## 介绍
+
+LogQL（Log Query Language）类似于PromQL，但专为日志设计。它允许用户通过标签和内容过滤日志，并支持日志解析和聚合。掌握LogQL的高级技巧可以显著提升日志分析的效率和灵活性。
+
+## 日志解析与提取
+
+LogQL支持使用解析器（parsers）从日志行中提取结构化数据。常见的解析器包括：
+
+- `json`：解析JSON格式的日志。
+- `logfmt`：解析logfmt格式的日志。
+- `pattern`：通过模式匹配提取字段。
+- `regexp`：使用正则表达式提取字段。
+
+### 示例：JSON解析
+
+假设有以下JSON格式的日志行：
+
+```json
+{
+  "level": "error",
+  "message": "Failed to connect to DB",
+  "timestamp": "2023-10-01T12:00:00Z"
+}
+```
+
+使用`json`解析器提取字段：
+
+```logql
+{job="myapp"} | json
+```
+
+输出结果将包含提取的字段：`level="error"`、`message="Failed to connect to DB"`和`timestamp="2023-10-01T12:00:00Z"`。
+
+### 示例：正则表达式解析
+
+对于非结构化日志，可以使用正则表达式提取字段。例如：
+
+```log
+2023-10-01T12:00:00Z ERROR Failed to connect to DB
+```
+
+使用`regexp`解析器提取时间戳、日志级别和消息：
+
+```logql
+{job="myapp"} | regexp `(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) (?P<level>\w+) (?P<message>.*)`
+```
+
+输出结果将包含：`timestamp="2023-10-01T12:00:00Z"`、`level="ERROR"`和`message="Failed to connect to DB"`。
+
+## 模式匹配与过滤
+
+LogQL支持使用标签和内容进行高效的模式匹配和过滤。
+
+### 标签过滤
+
+通过标签可以快速缩小日志范围：
+
+```logql
+{job="myapp", level="error"}
+```
+
+### 内容过滤
+
+使用`|=`（包含）和`!=`（不包含）过滤日志内容：
+
+```logql
+{job="myapp"} |= "error"
+{job="myapp"} != "debug"
+```
+
+### 正则表达式匹配
+
+使用`|~`和`!~`进行正则表达式匹配：
+
+```logql
+{job="myapp"} |~ "error|fail"
+{job="myapp"} !~ "debug|info"
+```
+
+## 指标提取
+
+LogQL可以将日志转换为指标，支持计数器（counter）、直方图（histogram）等聚合操作。
+
+### 示例：错误日志计数
+
+统计每分钟的错误日志数量：
+
+```logql
+sum by (level) (
+  count_over_time(
+    {job="myapp"} | json | level="error" [1m]
+  )
+)
+```
+
+### 示例：请求延迟直方图
+
+假设日志中包含请求延迟字段`latency`，可以生成延迟直方图：
+
+```logql
+histogram_over_time(
+  {job="myapp"} | json | latency [1m]
+)
+```
+
+## 性能优化技巧
+
+### 使用标签索引
+
+确保日志流使用高基数标签（如`job`、`level`）索引，避免低基数标签（如`ip`、`user_id`）导致性能下降。
+
+### 限制查询范围
+
+缩小时间范围可以减少查询数据量：
+
+```logql
+{job="myapp"} [5m]
+```
+
+### 使用`line_format`减少输出
+
+`line_format`可以只返回需要的字段，减少网络传输：
+
+```logql
+{job="myapp"} | json | line_format "{{.level}}: {{.message}}"
+```
+
+## 实际案例
+
+### 案例1：监控HTTP错误率
+
+统计HTTP服务的错误率（状态码>=500）：
+
+```logql
+sum by (service) (
+  rate(
+    {job="http-service"} | json | status_code>=500 [1m]
+  )
+)
+```
+
+### 案例2：提取并分析慢查询
+
+从数据库日志中提取慢查询（延迟>1s）：
+
+```logql
+{job="mysql"} | json | latency>1s | line_format "{{.query}} ({{.latency}}s)"

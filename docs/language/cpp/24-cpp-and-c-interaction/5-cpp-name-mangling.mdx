@@ -1,0 +1,283 @@
+---
+title: C++ 名称修饰
+description: 详细解析C++名称修饰机制、其工作原理、与C的区别以及在混合编程中的应用。
+---
+
+# C++ 名称修饰
+
+## 什么是名称修饰？
+
+在开始我们的C++编程之旅时，你可能注意到了一个奇怪的现象：有时候在调试程序或查看链接错误时，会看到一些奇怪的函数名称，比如`_Z3addii`而不是我们实际编写的`add`。这就是**名称修饰**（Name Mangling）的结果。
+
+名称修饰是编译器为了支持函数重载、类成员函数、命名空间等C++特性，对函数和变量的名称进行转换的过程，使它们在目标文件中具有唯一标识符。
+
+:::note
+C++标准并没有规定名称修饰的具体实现方式，因此不同的编译器可能会使用不同的修饰规则。
+:::
+
+## 为什么需要名称修饰？
+
+假设我们有两个同名但参数不同的函数：
+
+```cpp
+int add(int a, int b) {
+    return a + b;
+}
+
+double add(double a, double b) {
+    return a + b;
+}
+```
+
+在C语言中，这是不允许的，因为C不支持函数重载。但在C++中，我们可以通过参数类型来区分同名函数。为了实现这一点，编译器必须给每个函数一个唯一的名称，这就是名称修饰的主要目的。
+
+## 名称修饰的工作原理
+
+名称修饰的基本原理是将函数的额外信息（如参数类型、命名空间、类等）编码到函数名中，形成一个唯一的标识符。
+
+以下是几种常见的情况：
+
+### 1. 函数重载
+
+```cpp
+// 源代码
+int func(int a);
+int func(int a, int b);
+int func(double a);
+
+// 可能的修饰后名称（以GCC为例）
+_Z4funci      // func(int)
+_Z4funcii     // func(int, int)
+_Z4funcd      // func(double)
+```
+
+### 2. 类成员函数
+
+```cpp
+// 源代码
+class MyClass {
+public:
+    void method();
+    static void staticMethod();
+};
+
+// 可能的修饰后名称
+_ZN7MyClass6methodEv     // MyClass::method()
+_ZN7MyClass12staticMethodEv  // MyClass::staticMethod()
+```
+
+### 3. 命名空间
+
+```cpp
+// 源代码
+namespace MyNamespace {
+    int func(int a);
+}
+
+// 可能的修饰后名称
+_ZN11MyNamespace4funcEi  // MyNamespace::func(int)
+```
+
+## C++ 与C的名称修饰差异
+
+C语言不支持函数重载，因此不需要名称修饰。C函数编译后的名称与源代码中基本相同（可能前缀一个下划线）。
+
+例如，以下C函数：
+
+```c
+int add(int a, int b) {
+    return a + b;
+}
+```
+
+编译后可能为`_add`或简单的`add`。
+
+而对应的C++函数可能被修饰为`_Z3addii`。
+
+## 在C++与C混合编程中的应用
+
+当我们需要在C++代码中调用C函数，或者在C代码中调用C++函数时，名称修饰会导致链接错误。这时，我们需要使用`extern "C"`来告诉C++编译器不要对指定的函数进行名称修饰。
+
+### 在C++中调用C函数
+
+```cpp
+// C头文件 math.h
+int add(int a, int b);
+
+// C++代码
+extern "C" {
+    #include "math.h"
+}
+
+int main() {
+    int result = add(5, 3); // 正确调用C函数
+    return 0;
+}
+```
+
+### 让C++函数能被C调用
+
+```cpp
+// C++头文件 math.hpp
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+int multiply(int a, int b);
+
+#ifdef __cplusplus
+}
+#endif
+
+// C++实现
+extern "C" int multiply(int a, int b) {
+    return a * b;
+}
+
+// C代码可以直接调用multiply函数
+```
+
+## 实际案例：解析链接错误
+
+考虑以下场景：你有一个C库和一个C++应用程序，想要在C++程序中使用C库的函数。
+
+**C库 (math_lib.h)**:
+```c
+// math_lib.h
+int calculate(int a, int b);
+
+// math_lib.c
+int calculate(int a, int b) {
+    return a * b + a;
+}
+```
+
+**C++应用程序**:
+```cpp
+// main.cpp
+#include "math_lib.h"
+
+int main() {
+    int result = calculate(5, 3);
+    return 0;
+}
+```
+
+编译时可能会出现以下错误：
+```
+undefined reference to '_Z9calculateii'
+```
+
+这是因为C++编译器对`calculate`函数进行了名称修饰，而C库中的函数没有经过修饰。解决方法是使用`extern "C"`：
+
+```cpp
+// main.cpp
+extern "C" {
+    #include "math_lib.h"
+}
+
+int main() {
+    int result = calculate(5, 3); // 现在可以正常工作
+    return 0;
+}
+```
+
+## 如何查看修饰后的名称
+
+你可以使用一些工具来查看编译后的符号名称：
+
+### 在Linux上（使用GCC/Clang）
+
+使用`nm`命令查看目标文件中的符号：
+
+```bash
+$ g++ -c example.cpp
+$ nm example.o
+```
+
+### 在Windows上（使用MSVC）
+
+使用`dumpbin`命令：
+
+```bash
+> dumpbin /SYMBOLS example.obj
+```
+
+### 解析名称修饰（Demangling）
+
+GCC提供了`c++filt`工具来解析修饰后的名称：
+
+```bash
+$ c++filt _Z3addii
+add(int, int)
+```
+
+## 使用`extern "C"`的注意事项
+
+1. `extern "C"`只能在C++代码中使用，C编译器不认识这个语法。
+2. 使用`extern "C"`的函数不能使用C++特有的特性，如函数重载。
+3. 类成员函数不能直接声明为`extern "C"`，因为类是C++特有的概念。
+
+```cpp
+class MyClass {
+public:
+    extern "C" void method(); // 错误！
+};
+```
+
+4. 可以对整个头文件使用`extern "C"`，但要注意条件编译：
+
+```cpp
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// C兼容的函数声明
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+## 不同编译器的名称修饰规则
+
+不同编译器的名称修饰规则可能完全不同，这也是为什么使用不同编译器编译的C++库往往不兼容的原因之一。
+
+以下是几个常见编译器的名称修饰示例（对于函数`int add(int, int)`）：
+
+- GCC/Clang: `_Z3addii`
+- Microsoft Visual C++: `?add@@YAHHH@Z`
+- Borland C++: `@add$qii`
+
+```mermaid
+graph TB
+    A[C++源代码] --> B[编译器前端]
+    B --> C{不同编译器}
+    C -->|GCC/Clang| D[_Z3addii]
+    C -->|MSVC| E[?add@@YAHHH@Z]
+    C -->|Borland| F[@add$qii]
+```
+
+## 总结
+
+名称修饰是C++实现函数重载等特性的关键机制，但也导致了与C语言的兼容性问题。通过理解名称修饰的工作原理和使用`extern "C"`，我们可以更有效地进行C++与C的混合编程。
+
+关键点回顾：
+- 名称修饰是C++编译器为函数和变量创建唯一标识符的过程
+- C++支持函数重载等特性，需要名称修饰；C语言不需要
+- 使用`extern "C"`可以防止C++编译器对函数进行名称修饰
+- 不同编译器有不同的名称修饰规则
+- 在混合编程中正确处理名称修饰是避免链接错误的关键
+
+## 练习
+
+1. 尝试编写一个包含重载函数的简单C++程序，编译后使用适当的工具查看修饰后的名称。
+2. 创建一个简单的C库和一个调用该库的C++程序，使用`extern "C"`确保它们能正常链接。
+3. 尝试分析以下修饰后的名称代表什么函数：`_ZN9Namespace5Class10methodNameEiPc`
+
+:::tip 扩展阅读
+如果你对更多C++与C交互的主题感兴趣，可以研究以下内容：
+- ABI（应用二进制接口）兼容性
+- C++异常在C/C++混合代码中的处理
+- 跨语言对象模型和对象传递
+:::

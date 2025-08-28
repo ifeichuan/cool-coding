@@ -1,0 +1,137 @@
+---
+title: 数据加密策略
+description: "学习 Zipkin 中的数据加密策略，了解如何保护分布式追踪数据的安全传输和存储。"
+---
+
+# 数据加密策略
+
+## 介绍
+
+在分布式系统中，Zipkin 用于收集和可视化服务之间的调用链路数据。由于这些数据可能包含敏感信息（如 HTTP 头部、请求参数等），因此需要采取适当的数据加密策略来确保安全性。数据加密策略主要包括 **传输加密**（如 HTTPS/TLS）和 **存储加密**（如数据库加密）。本文将介绍 Zipkin 中如何实现这些策略。
+
+:::note
+**为什么需要数据加密？**  
+- 防止中间人攻击（MITM）。  
+- 避免敏感数据泄露（如用户身份信息）。  
+- 符合数据保护法规（如 GDPR、HIPAA）。
+:::
+
+---
+
+## 传输加密（HTTPS/TLS）
+
+Zipkin 支持通过 HTTPS 传输数据，确保数据在客户端和服务器之间的安全通信。
+
+### 配置 Zipkin 服务器启用 HTTPS
+
+以下是使用 Spring Boot 启动 Zipkin 服务器并启用 HTTPS 的示例：
+
+```yaml
+# application.yml
+server:
+  port: 9411
+  ssl:
+    enabled: true
+    key-store: classpath:keystore.p12
+    key-store-password: yourpassword
+    key-store-type: PKCS12
+```
+
+### 生成自签名证书
+
+如果你没有正式的 CA 证书，可以使用 OpenSSL 生成自签名证书：
+
+```bash
+openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 365 -out certificate.pem
+openssl pkcs12 -inkey key.pem -in certificate.pem -export -out keystore.p12
+```
+
+### 客户端配置
+
+客户端（如 Spring Cloud Sleuth）需要信任服务器的证书：
+
+```yaml
+# application.yml
+spring:
+  zipkin:
+    base-url: https://your-zipkin-server:9411
+    sender.type: web
+```
+
+:::caution
+**自签名证书的局限性**  
+自签名证书适用于开发和测试环境，但在生产环境中应使用受信任的 CA 签发的证书。
+:::
+
+---
+
+## 存储加密
+
+Zipkin 支持多种存储后端（如 MySQL、Elasticsearch），存储加密通常由数据库本身提供。
+
+### MySQL 存储加密
+
+MySQL 支持透明数据加密（TDE）。以下是配置示例：
+
+```sql
+-- 启用表加密
+ALTER TABLE zipkin_spans ENCRYPTION='Y';
+```
+
+### Elasticsearch 存储加密
+
+Elasticsearch 通过安全插件（如 Search Guard）支持存储加密：
+
+```yaml
+# elasticsearch.yml
+searchguard.ssl.transport.pemcert_filepath: node.pem
+searchguard.ssl.transport.pemkey_filepath: node-key.pem
+```
+
+---
+
+## 实际案例
+
+### 场景：电商系统的支付服务追踪
+
+假设一个电商系统使用 Zipkin 追踪支付服务的调用链路，支付请求包含信用卡信息。以下是加密策略的应用：
+
+1. **传输加密**：支付服务与 Zipkin 服务器之间通过 HTTPS 通信。  
+2. **存储加密**：Zipkin 数据存储在加密的 Elasticsearch 集群中。  
+3. **数据脱敏**：敏感字段（如信用卡号）在存储前被脱敏。
+
+```java
+// 示例：在 Spring Boot 中脱敏敏感数据
+@Bean
+public SpanHandler spanHandler() {
+    return new SpanHandler() {
+        @Override
+        public boolean end(TraceContext traceContext, MutableSpan span, Cause cause) {
+            if (span.tags().containsKey("credit_card")) {
+                span.tag("credit_card", "****-****-****-" + span.tags().get("credit_card").substring(15));
+            }
+            return true;
+        }
+    };
+}
+```
+
+---
+
+## 总结
+
+Zipkin 的数据加密策略主要包括：
+1. **传输加密**：通过 HTTPS/TLS 保护数据传输。  
+2. **存储加密**：利用数据库的加密功能保护存储数据。  
+3. **数据脱敏**：在存储或传输前移除或掩盖敏感信息。
+
+:::tip
+**进一步学习**  
+- [OpenSSL 官方文档](https://www.openssl.org/docs/)  
+- [Elasticsearch 安全配置指南](https://www.elastic.co/guide/en/elasticsearch/reference/current/security-settings.html)  
+- [Spring Cloud Sleuth 文档](https://spring.io/projects/spring-cloud-sleuth)
+:::
+
+**练习**  
+1. 使用 OpenSSL 生成自签名证书并配置 Zipkin 服务器启用 HTTPS。  
+2. 在本地 MySQL 中创建一个加密表，存储 Zipkin 数据。

@@ -1,0 +1,156 @@
+---
+title: Kubernetes 网络
+description: 了解Kubernetes网络的核心概念，包括Pod网络、Service、Ingress等，以及它们如何协同工作以实现容器间的通信。
+---
+
+# Kubernetes 网络
+
+Kubernetes是一个强大的容器编排平台，而网络是Kubernetes中至关重要的一部分。理解Kubernetes网络的核心概念对于构建和管理容器化应用程序至关重要。本文将逐步介绍Kubernetes网络的基本概念，并通过实际案例帮助你更好地理解。
+
+## 1. 什么是Kubernetes网络？
+
+Kubernetes网络是指在Kubernetes集群中，容器之间以及容器与外部世界之间的通信方式。Kubernetes网络的核心目标是确保每个Pod（Kubernetes中最小的部署单元）都能够与其他Pod进行通信，无论它们位于哪个节点上。
+
+:::note
+Pod是Kubernetes中最小的部署单元，通常包含一个或多个容器。每个Pod都有一个唯一的IP地址，Kubernetes网络确保这些Pod之间可以相互通信。
+:::
+
+## 2. Pod网络
+
+在Kubernetes中，每个Pod都有一个唯一的IP地址，这个IP地址在Pod的生命周期内是固定的。Pod网络是指这些Pod之间如何相互通信。
+
+### 2.1 Pod间通信
+
+Kubernetes网络模型要求每个Pod都可以直接与其他Pod通信，而不需要经过NAT（网络地址转换）。这意味着每个Pod都可以通过其IP地址直接访问其他Pod。
+
+```mermaid
+graph LR
+    Pod1[Pod 1] -->|通过IP地址| Pod2[Pod 2]
+    Pod2 -->|通过IP地址| Pod3[Pod 3]
+```
+
+### 2.2 网络插件
+
+Kubernetes本身并不直接管理Pod网络，而是通过**网络插件**（CNI，Container Network Interface）来实现。常见的网络插件包括Calico、Flannel、Weave等。这些插件负责为Pod分配IP地址，并确保Pod之间的通信。
+
+:::tip
+选择适合的网络插件取决于你的具体需求，例如网络性能、安全性、可扩展性等。
+:::
+
+## 3. Service
+
+虽然Pod有唯一的IP地址，但Pod是短暂的，可能会被销毁和重新创建。为了确保应用程序的稳定性，Kubernetes引入了**Service**的概念。
+
+### 3.1 Service的作用
+
+Service为一组Pod提供了一个稳定的IP地址和DNS名称。即使Pod被重新创建，Service的IP地址和DNS名称也不会改变。Service通过标签选择器（Label Selector）来匹配一组Pod，并将流量分发到这些Pod。
+
+### 3.2 Service类型
+
+Kubernetes支持多种类型的Service，包括：
+
+- **ClusterIP**：默认类型，为Service分配一个集群内部的IP地址，只能在集群内部访问。
+- **NodePort**：在每个节点上开放一个端口，外部可以通过节点的IP地址和端口访问Service。
+- **LoadBalancer**：在云平台上自动创建一个外部负载均衡器，并将流量分发到Service。
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+spec:
+  selector:
+    app: my-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 9376
+  type: ClusterIP
+```
+
+:::caution
+在生产环境中，通常使用`LoadBalancer`类型的Service来暴露应用程序，但需要注意成本和安全问题。
+:::
+
+## 4. Ingress
+
+Service提供了集群内部的负载均衡，但如果需要从外部访问集群中的应用程序，通常需要使用**Ingress**。
+
+### 4.1 Ingress的作用
+
+Ingress是一个API对象，用于管理外部访问集群中Service的HTTP和HTTPS路由。Ingress通常与Ingress控制器（如Nginx、Traefik）一起使用，后者负责实现Ingress规则。
+
+### 4.2 Ingress示例
+
+以下是一个简单的Ingress示例，它将外部流量路由到名为`my-service`的Service：
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: my-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-service
+                port:
+                  number: 80
+```
+
+:::note
+Ingress控制器需要单独部署，并且不同的Ingress控制器可能支持不同的注解（annotations）。
+:::
+
+## 5. 实际案例
+
+假设你有一个Web应用程序，它由多个Pod组成，并且需要通过HTTP对外提供服务。你可以按照以下步骤配置Kubernetes网络：
+
+1. 部署Pod，并为它们添加标签（如`app: my-app`）。
+2. 创建一个`ClusterIP`类型的Service，将流量分发到这些Pod。
+3. 部署一个Ingress资源，将外部流量路由到Service。
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app-container
+          image: my-app-image
+          ports:
+            - containerPort: 80
+```
+
+## 6. 总结
+
+Kubernetes网络是Kubernetes集群中容器通信的基础。通过理解Pod网络、Service和Ingress，你可以更好地管理和配置Kubernetes中的网络流量。希望本文能帮助你掌握Kubernetes网络的核心概念，并为你的容器化应用程序提供稳定的网络支持。
+
+## 7. 附加资源与练习
+
+- **练习**：尝试在本地或云环境中部署一个简单的Web应用程序，并使用Service和Ingress将其暴露给外部访问。
+- **资源**：
+  - [Kubernetes官方文档 - 网络](https://kubernetes.io/docs/concepts/cluster-administration/networking/)
+  - [Calico网络插件文档](https://docs.projectcalico.org/)
+  - [Nginx Ingress控制器文档](https://kubernetes.github.io/ingress-nginx/)
+
+:::warning
+在实际生产环境中，务必仔细规划网络配置，确保安全性和可扩展性。
+:::

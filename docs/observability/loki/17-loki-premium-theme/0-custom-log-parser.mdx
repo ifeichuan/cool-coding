@@ -1,0 +1,135 @@
+---
+title: 自定义日志解析器
+description: 学习如何在Grafana Loki中创建和使用自定义日志解析器，以灵活处理非标准日志格式。
+---
+
+# 自定义日志解析器
+
+## 介绍
+
+在Grafana Loki中，日志解析是将原始日志数据转换为结构化格式的关键步骤。虽然Loki提供了内置的解析器（如JSON、logfmt等），但有时您需要处理非标准日志格式。这时，**自定义日志解析器**就派上用场了。
+
+自定义日志解析器允许您：
+- 处理独特的日志格式
+- 提取特定字段
+- 转换日志数据以满足您的需求
+
+## 基础概念
+
+Loki使用**Pipeline Stages**来处理日志。自定义解析通常涉及以下阶段类型：
+
+1. **正则表达式解析器** (`regex`)
+2. **JSON解析器** (`json`)
+3. **日志格式解析器** (`logfmt`)
+4. **模板解析器** (`template`)
+
+:::tip
+对于大多数自定义需求，`regex`和`template`阶段是最灵活的选择。
+:::
+
+## 创建自定义解析器
+
+### 1. 使用正则表达式解析器
+
+正则表达式解析器是最强大的自定义解析工具。它允许您使用正则表达式从日志行中提取字段。
+
+**示例**：解析Nginx访问日志
+
+```plaintext
+192.168.1.1 - - [10/Oct/2023:13:55:36 +0000] "GET /api/user HTTP/1.1" 200 1234
+```
+
+对应的解析配置：
+
+```yaml
+pipeline_stages:
+  - regex:
+      expression: '^(?P<ip>\S+) \S+ \S+ $$(?P<timestamp>[^$$]+)$$ "(?P<method>\S+) (?P<path>\S+) \S+" (?P<status>\d+) (?P<size>\d+)$'
+  - labels:
+      method:
+      status:
+```
+
+解析后的结构化数据：
+
+```json
+{
+  "ip": "192.168.1.1",
+  "timestamp": "10/Oct/2023:13:55:36 +0000",
+  "method": "GET",
+  "path": "/api/user",
+  "status": "200",
+  "size": "1234"
+}
+```
+
+### 2. 使用模板解析器
+
+模板解析器允许您使用Go模板语法创建自定义日志格式。
+
+**示例**：将多个字段组合成一个新字段
+
+```yaml
+pipeline_stages:
+  - template:
+      source: new_key
+      template: '{{ .level }}:{{ .msg }}'
+```
+
+## 实际案例：解析多行应用日志
+
+许多应用程序生成包含堆栈跟踪的多行日志。下面是如何处理这种情况：
+
+**原始日志**:
+```plaintext
+ERROR 2023-10-10T14:00:00Z Something went wrong
+java.lang.NullPointerException
+    at com.example.MyClass.method(MyClass.java:123)
+    at com.example.OtherClass.run(OtherClass.java:456)
+```
+
+**解析配置**:
+
+```yaml
+pipeline_stages:
+  - multiline:
+      firstline: '^(ERROR|WARN|INFO|DEBUG) \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z'
+      max_wait_time: 3s
+  - regex:
+      expression: '^(?P<level>\S+) (?P<timestamp>\S+) (?P<message>[\s\S]+)'
+  - labels:
+      level:
+```
+
+## 调试自定义解析器
+
+创建自定义解析器时，调试至关重要。您可以使用以下方法：
+
+1. 使用[Loki的Promtail调试端点](https://grafana.com/docs/loki/latest/clients/promtail/configuration/#debug-endpoints)
+2. 在开发环境中测试小样本日志
+3. 使用在线正则表达式测试工具验证您的模式
+
+:::caution
+复杂的正则表达式可能会影响性能。始终测试您的解析器在生产负载下的表现。
+:::
+
+## 总结
+
+自定义日志解析器是Loki中强大的工具，可以让您：
+
+- 处理任意日志格式
+- 提取精确需要的字段
+- 为特定用例优化日志处理
+
+通过结合正则表达式、模板和其他管道阶段，您可以创建适合您日志格式的完美解析解决方案。
+
+## 进一步学习
+
+1. [官方Loki日志管道文档](https://grafana.com/docs/loki/latest/processors/logs/)
+2. [正则表达式语法参考](https://pkg.go.dev/regexp/syntax)
+3. [Go模板语言文档](https://pkg.go.dev/text/template)
+
+**练习**：
+1. 为您的应用程序日志创建一个自定义解析器
+2. 尝试解析包含ISO 8601时间戳的多行Java异常
+3. 比较不同解析方法的性能

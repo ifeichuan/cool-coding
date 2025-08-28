@@ -1,0 +1,121 @@
+---
+title: 监控系统集成
+description: 学习如何将Zipkin与Prometheus、Grafana等监控系统集成，实现分布式追踪数据的可视化与告警功能。
+---
+
+# 监控系统集成
+
+## 介绍
+
+在微服务架构中，Zipkin作为分布式追踪系统，能够帮助开发者理解请求在服务间的流转路径。但单纯依靠Zipkin的UI可能无法满足生产环境的监控需求。通过与监控系统（如Prometheus、Grafana）集成，可以实现：
+- **指标聚合**：将追踪数据转化为可量化的性能指标
+- **可视化增强**：创建动态仪表盘展示实时数据
+- **告警自动化**：基于阈值触发通知
+
+## 核心集成方案
+
+### 1. 与Prometheus集成
+
+Zipkin本身不存储指标数据，但可以通过以下方式暴露Prometheus支持的指标：
+
+```java
+// 示例：在Spring Boot应用中配置Prometheus端点
+@Bean
+public CollectorRegistry prometheusRegistry() {
+    return new CollectorRegistry(true);
+}
+
+@Bean
+public PrometheusMeterRegistry prometheusMeterRegistry(
+    CollectorRegistry registry) {
+    return new PrometheusMeterRegistry(PrometheusConfig.DEFAULT, registry);
+}
+```
+
+配置成功后，Prometheus可以抓取以下典型指标：
+- `zipkin_collector_spans_total`：接收span总数
+- `zipkin_collector_bytes_total`：接收数据量
+- `zipkin_collector_requests_total`：HTTP请求计数
+
+### 2. 与Grafana集成
+
+通过Prometheus数据源，可以在Grafana中创建监控面板：
+
+```mermaid
+graph LR
+    A[Zipkin] -->|暴露指标| B(Prometheus)
+    B -->|作为数据源| C[Grafana]
+    C --> D[可视化仪表盘]
+```
+
+典型面板配置项：
+- 服务延迟百分位（P99/P95）
+- 错误率趋势图
+- 流量对比热力图
+
+## 实际案例：电商平台监控
+
+**场景需求**：
+- 当订单服务的P99延迟 > 500ms时触发告警
+- 实时显示支付链路调用关系
+
+**实现步骤**：
+1. 在Zipkin中标记关键业务标签：
+```python
+# Python示例：标记业务属性
+with tracer.new_trace() as span:
+    span.name("order:create")
+    span.tag("business.type", "flash_sale")
+```
+
+2. 配置Grafana告警规则：
+```
+Alert: HighOrderLatency
+Expr: histogram_quantile(0.99, sum(rate(zipkin_server_latency_bucket{service="order-service"}[5m])) by (le)) > 500
+```
+
+## 高级集成技巧
+
+### 自定义指标导出
+
+通过OpenTelemetry Collector可以实现更灵活的指标转换：
+
+```yaml
+# otel-collector-config.yaml
+processors:
+  metrics:
+    exporters: [prometheus]
+service:
+  pipelines:
+    metrics:
+      receivers: [zipkin]
+      processors: [metrics]
+      exporters: [prometheus]
+```
+
+### 告警分级策略
+
+:::tip 实践建议
+建议采用三级告警策略：
+1. **Warning**（延迟 > 300ms）
+2. **Error**（延迟 > 500ms）
+3. **Critical**（延迟 > 1s + 错误率 > 5%）
+:::
+
+## 总结
+
+关键集成要点：
+- Prometheus负责指标抓取和存储
+- Grafana实现可视化与告警
+- 业务标签增强监控维度
+
+## 延伸学习
+
+推荐练习：
+1. 在本地环境部署Prometheus+Zipkin集成
+2. 创建一个展示服务依赖关系的Grafana面板
+3. 配置当错误率突增时的Slack通知
+
+附加资源：
+- [Zipkin官方指标文档](https://zipkin.io/pages/instrumenting.html)
+- Prometheus histogram指标类型详解

@@ -1,0 +1,217 @@
+---
+title: Swift 引用循环
+description: 了解 Swift 中的引用循环（Retain Cycle）是什么，如何产生，以及如何避免它。本文将通过代码示例和实际案例帮助你掌握这一重要概念。
+---
+
+## 介绍
+
+在 Swift 中，内存管理是通过自动引用计数（ARC）来处理的。ARC 会自动跟踪和管理对象的引用计数，当引用计数降为 0 时，对象会被释放。然而，在某些情况下，对象之间可能会相互持有强引用，导致引用计数无法降为 0，从而引发**引用循环**（Retain Cycle）。引用循环会导致内存泄漏，即对象无法被释放，最终可能导致应用程序内存不足。
+
+本文将详细介绍引用循环的概念、如何检测它，以及如何通过弱引用（`weak`）和无主引用（`unowned`）来避免它。
+
+---
+
+## 什么是引用循环？
+
+引用循环发生在两个或多个对象相互持有强引用时。例如，对象 A 持有对象 B 的强引用，而对象 B 也持有对象 A 的强引用。这种情况下，即使没有其他对象引用 A 或 B，它们的引用计数也不会降为 0，导致内存泄漏。
+
+### 代码示例
+
+以下是一个简单的引用循环示例：
+
+```swift
+class Person {
+    var name: String
+    var friend: Person?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+var john: Person? = Person(name: "John")
+var jane: Person? = Person(name: "Jane")
+
+john?.friend = jane
+jane?.friend = john
+
+john = nil
+jane = nil
+```
+
+在这个例子中，`john` 和 `jane` 相互持有对方的强引用。即使我们将 `john` 和 `jane` 设置为 `nil`，它们的 `deinit` 方法也不会被调用，因为它们的引用计数仍然为 1。
+
+---
+
+## 如何避免引用循环？
+
+为了避免引用循环，Swift 提供了两种弱引用类型：`weak` 和 `unowned`。
+
+### 1. 弱引用（`weak`）
+
+弱引用不会增加对象的引用计数。当引用的对象被释放时，弱引用会自动设置为 `nil`。因此，弱引用必须声明为可选类型（`Optional`）。
+
+#### 修改后的代码示例
+
+```swift
+class Person {
+    var name: String
+    weak var friend: Person?
+
+    init(name: String) {
+        self.name = name
+    }
+
+    deinit {
+        print("\(name) is being deinitialized")
+    }
+}
+
+var john: Person? = Person(name: "John")
+var jane: Person? = Person(name: "Jane")
+
+john?.friend = jane
+jane?.friend = john
+
+john = nil
+jane = nil
+```
+
+在这个修改后的版本中，我们将 `friend` 属性声明为 `weak`。现在，当 `john` 和 `jane` 被设置为 `nil` 时，它们的 `deinit` 方法会被调用，对象会被正确释放。
+
+### 2. 无主引用（`unowned`）
+
+无主引用也不会增加对象的引用计数，但它不会自动设置为 `nil`。因此，无主引用必须确保引用的对象在其生命周期内始终有效。如果引用的对象被释放，访问无主引用会导致运行时崩溃。
+
+#### 适用场景
+
+无主引用通常用于两个对象的生命周期紧密相关的情况。例如，父对象和子对象之间的关系。
+
+---
+
+## 实际案例
+
+### 案例 1：闭包中的引用循环
+
+闭包是引用类型，如果闭包捕获了类的实例，而类的实例又持有闭包的强引用，就会导致引用循环。
+
+#### 代码示例
+
+```swift
+class ViewController {
+    var onButtonTap: (() -> Void)?
+
+    init() {
+        onButtonTap = {
+            self.doSomething()
+        }
+    }
+
+    func doSomething() {
+        print("Button tapped!")
+    }
+
+    deinit {
+        print("ViewController is being deinitialized")
+    }
+}
+
+var vc: ViewController? = ViewController()
+vc = nil
+```
+
+在这个例子中，`ViewController` 持有闭包的强引用，而闭包又捕获了 `self`，导致引用循环。
+
+#### 解决方法
+
+使用 `weak self` 来避免引用循环：
+
+```swift
+onButtonTap = { [weak self] in
+    self?.doSomething()
+}
+```
+
+---
+
+### 案例 2：父子对象关系
+
+在父子对象关系中，父对象通常持有子对象的强引用，而子对象可以使用无主引用来引用父对象。
+
+#### 代码示例
+
+```swift
+class Parent {
+    var child: Child?
+
+    deinit {
+        print("Parent is being deinitialized")
+    }
+}
+
+class Child {
+    unowned let parent: Parent
+
+    init(parent: Parent) {
+        self.parent = parent
+    }
+
+    deinit {
+        print("Child is being deinitialized")
+    }
+}
+
+var parent: Parent? = Parent()
+parent?.child = Child(parent: parent!)
+parent = nil
+```
+
+在这个例子中，`Child` 使用无主引用来引用 `Parent`，避免了引用循环。
+
+---
+
+## 总结
+
+引用循环是 Swift 内存管理中一个常见的问题，但通过合理使用 `weak` 和 `unowned`，我们可以有效地避免它。以下是关键点总结：
+
+1. **引用循环**发生在两个或多个对象相互持有强引用时。
+2. 使用 `weak` 引用可以避免引用循环，但需要声明为可选类型。
+3. 使用 `unowned` 引用时，必须确保引用的对象在其生命周期内始终有效。
+4. 在闭包中捕获 `self` 时，使用 `[weak self]` 来避免引用循环。
+
+---
+
+## 附加资源与练习
+
+### 练习
+1. 修改以下代码，使其避免引用循环：
+   ```swift
+   class A {
+       var b: B?
+       deinit { print("A deinit") }
+   }
+
+   class B {
+       var a: A?
+       deinit { print("B deinit") }
+   }
+
+   var a: A? = A()
+   var b: B? = B()
+   a?.b = b
+   b?.a = a
+   a = nil
+   b = nil
+   ```
+
+2. 在闭包中捕获 `self` 时，尝试使用 `[unowned self]`，并观察其行为。
+
+### 进一步阅读
+- [Swift 官方文档 - Automatic Reference Counting](https://docs.swift.org/swift-book/LanguageGuide/AutomaticReferenceCounting.html)
+- [Understanding Weak and Unowned References in Swift](https://www.avanderlee.com/swift/weak-self/)
+
+通过学习和实践，你将能够更好地掌握 Swift 中的内存管理技巧！

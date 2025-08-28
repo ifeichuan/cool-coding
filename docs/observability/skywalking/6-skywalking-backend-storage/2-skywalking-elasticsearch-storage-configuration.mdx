@@ -1,0 +1,162 @@
+---
+title: SkyWalking ElasticSearch存储配置
+description: "学习如何配置SkyWalking使用ElasticSearch作为后端存储，包括基础概念、详细步骤和实际案例。"
+---
+
+# SkyWalking ElasticSearch存储配置
+
+## 介绍
+
+Apache SkyWalking是一个开源的APM（应用性能监控）系统，用于监控、追踪和诊断分布式系统。SkyWalking支持多种后端存储选项，其中ElasticSearch（ES）是最常用的选择之一，因为它具备高扩展性、强大的全文搜索能力和优秀的聚合性能。
+
+本指南将详细介绍如何配置SkyWalking使用ElasticSearch作为其后端存储，适合初学者逐步实践。
+
+## 前置条件
+
+在开始之前，请确保：
+- 已安装并运行ElasticSearch（建议7.x或8.x版本）
+- 已部署SkyWalking OAP（Observability Analysis Platform）服务
+
+## 基础配置
+
+### 1. 修改SkyWalking配置文件
+
+SkyWalking的主要配置文件位于`config/application.yml`。以下是关键配置项：
+
+```yaml
+storage:
+  selector: ${SW_STORAGE:elasticsearch}
+  elasticsearch:
+    nameSpace: ${SW_NAMESPACE:""}
+    clusterNodes: ${SW_STORAGE_ES_CLUSTER_NODES:localhost:9200}
+    protocol: ${SW_STORAGE_ES_HTTP_PROTOCOL:"http"}
+    trustStorePath: ${SW_STORAGE_ES_SSL_JKS_PATH:""}
+    trustStorePass: ${SW_STORAGE_ES_SSL_JKS_PASS:""}
+    user: ${SW_ES_USER:""}
+    password: ${SW_ES_PASSWORD:""}
+    indexShardsNumber: ${SW_STORAGE_ES_INDEX_SHARDS_NUMBER:1}
+    indexReplicasNumber: ${SW_STORAGE_ES_INDEX_REPLICAS_NUMBER:1}
+```
+
+:::note 配置说明
+- `clusterNodes`: ElasticSearch集群节点地址，多个节点用逗号分隔
+- `indexShardsNumber/indexReplicasNumber`: 根据数据量和集群规模调整
+- 安全认证：如果ES启用了安全认证，需配置`user`和`password`
+:::
+
+### 2. 环境变量配置（可选）
+
+也可以通过环境变量覆盖配置：
+
+```bash
+export SW_STORAGE=elasticsearch
+export SW_STORAGE_ES_CLUSTER_NODES=es1:9200,es2:9200
+```
+
+## 高级配置
+
+### 索引管理
+
+SkyWalking在ES中会自动创建以下主要索引模式：
+- `sw_segment-{yyyyMMdd}`
+- `sw_metrics-{metrics-name}-{yyyyMMdd}`
+- `sw_alarm_record-{yyyyMMdd}`
+
+可以通过以下配置调整索引策略：
+
+```yaml
+elasticsearch:
+  # 索引滚动策略（天/月）
+  dayStep: ${SW_STORAGE_DAY_STEP:1} # 表示按天滚动
+  indexRollingPeriod: ${SW_STORAGE_INDEX_ROLLING_PERIOD:day} # day/month
+
+  # 索引数据保留策略
+  recordDataTTL: ${SW_STORAGE_ES_RECORD_DATA_TTL:7} # 单位天
+  metricsDataTTL: ${SW_STORAGE_ES_METRICS_DATA_TTL:30} # 单位天
+```
+
+### 性能调优
+
+对于生产环境，建议调整以下参数：
+
+```yaml
+elasticsearch:
+  bulkActions: ${SW_STORAGE_ES_BULK_ACTIONS:1000} # 批量操作阈值
+  flushInterval: ${SW_STORAGE_ES_FLUSH_INTERVAL:10} # 批量刷新间隔(秒)
+  concurrentRequests: ${SW_STORAGE_ES_CONCURRENT_REQUESTS:2} # 并发请求数
+```
+
+## 实际案例
+
+### 案例：生产环境配置
+
+以下是一个典型生产环境配置示例：
+
+```yaml
+storage:
+  selector: elasticsearch
+  elasticsearch:
+    clusterNodes: 10.0.0.1:9200,10.0.0.2:9200,10.0.0.3:9200
+    protocol: https
+    user: "skywalking"
+    password: "your_password"
+    indexShardsNumber: 3
+    indexReplicasNumber: 2
+    dayStep: 1
+    indexRollingPeriod: day
+    recordDataTTL: 14
+    metricsDataTTL: 60
+    bulkActions: 2000
+    flushInterval: 15
+```
+
+### 案例：TLS配置
+
+如果ElasticSearch启用了TLS：
+
+```yaml
+elasticsearch:
+  protocol: https
+  trustStorePath: /path/to/elasticsearch-ca.p12
+  trustStorePass: your_keystore_password
+```
+
+## 验证配置
+
+启动SkyWalking OAP后，可以通过以下方式验证：
+
+1. 检查OAP日志，应出现类似以下信息：
+```
+Storage elasticsearch started successfully...
+```
+
+2. 查询ElasticSearch索引：
+```bash
+curl -XGET 'http://localhost:9200/_cat/indices?v' | grep sw_
+```
+
+## 常见问题
+
+:::caution 常见问题
+1. **连接失败**：检查ES地址、端口和网络连通性
+2. **认证失败**：确认用户名/密码正确，检查ES安全配置
+3. **索引创建失败**：确保OAP服务有足够的ES权限
+:::
+
+## 总结
+
+通过本文，你学会了：
+- SkyWalking与ElasticSearch集成的核心配置
+- 生产环境的最佳实践配置
+- 如何验证配置的正确性
+- 常见问题的解决方法
+
+## 扩展学习
+
+1. [ElasticSearch官方文档](https://www.elastic.co/guide/index.html)
+2. [SkyWalking官方文档 - 存储配置](https://skywalking.apache.org/docs/main/latest/en/setup/backend/backend-storage/)
+
+**练习建议**：
+1. 尝试在不同环境中（开发/生产）配置ES存储
+2. 测试不同索引策略对性能的影响
+3. 模拟大数据量场景，观察ES集群的表现

@@ -1,0 +1,186 @@
+---
+title: C 语言条件变量
+description: 了解C语言中的条件变量，掌握多线程编程中如何通过条件变量实现线程间的同步与通信。
+---
+
+## 介绍
+
+在多线程编程中，线程之间的同步是一个关键问题。条件变量（Condition Variable）是一种用于线程间通信的机制，它允许线程在某个条件不满足时进入等待状态，直到其他线程通知它条件已经满足。条件变量通常与互斥锁（Mutex）一起使用，以确保线程安全。
+
+## 条件变量的基本概念
+
+条件变量是POSIX线程（pthread）库中的一部分，它提供了一种机制，使得线程可以等待某个条件成立。条件变量的核心操作包括：
+
+- **等待（wait）**：线程在条件变量上等待，直到其他线程通知它条件已经满足。
+- **通知（signal）**：线程通知等待在条件变量上的一个线程，条件已经满足。
+- **广播（broadcast）**：线程通知所有等待在条件变量上的线程，条件已经满足。
+
+## 条件变量的使用
+
+### 初始化与销毁
+
+在使用条件变量之前，必须先对其进行初始化。条件变量的初始化可以通过静态初始化或动态初始化来完成。
+
+```c
+#include <pthread.h>
+
+// 静态初始化
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+// 动态初始化
+pthread_cond_t cond;
+pthread_cond_init(&cond, NULL);
+```
+
+在使用完条件变量后，应该调用 `pthread_cond_destroy` 来销毁它。
+
+```c
+pthread_cond_destroy(&cond);
+```
+
+### 等待与通知
+
+条件变量通常与互斥锁一起使用。以下是一个简单的例子，展示了如何使用条件变量来实现线程间的同步。
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int ready = 0;
+
+void* producer(void* arg) {
+    pthread_mutex_lock(&mutex);
+    ready = 1;
+    printf("Producer: Data is ready.\n");
+    pthread_cond_signal(&cond);  // 通知消费者
+    pthread_mutex_unlock(&mutex);
+    return NULL;
+}
+
+void* consumer(void* arg) {
+    pthread_mutex_lock(&mutex);
+    while (ready == 0) {
+        printf("Consumer: Waiting for data...\n");
+        pthread_cond_wait(&cond, &mutex);  // 等待条件满足
+    }
+    printf("Consumer: Data is consumed.\n");
+    pthread_mutex_unlock(&mutex);
+    return NULL;
+}
+
+int main() {
+    pthread_t producer_thread, consumer_thread;
+
+    pthread_create(&producer_thread, NULL, producer, NULL);
+    pthread_create(&consumer_thread, NULL, consumer, NULL);
+
+    pthread_join(producer_thread, NULL);
+    pthread_join(consumer_thread, NULL);
+
+    return 0;
+}
+```
+
+**输出：**
+```
+Consumer: Waiting for data...
+Producer: Data is ready.
+Consumer: Data is consumed.
+```
+
+在这个例子中，生产者线程设置 `ready` 为 1，并通知消费者线程。消费者线程在 `ready` 为 0 时等待，直到生产者线程通知它条件已经满足。
+
+### 广播通知
+
+有时候，你可能希望通知所有等待在条件变量上的线程。这时可以使用 `pthread_cond_broadcast`。
+
+```c
+pthread_cond_broadcast(&cond);
+```
+
+## 实际应用场景
+
+条件变量在实际应用中非常常见，特别是在生产者-消费者问题、线程池、任务队列等场景中。以下是一个简单的任务队列的例子：
+
+```c
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define QUEUE_SIZE 10
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+int queue[QUEUE_SIZE];
+int count = 0;
+
+void* producer(void* arg) {
+    for (int i = 0; i < QUEUE_SIZE; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == QUEUE_SIZE) {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        queue[count++] = i;
+        printf("Producer: Produced %d\n", i);
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
+}
+
+void* consumer(void* arg) {
+    for (int i = 0; i < QUEUE_SIZE; i++) {
+        pthread_mutex_lock(&mutex);
+        while (count == 0) {
+            pthread_cond_wait(&cond, &mutex);
+        }
+        int item = queue[--count];
+        printf("Consumer: Consumed %d\n", item);
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
+}
+
+int main() {
+    pthread_t producer_thread, consumer_thread;
+
+    pthread_create(&producer_thread, NULL, producer, NULL);
+    pthread_create(&consumer_thread, NULL, consumer, NULL);
+
+    pthread_join(producer_thread, NULL);
+    pthread_join(consumer_thread, NULL);
+
+    return 0;
+}
+```
+
+**输出：**
+```
+Producer: Produced 0
+Consumer: Consumed 0
+Producer: Produced 1
+Consumer: Consumed 1
+...
+Producer: Produced 9
+Consumer: Consumed 9
+```
+
+在这个例子中，生产者线程向队列中添加任务，消费者线程从队列中取出任务。当队列满时，生产者线程等待；当队列空时，消费者线程等待。
+
+## 总结
+
+条件变量是C语言多线程编程中非常重要的同步机制。通过条件变量，线程可以在某个条件不满足时进入等待状态，直到其他线程通知它条件已经满足。条件变量通常与互斥锁一起使用，以确保线程安全。
+
+:::tip
+在实际编程中，使用条件变量时要注意避免死锁和竞态条件。确保在调用 `pthread_cond_wait` 之前已经获取了互斥锁，并且在等待返回后重新检查条件是否满足。
+:::
+
+## 附加资源与练习
+
+- **练习**：尝试修改上面的任务队列例子，使其支持多个生产者和多个消费者。
+- **进一步阅读**：查阅POSIX线程库的官方文档，了解更多关于条件变量的高级用法和注意事项。
+
+通过掌握条件变量，你将能够编写更加高效和可靠的多线程程序。继续练习和探索，你会在多线程编程的道路上越走越远！

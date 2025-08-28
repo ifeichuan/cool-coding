@@ -1,0 +1,449 @@
+---
+title: RabbitMQ 分发模式
+description: 了解RabbitMQ中的分发模式，掌握消息队列的基本概念及其在实际应用中的使用场景。
+---
+
+# RabbitMQ 分发模式
+
+RabbitMQ 是一个开源的消息代理软件，用于在分布式系统中传递消息。它支持多种消息分发模式，帮助开发者实现高效的消息传递和处理。本文将详细介绍 RabbitMQ 的分发模式，并通过代码示例和实际案例帮助你理解其工作原理。
+
+## 什么是分发模式？
+
+在 RabbitMQ 中，分发模式决定了消息如何从生产者传递到消费者。RabbitMQ 提供了多种分发模式，包括简单队列、工作队列、发布/订阅、路由和主题等。每种模式都有其特定的使用场景和优势。
+
+## 简单队列模式
+
+简单队列模式是最基本的分发模式，生产者将消息发送到一个队列，消费者从该队列中接收消息。这种模式适用于单一生产者和单一消费者的场景。
+
+### 代码示例
+
+以下是一个简单的 Python 示例，展示了如何使用 `pika` 库实现简单队列模式。
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个队列
+channel.queue_declare(queue='hello')
+
+# 发送消息
+channel.basic_publish(exchange='',
+                      routing_key='hello',
+                      body='Hello World!')
+print(" [x] Sent 'Hello World!'")
+
+# 关闭连接
+connection.close()
+```
+
+消费者代码：
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个队列
+channel.queue_declare(queue='hello')
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(" [x] Received %r" % body)
+
+# 消费消息
+channel.basic_consume(queue='hello',
+                      auto_ack=True,
+                      on_message_callback=callback)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 输出
+
+生产者输出：
+
+```
+ [x] Sent 'Hello World!'
+```
+
+消费者输出：
+
+```
+ [*] Waiting for messages. To exit press CTRL+C
+ [x] Received b'Hello World!'
+```
+
+## 工作队列模式
+
+工作队列模式（也称为任务队列）用于将耗时的任务分配给多个消费者。这种模式适用于需要并行处理任务的场景。
+
+### 代码示例
+
+以下是一个工作队列模式的 Python 示例。
+
+生产者代码：
+
+```python
+import pika
+import sys
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个队列
+channel.queue_declare(queue='task_queue', durable=True)
+
+# 发送消息
+message = ' '.join(sys.argv[1:]) or "Hello World!"
+channel.basic_publish(exchange='',
+                      routing_key='task_queue',
+                      body=message,
+                      properties=pika.BasicProperties(
+                         delivery_mode=2,  # 使消息持久化
+                      ))
+print(" [x] Sent %r" % message)
+
+# 关闭连接
+connection.close()
+```
+
+消费者代码：
+
+```python
+import pika
+import time
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个队列
+channel.queue_declare(queue='task_queue', durable=True)
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(" [x] Received %r" % body)
+    time.sleep(body.count(b'.'))
+    print(" [x] Done")
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+# 消费消息
+channel.basic_qos(prefetch_count=1)
+channel.basic_consume(queue='task_queue',
+                      on_message_callback=callback)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 输出
+
+生产者输出：
+
+```
+ [x] Sent 'Task 1...'
+```
+
+消费者输出：
+
+```
+ [*] Waiting for messages. To exit press CTRL+C
+ [x] Received b'Task 1...'
+ [x] Done
+```
+
+## 发布/订阅模式
+
+发布/订阅模式允许生产者将消息发送到多个消费者。这种模式适用于广播消息的场景。
+
+### 代码示例
+
+以下是一个发布/订阅模式的 Python 示例。
+
+生产者代码：
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='logs', exchange_type='fanout')
+
+# 发送消息
+message = "Hello World!"
+channel.basic_publish(exchange='logs',
+                      routing_key='',
+                      body=message)
+print(" [x] Sent %r" % message)
+
+# 关闭连接
+connection.close()
+```
+
+消费者代码：
+
+```python
+import pika
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='logs', exchange_type='fanout')
+
+# 声明一个临时队列
+result = channel.queue_declare(queue='', exclusive=True)
+queue_name = result.method.queue
+
+# 绑定队列到交换机
+channel.queue_bind(exchange='logs', queue=queue_name)
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(" [x] Received %r" % body)
+
+# 消费消息
+channel.basic_consume(queue=queue_name,
+                      auto_ack=True,
+                      on_message_callback=callback)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 输出
+
+生产者输出：
+
+```
+ [x] Sent 'Hello World!'
+```
+
+消费者输出：
+
+```
+ [*] Waiting for messages. To exit press CTRL+C
+ [x] Received b'Hello World!'
+```
+
+## 路由模式
+
+路由模式允许生产者根据路由键将消息发送到特定的队列。这种模式适用于需要根据消息内容进行分发的场景。
+
+### 代码示例
+
+以下是一个路由模式的 Python 示例。
+
+生产者代码：
+
+```python
+import pika
+import sys
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='direct_logs', exchange_type='direct')
+
+# 发送消息
+severity = sys.argv[1] if len(sys.argv) > 1 else 'info'
+message = ' '.join(sys.argv[2:]) or 'Hello World!'
+channel.basic_publish(exchange='direct_logs',
+                      routing_key=severity,
+                      body=message)
+print(" [x] Sent %r:%r" % (severity, message))
+
+# 关闭连接
+connection.close()
+```
+
+消费者代码：
+
+```python
+import pika
+import sys
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='direct_logs', exchange_type='direct')
+
+# 声明一个临时队列
+result = channel.queue_declare(queue='', exclusive=True)
+queue_name = result.method.queue
+
+# 绑定队列到交换机
+severities = sys.argv[1:]
+if not severities:
+    sys.stderr.write("Usage: %s [info] [warning] [error]\n" % sys.argv[0])
+    sys.exit(1)
+
+for severity in severities:
+    channel.queue_bind(exchange='direct_logs',
+                       queue=queue_name,
+                       routing_key=severity)
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(" [x] %r:%r" % (method.routing_key, body))
+
+# 消费消息
+channel.basic_consume(queue=queue_name,
+                      auto_ack=True,
+                      on_message_callback=callback)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 输出
+
+生产者输出：
+
+```
+ [x] Sent 'info':'Hello World!'
+```
+
+消费者输出：
+
+```
+ [*] Waiting for messages. To exit press CTRL+C
+ [x] 'info':b'Hello World!'
+```
+
+## 主题模式
+
+主题模式允许生产者根据主题将消息发送到特定的队列。这种模式适用于需要根据消息内容进行复杂分发的场景。
+
+### 代码示例
+
+以下是一个主题模式的 Python 示例。
+
+生产者代码：
+
+```python
+import pika
+import sys
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='topic_logs', exchange_type='topic')
+
+# 发送消息
+routing_key = sys.argv[1] if len(sys.argv) > 1 else 'anonymous.info'
+message = ' '.join(sys.argv[2:]) or 'Hello World!'
+channel.basic_publish(exchange='topic_logs',
+                      routing_key=routing_key,
+                      body=message)
+print(" [x] Sent %r:%r" % (routing_key, message))
+
+# 关闭连接
+connection.close()
+```
+
+消费者代码：
+
+```python
+import pika
+import sys
+
+# 连接到 RabbitMQ 服务器
+connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+channel = connection.channel()
+
+# 声明一个交换机
+channel.exchange_declare(exchange='topic_logs', exchange_type='topic')
+
+# 声明一个临时队列
+result = channel.queue_declare(queue='', exclusive=True)
+queue_name = result.method.queue
+
+# 绑定队列到交换机
+binding_keys = sys.argv[1:]
+if not binding_keys:
+    sys.stderr.write("Usage: %s [binding_key]...\n" % sys.argv[0])
+    sys.exit(1)
+
+for binding_key in binding_keys:
+    channel.queue_bind(exchange='topic_logs',
+                       queue=queue_name,
+                       routing_key=binding_key)
+
+# 定义回调函数
+def callback(ch, method, properties, body):
+    print(" [x] %r:%r" % (method.routing_key, body))
+
+# 消费消息
+channel.basic_consume(queue=queue_name,
+                      auto_ack=True,
+                      on_message_callback=callback)
+
+print(' [*] Waiting for messages. To exit press CTRL+C')
+channel.start_consuming()
+```
+
+### 输出
+
+生产者输出：
+
+```
+ [x] Sent 'kern.critical':'A critical kernel error'
+```
+
+消费者输出：
+
+```
+ [*] Waiting for messages. To exit press CTRL+C
+ [x] 'kern.critical':b'A critical kernel error'
+```
+
+## 实际应用场景
+
+### 日志处理
+
+在分布式系统中，日志处理是一个常见的应用场景。通过使用 RabbitMQ 的发布/订阅模式，可以将日志消息广播到多个消费者，从而实现日志的集中处理和分析。
+
+### 任务分发
+
+在需要处理大量任务的系统中，工作队列模式可以帮助将任务分发给多个工作节点，从而提高系统的处理能力和响应速度。
+
+### 消息路由
+
+在复杂的系统中，消息路由模式可以根据消息的内容将消息发送到特定的处理节点，从而实现消息的精确分发和处理。
+
+## 总结
+
+RabbitMQ 提供了多种分发模式，每种模式都有其特定的使用场景和优势。通过理解这些模式，你可以根据实际需求选择合适的模式来实现高效的消息传递和处理。
+
+## 附加资源
+
+- [RabbitMQ 官方文档](https://www.rabbitmq.com/documentation.html)
+- [RabbitMQ 教程](https://www.rabbitmq.com/getstarted.html)
+- [pika 库文档](https://pika.readthedocs.io/en/stable/)
+
+## 练习
+
+1. 尝试实现一个简单的 RabbitMQ 生产者-消费者模型，使用简单队列模式。
+2. 修改上述代码，使其支持工作队列模式，并观察多个消费者如何处理任务。
+3. 实现一个发布/订阅模式的日志系统，将日志消息广播到多个消费者。
+4. 使用路由模式实现一个消息路由系统，根据消息内容将消息发送到特定的处理节点。
+
+通过完成这些练习，你将更深入地理解 RabbitMQ 的分发模式及其在实际应用中的使用。

@@ -1,0 +1,181 @@
+---
+title: Kubernetes 授权
+description: 了解 Kubernetes 授权机制，掌握如何通过角色和权限控制集群资源的访问。
+---
+
+## 介绍
+
+Kubernetes 授权（Authorization）是 Kubernetes 安全机制的重要组成部分，用于控制用户或服务账户对集群资源的访问权限。授权机制决定了哪些用户可以执行哪些操作，例如创建、读取、更新或删除资源。Kubernetes 提供了多种授权模式，包括基于角色的访问控制（RBAC）、基于属性的访问控制（ABAC）和 Webhook 授权等。
+
+本文将重点介绍 Kubernetes 中最常用的授权模式——基于角色的访问控制（RBAC），并通过实际案例帮助初学者理解其工作原理。
+
+---
+
+## Kubernetes 授权模式
+
+Kubernetes 支持以下几种授权模式：
+
+1. **RBAC（基于角色的访问控制）**：通过定义角色（Role）和角色绑定（RoleBinding）来控制用户或服务账户的权限。
+2. **ABAC（基于属性的访问控制）**：通过用户属性（如用户名、组名）和资源属性（如命名空间、资源类型）来控制权限。
+3. **Node 授权**：用于控制 kubelet 对集群资源的访问。
+4. **Webhook 授权**：通过外部服务（如 Open Policy Agent）实现自定义授权逻辑。
+
+:::tip
+对于大多数 Kubernetes 集群，RBAC 是最常用且推荐的授权模式。
+:::
+
+---
+
+## RBAC 的核心概念
+
+RBAC 的核心概念包括以下四个部分：
+
+1. **Role**：定义一组权限，例如读取 Pod 或创建 Deployment。Role 是命名空间级别的资源。
+2. **ClusterRole**：与 Role 类似，但作用于整个集群（非命名空间级别）。
+3. **RoleBinding**：将 Role 或 ClusterRole 绑定到用户、组或服务账户。RoleBinding 是命名空间级别的资源。
+4. **ClusterRoleBinding**：将 ClusterRole 绑定到用户、组或服务账户，作用于整个集群。
+
+---
+
+## RBAC 示例
+
+### 1. 创建 Role
+
+以下是一个 Role 的示例，允许用户读取和列出命名空间 `default` 中的 Pod：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: pod-reader
+rules:
+- apiGroups: [""] # 核心 API 组
+  resources: ["pods"]
+  verbs: ["get", "list"]
+```
+
+### 2. 创建 RoleBinding
+
+接下来，将 `pod-reader` Role 绑定到用户 `alice`：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods
+  namespace: default
+subjects:
+- kind: User
+  name: alice
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### 3. 验证权限
+
+绑定完成后，用户 `alice` 可以执行以下命令读取 Pod：
+
+```bash
+kubectl get pods -n default
+```
+
+如果用户尝试删除 Pod，则会收到权限不足的错误：
+
+```bash
+kubectl delete pod my-pod -n default
+```
+
+输出：
+
+```
+Error from server (Forbidden): pods "my-pod" is forbidden: User "alice" cannot delete resource "pods" in API group "" in the namespace "default"
+```
+
+---
+
+## 实际案例：为开发团队分配权限
+
+假设你有一个开发团队，需要访问 `dev` 命名空间中的资源，但只能读取 Deployment 和创建 Pod。以下是实现步骤：
+
+1. 创建 `dev` 命名空间：
+
+```bash
+kubectl create namespace dev
+```
+
+2. 创建 Role：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: dev
+  name: dev-team-role
+rules:
+- apiGroups: ["", "apps"]
+  resources: ["pods", "deployments"]
+  verbs: ["get", "list", "create"]
+```
+
+3. 创建 RoleBinding：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-team-binding
+  namespace: dev
+subjects:
+- kind: Group
+  name: dev-team
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: dev-team-role
+  apiGroup: rbac.authorization.k8s.io
+```
+
+4. 验证权限：
+
+开发团队成员可以执行以下操作：
+
+```bash
+kubectl get pods -n dev
+kubectl create pod my-pod -n dev
+```
+
+但无法删除 Deployment：
+
+```bash
+kubectl delete deployment my-deployment -n dev
+```
+
+---
+
+## 总结
+
+Kubernetes 授权是确保集群安全的关键机制。通过 RBAC，你可以灵活地控制用户和服务账户的权限，确保他们只能访问所需的资源。本文介绍了 RBAC 的核心概念，并通过实际案例展示了如何为开发团队分配权限。
+
+:::caution
+在实际生产环境中，务必遵循最小权限原则，避免授予不必要的权限。
+:::
+
+---
+
+## 附加资源
+
+1. [Kubernetes 官方文档 - 授权](https://kubernetes.io/docs/reference/access-authn-authz/authorization/)
+2. [RBAC 最佳实践](https://kubernetes.io/docs/reference/access-authn-authz/rbac/#best-practices)
+3. [Kubernetes 安全白皮书](https://kubernetes.io/docs/concepts/security/)
+
+---
+
+## 练习
+
+1. 创建一个 Role，允许用户读取和更新 ConfigMap。
+2. 创建一个 ClusterRole，允许用户查看所有命名空间中的节点信息。
+3. 为你的团队设计一个 RBAC 策略，限制他们只能访问特定命名空间中的资源。

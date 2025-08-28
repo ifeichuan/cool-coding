@@ -1,0 +1,384 @@
+---
+title: C++ 执行策略
+description: 了解C++17引入的执行策略，如何使用并行算法加速程序执行，以及不同执行策略的适用场景
+---
+
+# C++ 执行策略
+
+## 什么是执行策略？
+
+从C++17开始，STL算法库引入了**执行策略**（Execution Policies）的概念，允许开发者指定算法的执行方式。这是C++标准库迈向并行编程的重要一步，让开发者能够利用现代多核处理器的优势，而无需编写复杂的多线程代码。
+
+执行策略本质上是一种告诉编译器"如何"执行算法的指示符，它可以显著影响算法的性能和行为。
+
+:::note 为什么需要执行策略？
+随着硬件的发展，单核处理器速度提升受限，而多核处理器成为主流。执行策略使得标准库算法能够自动利用这些额外的计算资源，而开发者只需添加简单的参数即可。
+:::
+
+## C++ 标准中的执行策略类型
+
+C++17定义了三种基本的执行策略，位于`<execution>`头文件中：
+
+1. **`std::execution::seq`**（顺序执行）
+2. **`std::execution::par`**（并行执行）
+3. **`std::execution::par_unseq`**（并行+向量化执行）
+
+C++20进一步添加了：
+
+4. **`std::execution::unseq`**（向量化执行）
+
+让我们详细了解每种策略：
+
+### 1. `std::execution::seq`（顺序执行）
+
+这是默认的执行策略，算法按顺序在单线程中执行，就像传统的STL算法一样。
+
+```cpp
+#include <algorithm>
+#include <execution>
+#include <vector>
+#include <iostream>
+
+int main() {
+    std::vector<int> v = {5, 7, 2, 1, 9, 6, 3, 8, 4};
+    
+    // 使用顺序执行策略排序
+    std::sort(std::execution::seq, v.begin(), v.end());
+    
+    for (int i : v) {
+        std::cout << i << " ";
+    }
+    // 输出: 1 2 3 4 5 6 7 8 9
+    
+    return 0;
+}
+```
+
+### 2. `std::execution::par`（并行执行）
+
+允许算法在多个线程上并行执行。这对于处理大型数据集非常有用，可以显著提高性能。
+
+```cpp
+#include <algorithm>
+#include <execution>
+#include <vector>
+#include <random>
+#include <iostream>
+#include <chrono>
+
+int main() {
+    // 创建一个包含大量随机数的向量
+    std::vector<int> large_vector(1000000);
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::uniform_int_distribution<> dis(1, 1000000);
+    
+    for (auto& elem : large_vector) {
+        elem = dis(g);
+    }
+    
+    // 使用并行执行策略排序
+    auto start = std::chrono::high_resolution_clock::now();
+    std::sort(std::execution::par, large_vector.begin(), large_vector.end());
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double, std::milli> duration = end - start;
+    std::cout << "并行排序用时: " << duration.count() << " ms\n";
+    
+    return 0;
+}
+```
+
+### 3. `std::execution::par_unseq`（并行+向量化执行）
+
+此策略不仅允许多线程执行，还允许SIMD（单指令多数据）向量化操作，以及跨迭代的指令重排。这可能是性能最高的选项，但也对代码的正确性提出了更高要求。
+
+```cpp
+#include <algorithm>
+#include <execution>
+#include <vector>
+#include <iostream>
+#include <chrono>
+
+int main() {
+    std::vector<double> v(10000000, 1.0);
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    // 使用并行+向量化执行策略进行转换
+    std::transform(std::execution::par_unseq, 
+                  v.begin(), v.end(), 
+                  v.begin(),
+                  [](double x) { return std::sqrt(x) * std::sin(x); });
+    auto end = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double> duration = end - start;
+    std::cout << "并行+向量化转换用时: " << duration.count() << " 秒\n";
+    
+    return 0;
+}
+```
+
+### 4. `std::execution::unseq`（向量化执行，C++20）
+
+允许向量化执行，但不进行并行化。适用于希望利用SIMD指令但不想引入多线程开销的场景。
+
+## 支持执行策略的算法
+
+并非所有STL算法都支持执行策略。支持执行策略的算法大多数属于非修改序列操作、修改序列操作、排序操作和数值操作等类别。以下是部分支持执行策略的算法：
+
+- `std::for_each`, `std::find`, `std::count`
+- `std::copy`, `std::move`, `std::fill`
+- `std::transform`, `std::replace`
+- `std::sort`, `std::stable_sort`, `std::merge`
+- `std::reduce`, `std::transform_reduce`
+
+## 使用执行策略的注意事项
+
+虽然执行策略可以提高性能，但也带来了一些新的复杂性：
+
+### 1. 线程安全问题
+
+使用并行执行策略意味着代码将在多个线程中运行，因此必须确保：
+
+- 传递给算法的函数对象是线程安全的
+- 没有数据竞争
+- 避免使用共享可变状态
+
+```cpp
+// 错误示例：函数对象修改共享状态
+int sum = 0;
+std::for_each(std::execution::par, v.begin(), v.end(), [&sum](int x) {
+    sum += x;  // 危险！多线程访问同一变量，可能导致数据竞争
+});
+
+// 正确做法：使用 std::reduce
+int sum = std::reduce(std::execution::par, v.begin(), v.end());
+```
+
+### 2. 异常处理
+
+对于并行和向量化执行策略，抛出异常的行为是未定义的。如果操作可能抛出异常，最好不要使用非顺序执行策略，或在使用前确保异常被妥善处理。
+
+### 3. 算法选择
+
+不是所有的任务都适合并行化。小规模数据集的并行开销可能会超过收益。通常，数据量很大时才能体现并行的优势。
+
+```cpp
+// 对于小型数据集，顺序执行可能更快
+std::vector<int> small_vector = {1, 2, 3, 4, 5};
+std::sort(std::execution::seq, small_vector.begin(), small_vector.end());
+
+// 对于大型数据集，并行执行通常更有优势
+std::vector<int> large_vector(100000);
+// 初始化 large_vector
+std::sort(std::execution::par, large_vector.begin(), large_vector.end());
+```
+
+## 实际应用案例
+
+### 案例一：大数据分析
+
+假设我们正在处理一个大型传感器数据集，需要找出所有超过阈值的数据点：
+
+```cpp
+#include <algorithm>
+#include <execution>
+#include <vector>
+#include <chrono>
+#include <iostream>
+#include <random>
+
+struct SensorData {
+    double temperature;
+    double humidity;
+    double pressure;
+    // 其他数据...
+};
+
+int main() {
+    // 生成1000万条模拟传感器数据
+    std::vector<SensorData> sensor_readings(10000000);
+    
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> temp_dist(15.0, 35.0);
+    std::uniform_real_distribution<> humid_dist(30.0, 90.0);
+    std::uniform_real_distribution<> press_dist(980.0, 1020.0);
+    
+    for (auto& reading : sensor_readings) {
+        reading.temperature = temp_dist(gen);
+        reading.humidity = humid_dist(gen);
+        reading.pressure = press_dist(gen);
+    }
+    
+    const double TEMP_THRESHOLD = 30.0;
+    
+    // 计算超过温度阈值的读数 - 顺序执行
+    auto start_seq = std::chrono::high_resolution_clock::now();
+    int count_seq = std::count_if(std::execution::seq,
+                                 sensor_readings.begin(),
+                                 sensor_readings.end(),
+                                 [TEMP_THRESHOLD](const SensorData& data) {
+                                     return data.temperature > TEMP_THRESHOLD;
+                                 });
+    auto end_seq = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration_seq = end_seq - start_seq;
+    
+    // 计算超过温度阈值的读数 - 并行执行
+    auto start_par = std::chrono::high_resolution_clock::now();
+    int count_par = std::count_if(std::execution::par,
+                                 sensor_readings.begin(),
+                                 sensor_readings.end(),
+                                 [TEMP_THRESHOLD](const SensorData& data) {
+                                     return data.temperature > TEMP_THRESHOLD;
+                                 });
+    auto end_par = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration_par = end_par - start_par;
+    
+    std::cout << "温度超过" << TEMP_THRESHOLD << "°C的读数有: " << count_seq << " 条\n";
+    std::cout << "顺序执行用时: " << duration_seq.count() << " ms\n";
+    std::cout << "并行执行用时: " << duration_par.count() << " ms\n";
+    std::cout << "加速比: " << duration_seq.count() / duration_par.count() << "x\n";
+    
+    return 0;
+}
+```
+
+### 案例二：图像处理
+
+在图像处理应用中，许多操作都可以并行化，例如对每个像素应用滤镜：
+
+```cpp
+#include <algorithm>
+#include <execution>
+#include <vector>
+#include <chrono>
+#include <iostream>
+
+// 简化的像素结构
+struct Pixel {
+    uint8_t r, g, b;
+};
+
+// 简化的图像类
+class Image {
+public:
+    Image(int width, int height) : width_(width), height_(height), pixels_(width * height) {}
+    
+    Pixel& at(int x, int y) {
+        return pixels_[y * width_ + x];
+    }
+    
+    std::vector<Pixel>& pixels() { return pixels_; }
+    
+    int width() const { return width_; }
+    int height() const { return height_; }
+
+private:
+    int width_, height_;
+    std::vector<Pixel> pixels_;
+};
+
+// 将图像转为灰度
+void convertToGrayscale(Image& image, std::execution::sequenced_policy) {
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    for (auto& pixel : image.pixels()) {
+        uint8_t gray = static_cast<uint8_t>(0.3 * pixel.r + 0.59 * pixel.g + 0.11 * pixel.b);
+        pixel.r = pixel.g = pixel.b = gray;
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration = end - start;
+    std::cout << "顺序灰度转换用时: " << duration.count() << " ms\n";
+}
+
+void convertToGrayscale(Image& image, std::execution::parallel_policy) {
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    std::for_each(std::execution::par,
+                 image.pixels().begin(),
+                 image.pixels().end(),
+                 [](Pixel& pixel) {
+                     uint8_t gray = static_cast<uint8_t>(0.3 * pixel.r + 0.59 * pixel.g + 0.11 * pixel.b);
+                     pixel.r = pixel.g = pixel.b = gray;
+                 });
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> duration = end - start;
+    std::cout << "并行灰度转换用时: " << duration.count() << " ms\n";
+}
+
+int main() {
+    // 创建一个大型图像 (4K分辨率)
+    Image image(3840, 2160);
+    
+    // 用随机颜色填充图像
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> color_dist(0, 255);
+    
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            auto& pixel = image.at(x, y);
+            pixel.r = color_dist(gen);
+            pixel.g = color_dist(gen);
+            pixel.b = color_dist(gen);
+        }
+    }
+    
+    // 创建图像副本
+    Image image_seq = image;
+    Image image_par = image;
+    
+    // 使用不同执行策略转换为灰度
+    convertToGrayscale(image_seq, std::execution::seq);
+    convertToGrayscale(image_par, std::execution::par);
+    
+    return 0;
+}
+```
+
+## 性能对比和何时使用每种策略
+
+下面是不同执行策略的性能特点和适用场景：
+
+| 执行策略 | 性能特点 | 适用场景 |
+|---------|---------|---------|
+| `std::execution::seq` | 单线程执行，无并行开销 | 小数据量、简单操作、调试期间 |
+| `std::execution::par` | 多线程执行，有创建线程的开销 | 计算密集型任务、大数据集、独立操作 |
+| `std::execution::par_unseq` | 多线程 + SIMD执行，最高性能潜力 | 数值计算、向量/矩阵运算、大规模图像处理 |
+| `std::execution::unseq` | 单线程但SIMD执行，避免线程开销 | 需要向量化但希望避免多线程复杂性的场景 |
+
+:::tip 性能提示
+并行执行策略并不总是更快！对于小数据集，创建和管理线程的开销可能远大于并行执行带来的收益。通常只有当数据量足够大、每个元素的处理时间足够长，或者处理器核心数量足够多时，并行执行才会带来明显收益。
+:::
+
+## 总结
+
+C++执行策略是现代C++编程的重要特性，它允许开发者以最小的代码修改利用多核处理器的性能优势。主要要点：
+
+1. 执行策略定义了算法如何执行（顺序、并行、向量化）
+2. 使用执行策略需要包含`<execution>`头文件
+3. 主要的执行策略有四种：`seq`、`par`、`par_unseq`和`unseq`（C++20）
+4. 使用并行执行策略时需注意线程安全问题
+5. 执行策略适用于许多标准算法，如`std::sort`、`std::transform`等
+6. 选择合适的执行策略要考虑数据规模、任务复杂度和硬件特性
+
+在处理大型数据集时，执行策略可以显著提高代码性能，但对于小型数据集，顺序执行通常更高效。
+
+## 练习与思考
+
+1. 尝试使用不同的执行策略实现向量的加法运算，比较它们的性能。
+2. 分析哪些类型的算法最适合并行化，哪些则不适合。
+3. 实现一个矩阵乘法算法，并比较使用不同执行策略的性能差异。
+4. 思考：如果算法中存在数据依赖，使用并行执行策略会有什么问题？如何解决？
+
+## 进一步学习资源
+
+- C++标准库文档关于执行策略的部分
+- Intel Threading Building Blocks (TBB) 文档
+- 《C++ Concurrency in Action》by Anthony Williams
+- 《Effective Modern C++》by Scott Meyers
+
+通过合理使用执行策略，你可以编写出既保持简洁又能充分发挥现代硬件潜力的高性能代码。

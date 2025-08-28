@@ -1,0 +1,117 @@
+---
+title: 存储备份恢复
+description: 学习 Jaeger 存储配置中的备份与恢复机制，掌握数据保护的核心方法与实践技巧。
+---
+
+# 存储备份恢复
+
+## 介绍
+
+在分布式追踪系统中，Jaeger 存储的数据（如追踪记录、服务依赖关系等）是排查问题的重要依据。**存储备份恢复**是确保数据安全性的关键操作，它允许你在数据丢失或损坏时快速恢复系统状态。本文将介绍 Jaeger 存储的备份与恢复机制，涵盖配置方法、工具使用和实际案例。
+
+:::note 为什么需要备份？
+- 防止硬件故障导致数据丢失。
+- 应对误操作（如误删数据）。
+- 满足合规性要求（如数据归档）。
+:::
+
+---
+
+## 备份机制
+
+### 1. 备份类型
+Jaeger 支持多种存储后端（如 Elasticsearch、Cassandra），备份方法因存储类型而异：
+
+#### Elasticsearch
+- **快照（Snapshot）**：通过 Elasticsearch 的 Snapshot API 备份索引数据。
+- **工具**：使用 `elasticsearch-dump` 导出 JSON 数据。
+
+#### Cassandra
+- **表导出**：通过 `cqlsh` 执行 `COPY` 命令导出数据为 CSV。
+- **工具**：使用 `nodetool snapshot` 创建磁盘快照。
+
+### 2. 备份步骤（以 Elasticsearch 为例）
+以下是使用 Elasticsearch Snapshot API 的示例：
+
+```bash
+# 创建备份仓库
+PUT _snapshot/jaeger_backup
+{
+  "type": "fs",
+  "settings": {
+    "location": "/mnt/backups/jaeger"
+  }
+}
+
+# 执行快照备份
+PUT _snapshot/jaeger_backup/snapshot_20240501
+{
+  "indices": "jaeger-*",
+  "ignore_unavailable": true
+}
+```
+
+**输出：**
+```json
+{
+  "accepted": true
+}
+```
+
+:::tip
+确保备份目录（如 `/mnt/backups`）对所有 Elasticsearch 节点可访问。
+:::
+
+---
+
+## 恢复机制
+
+### 1. 从快照恢复
+使用 Elasticsearch 的 Restore API 恢复数据：
+
+```bash
+POST _snapshot/jaeger_backup/snapshot_20240501/_restore
+{
+  "indices": "jaeger-*",
+  "ignore_unavailable": true
+}
+```
+
+### 2. 验证恢复
+检查索引是否已恢复：
+```bash
+GET _cat/indices/jaeger-*?v
+```
+
+---
+
+## 实际案例
+
+### 场景：误删生产环境追踪数据
+1. **问题**：开发人员误执行了删除 Jaeger 索引的操作。
+2. **解决步骤**：
+   - 从最近的快照（如 `snapshot_20240501`）恢复数据。
+   - 使用 `_cat/indices` 确认数据恢复成功。
+3. **结果**：系统在 10 分钟内恢复正常，无数据丢失。
+
+:::warning 注意
+定期测试备份的有效性！避免备份文件损坏导致无法恢复。
+:::
+
+---
+
+## 总结
+
+- **备份**：根据存储后端选择合适的方法（如 Elasticsearch 快照、Cassandra 表导出）。
+- **恢复**：通过 API 或工具快速还原数据。
+- **最佳实践**：
+  - 自动化备份（如 Cron 定时任务）。
+  - 多地存储备份（如云存储 + 本地磁盘）。
+
+### 附加资源
+1. [Elasticsearch 快照官方文档](https://www.elastic.co/guide/en/elasticsearch/reference/current/snapshot-restore.html)
+2. [Cassandra 备份与恢复指南](https://cassandra.apache.org/doc/latest/operating/backups.html)
+
+### 练习
+1. 在测试环境中配置 Elasticsearch 快照备份，并尝试恢复一个索引。
+2. 使用 `cqlsh` 导出 Cassandra 的 `jaeger.traces` 表数据。

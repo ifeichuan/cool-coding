@@ -1,0 +1,220 @@
+---
+title: Sentinel 二次开发指南
+description: 本指南将详细介绍如何对Sentinel进行二次开发，帮助初学者理解Sentinel的核心概念，并通过实际案例展示如何扩展Sentinel的功能。
+---
+
+# Sentinel 二次开发指南
+
+Sentinel是阿里巴巴开源的一款轻量级流量控制组件，广泛应用于微服务架构中，用于实现流量控制、熔断降级、系统负载保护等功能。Sentinel的二次开发是指在其基础上进行功能扩展或定制化开发，以满足特定业务需求。本指南将带领初学者逐步了解Sentinel的二次开发流程，并通过实际案例展示如何实现自定义扩展。
+
+## 1. Sentinel核心概念
+
+在开始二次开发之前，首先需要理解Sentinel的核心概念：
+
+- **资源（Resource）**：Sentinel中的资源是受保护的对象，可以是方法、接口、服务等。
+- **规则（Rule）**：规则定义了资源的保护策略，如流量控制规则、熔断规则等。
+- **Slot**：Slot是Sentinel的核心处理单元，负责执行具体的流量控制逻辑。
+- **Context**：Context是Sentinel的执行上下文，包含了当前请求的相关信息。
+
+## 2. Sentinel二次开发流程
+
+### 2.1 环境准备
+
+首先，确保你已经安装了Java开发环境，并在项目中引入了Sentinel的依赖。可以通过Maven或Gradle引入Sentinel：
+
+```xml
+<dependency>
+    <groupId>com.alibaba.csp</groupId>
+    <artifactId>sentinel-core</artifactId>
+    <version>1.8.6</version>
+</dependency>
+```
+
+### 2.2 自定义Slot
+
+Slot是Sentinel的核心处理单元，负责执行具体的流量控制逻辑。Sentinel提供了默认的Slot链，但我们可以通过自定义Slot来扩展其功能。
+
+以下是一个简单的自定义Slot示例：
+
+```java
+public class CustomSlot extends AbstractLinkedProcessorSlot<DefaultNode> {
+
+    @Override
+    public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count, boolean prioritized, Object... args) throws Throwable {
+        // 自定义逻辑
+        System.out.println("CustomSlot entry: " + resourceWrapper.getName());
+        // 调用下一个Slot
+        fireEntry(context, resourceWrapper, node, count, prioritized, args);
+    }
+
+    @Override
+    public void exit(Context context, ResourceWrapper resourceWrapper, int count, Object... args) {
+        // 自定义逻辑
+        System.out.println("CustomSlot exit: " + resourceWrapper.getName());
+        // 调用下一个Slot
+        fireExit(context, resourceWrapper, count, args);
+    }
+}
+```
+
+### 2.3 注册自定义Slot
+
+自定义Slot完成后，需要将其注册到Sentinel的Slot链中。可以通过以下方式实现：
+
+```java
+public class CustomSlotChainBuilder implements SlotChainBuilder {
+
+    @Override
+    public ProcessorSlotChain build() {
+        ProcessorSlotChain chain = new DefaultProcessorSlotChain();
+        chain.addLast(new CustomSlot());
+        return chain;
+    }
+}
+
+// 注册自定义SlotChainBuilder
+SlotChainProvider.setSlotChainBuilder(new CustomSlotChainBuilder());
+```
+
+### 2.4 自定义规则
+
+除了自定义Slot，我们还可以通过自定义规则来扩展Sentinel的功能。以下是一个简单的自定义规则示例：
+
+```java
+public class CustomRule extends AbstractRule {
+
+    private String customParam;
+
+    public String getCustomParam() {
+        return customParam;
+    }
+
+    public void setCustomParam(String customParam) {
+        this.customParam = customParam;
+    }
+}
+```
+
+### 2.5 自定义规则管理器
+
+自定义规则需要与规则管理器配合使用。以下是一个简单的自定义规则管理器示例：
+
+```java
+public class CustomRuleManager {
+
+    private static final Map<String, Set<CustomRule>> rules = new ConcurrentHashMap<>();
+
+    public static void loadRules(Set<CustomRule> ruleSet) {
+        rules.clear();
+        for (CustomRule rule : ruleSet) {
+            rules.computeIfAbsent(rule.getResource(), k -> new HashSet<>()).add(rule);
+        }
+    }
+
+    public static Set<CustomRule> getRules(String resource) {
+        return rules.getOrDefault(resource, Collections.emptySet());
+    }
+}
+```
+
+## 3. 实际案例：自定义流量控制规则
+
+假设我们需要实现一个自定义的流量控制规则，当某个资源的请求参数中包含特定值时，触发流量控制。以下是实现步骤：
+
+### 3.1 定义自定义规则
+
+```java
+public class ParamFlowRule extends AbstractRule {
+
+    private String paramName;
+    private String paramValue;
+
+    // Getters and Setters
+}
+```
+
+### 3.2 实现自定义Slot
+
+```java
+public class ParamFlowSlot extends AbstractLinkedProcessorSlot<DefaultNode> {
+
+    @Override
+    public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count, boolean prioritized, Object... args) throws Throwable {
+        // 获取请求参数
+        String paramValue = (String) args[0];
+        // 获取自定义规则
+        Set<ParamFlowRule> rules = ParamFlowRuleManager.getRules(resourceWrapper.getName());
+        for (ParamFlowRule rule : rules) {
+            if (rule.getParamValue().equals(paramValue)) {
+                // 触发流量控制
+                throw new FlowException("Param flow control triggered");
+            }
+        }
+        // 调用下一个Slot
+        fireEntry(context, resourceWrapper, node, count, prioritized, args);
+    }
+
+    @Override
+    public void exit(Context context, ResourceWrapper resourceWrapper, int count, Object... args) {
+        // 调用下一个Slot
+        fireExit(context, resourceWrapper, count, args);
+    }
+}
+```
+
+### 3.3 注册自定义Slot
+
+```java
+public class ParamFlowSlotChainBuilder implements SlotChainBuilder {
+
+    @Override
+    public ProcessorSlotChain build() {
+        ProcessorSlotChain chain = new DefaultProcessorSlotChain();
+        chain.addLast(new ParamFlowSlot());
+        return chain;
+    }
+}
+
+// 注册自定义SlotChainBuilder
+SlotChainProvider.setSlotChainBuilder(new ParamFlowSlotChainBuilder());
+```
+
+### 3.4 使用自定义规则
+
+```java
+public class Demo {
+
+    public static void main(String[] args) {
+        // 加载自定义规则
+        Set<ParamFlowRule> rules = new HashSet<>();
+        ParamFlowRule rule = new ParamFlowRule();
+        rule.setResource("testResource");
+        rule.setParamName("paramName");
+        rule.setParamValue("paramValue");
+        rules.add(rule);
+        ParamFlowRuleManager.loadRules(rules);
+
+        // 测试流量控制
+        try {
+            Entry entry = SphU.entry("testResource", EntryType.IN, 1, "paramValue");
+            // 业务逻辑
+            entry.exit();
+        } catch (BlockException e) {
+            System.out.println("Blocked by custom flow control");
+        }
+    }
+}
+```
+
+## 4. 总结
+
+通过本指南，我们了解了Sentinel的二次开发流程，包括自定义Slot、自定义规则以及如何在实际场景中应用这些扩展功能。Sentinel的灵活性和可扩展性使其能够满足各种复杂的业务需求。
+
+## 5. 附加资源与练习
+
+- **官方文档**：[Sentinel官方文档](https://sentinelguard.io/zh-cn/docs/introduction.html)
+- **练习**：尝试实现一个自定义的熔断规则，并在实际项目中应用。
+
+:::tip
+在进行Sentinel二次开发时，建议先熟悉Sentinel的核心概念和默认实现，再逐步进行扩展开发。
+:::

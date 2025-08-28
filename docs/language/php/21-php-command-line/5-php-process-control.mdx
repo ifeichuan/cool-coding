@@ -1,0 +1,195 @@
+---
+title: PHP 进程控制
+description: 了解如何在PHP中管理和控制进程，包括创建子进程、进程间通信以及处理信号。
+---
+
+# PHP 进程控制
+
+在PHP中，进程控制是指通过编程方式管理和控制操作系统进程的能力。这对于需要执行并发任务、处理长时间运行的操作或与其他进程交互的应用程序非常有用。PHP提供了一些内置函数和扩展，使得进程控制变得相对简单。
+
+## 介绍
+
+进程控制通常涉及以下几个方面：
+
+1. **创建子进程**：通过`pcntl_fork()`函数创建一个新的子进程。
+2. **进程间通信**：通过管道、共享内存或信号等方式在进程之间传递数据。
+3. **信号处理**：通过`pcntl_signal()`函数捕获和处理操作系统发送的信号。
+
+## 创建子进程
+
+在PHP中，可以使用`pcntl_fork()`函数创建一个子进程。这个函数会返回两次：一次在父进程中返回子进程的PID，另一次在子进程中返回0。如果返回-1，则表示创建子进程失败。
+
+```php
+<?php
+$pid = pcntl_fork();
+
+if ($pid == -1) {
+    die('无法创建子进程');
+} elseif ($pid) {
+    // 父进程
+    echo "父进程ID: " . getmypid() . "\n";
+    echo "子进程ID: $pid\n";
+} else {
+    // 子进程
+    echo "子进程ID: " . getmypid() . "\n";
+}
+?>
+```
+
+**输出示例：**
+
+```
+父进程ID: 12345
+子进程ID: 12346
+子进程ID: 12346
+```
+
+:::note
+`pcntl_fork()`函数在Windows平台上不可用，因为它依赖于Unix系统的进程管理机制。
+:::
+
+## 进程间通信
+
+进程间通信（IPC）是多个进程之间交换数据的一种机制。PHP提供了多种IPC方法，包括管道、共享内存和信号。
+
+### 使用管道进行通信
+
+管道是一种单向通信机制，允许父进程和子进程之间传递数据。
+
+```php
+<?php
+$pipe = [];
+if (pipe($pipe) === false) {
+    die('无法创建管道');
+}
+
+$pid = pcntl_fork();
+
+if ($pid == -1) {
+    die('无法创建子进程');
+} elseif ($pid) {
+    // 父进程
+    fclose($pipe[0]); // 关闭读取端
+    fwrite($pipe[1], "Hello from parent\n");
+    fclose($pipe[1]);
+} else {
+    // 子进程
+    fclose($pipe[1]); // 关闭写入端
+    echo fread($pipe[0], 1024);
+    fclose($pipe[0]);
+}
+?>
+```
+
+**输出示例：**
+
+```
+Hello from parent
+```
+
+## 信号处理
+
+信号是操作系统发送给进程的通知，通常用于通知进程发生了某些事件。PHP允许你捕获这些信号并执行相应的操作。
+
+```php
+<?php
+declare(ticks=1);
+
+function signalHandler($signal) {
+    switch ($signal) {
+        case SIGTERM:
+            echo "接收到SIGTERM信号，准备退出...\n";
+            exit;
+        case SIGINT:
+            echo "接收到SIGINT信号，准备退出...\n";
+            exit;
+    }
+}
+
+pcntl_signal(SIGTERM, "signalHandler");
+pcntl_signal(SIGINT, "signalHandler");
+
+echo "运行中... 按下Ctrl+C退出\n";
+
+while (true) {
+    // 模拟长时间运行的任务
+    sleep(1);
+}
+?>
+```
+
+**输出示例：**
+
+```
+运行中... 按下Ctrl+C退出
+接收到SIGINT信号，准备退出...
+```
+
+:::caution
+信号处理函数应尽可能简短，以避免在信号处理期间发生不可预测的行为。
+:::
+
+## 实际案例
+
+假设你正在开发一个Web爬虫，需要同时抓取多个网页。你可以使用进程控制来并行处理这些任务。
+
+```php
+<?php
+$urls = [
+    'https://example.com/page1',
+    'https://example.com/page2',
+    'https://example.com/page3',
+];
+
+foreach ($urls as $url) {
+    $pid = pcntl_fork();
+
+    if ($pid == -1) {
+        die('无法创建子进程');
+    } elseif ($pid) {
+        // 父进程
+        continue;
+    } else {
+        // 子进程
+        $content = file_get_contents($url);
+        echo "抓取 $url 完成\n";
+        exit;
+    }
+}
+
+// 等待所有子进程完成
+while (pcntl_waitpid(0, $status) != -1) {
+    $status = pcntl_wexitstatus($status);
+    echo "子进程 $status 已完成\n";
+}
+?>
+```
+
+**输出示例：**
+
+```
+抓取 https://example.com/page1 完成
+抓取 https://example.com/page2 完成
+抓取 https://example.com/page3 完成
+子进程 0 已完成
+子进程 0 已完成
+子进程 0 已完成
+```
+
+## 总结
+
+PHP进程控制提供了强大的工具来管理和控制操作系统进程。通过创建子进程、进程间通信和信号处理，你可以构建复杂的并发应用程序。虽然这些功能在Unix系统上更为常见，但它们为处理高并发任务提供了极大的灵活性。
+
+## 附加资源
+
+- [PHP官方文档 - PCNTL](https://www.php.net/manual/en/book.pcntl.php)
+- [Unix进程管理](https://en.wikipedia.org/wiki/Process_management_(computing))
+- [信号处理](https://en.wikipedia.org/wiki/Signal_(IPC))
+
+## 练习
+
+1. 修改上面的Web爬虫示例，使其能够处理更多的URL，并确保所有子进程都能正确退出。
+2. 尝试使用共享内存来实现进程间通信，而不是管道。
+3. 编写一个脚本，捕获`SIGUSR1`信号，并在接收到信号时打印一条消息。
+
+通过完成这些练习，你将更深入地理解PHP进程控制的概念和应用。

@@ -1,0 +1,387 @@
+---
+title: Java 对象流
+description: 本文详细介绍Java对象流的概念、使用方法和应用场景，包含序列化和反序列化的完整案例和示例代码。
+---
+
+# Java 对象流
+
+## 什么是Java对象流？
+
+Java对象流是Java IO体系中的一个重要组成部分，它允许我们将Java对象转换为字节序列（称为"序列化"），以及将这些字节序列恢复为原始Java对象（称为"反序列化"）。对象流主要通过`ObjectOutputStream`和`ObjectInputStream`这两个类实现，这两个类分别用于对象的序列化和反序列化。
+
+:::note 核心概念
+- **序列化（Serialization）**：将Java对象转换为字节序列的过程
+- **反序列化（Deserialization）**：将字节序列恢复为Java对象的过程
+:::
+
+## 为什么需要对象流？
+
+在实际应用中，对象流主要有以下几个用途：
+
+1. **持久化存储**：将程序中的对象状态保存到文件中，以便在程序重新启动后恢复。
+2. **网络传输**：在网络上传输Java对象。
+3. **深拷贝**：通过序列化和反序列化可以实现对象的深拷贝。
+4. **远程方法调用（RMI）**：在分布式系统中，使用Java RMI时需要对象的序列化和反序列化。
+
+## 相关类介绍
+
+### ObjectOutputStream
+
+`ObjectOutputStream`类用于将Java对象序列化为字节序列。它是`OutputStream`的子类，提供了写入对象的能力。
+
+主要方法：
+- `writeObject(Object obj)`：将指定的对象写入ObjectOutputStream
+- `flush()`：刷新流
+- `close()`：关闭流
+
+### ObjectInputStream
+
+`ObjectInputStream`类用于将字节序列反序列化为Java对象。它是`InputStream`的子类，提供了读取对象的能力。
+
+主要方法：
+- `readObject()`：从ObjectInputStream读取对象
+- `close()`：关闭流
+
+## 使用对象流的条件
+
+要使一个Java对象可序列化，需要满足以下条件：
+
+1. 该类必须实现`java.io.Serializable`接口（这是一个标记接口，不包含任何方法）。
+2. 该类的所有属性都必须是可序列化的，或者被标记为`transient`（表示该属性不参与序列化）。
+3. 对于不想被序列化的敏感数据，应该使用`transient`关键字标记。
+
+```java
+import java.io.Serializable;
+
+public class Person implements Serializable {
+    // 序列化版本号，用于版本控制
+    private static final long serialVersionUID = 1L;
+    
+    private String name;
+    private int age;
+    // 不想被序列化的敏感信息
+    private transient String password;
+    
+    // 构造器和getter/setter方法省略...
+}
+```
+
+## 基本使用示例
+
+下面我们通过一个简单的示例展示如何使用对象流进行序列化和反序列化：
+
+```java
+import java.io.*;
+
+public class ObjectStreamExample {
+
+    public static void main(String[] args) {
+        // 创建一个Person对象
+        Person person = new Person("张三", 25);
+        person.setPassword("123456");
+        
+        // 序列化
+        try (FileOutputStream fileOut = new FileOutputStream("person.ser");
+             ObjectOutputStream out = new ObjectOutputStream(fileOut)) {
+            
+            out.writeObject(person);
+            System.out.println("Person对象已成功序列化到person.ser");
+            
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        
+        // 反序列化
+        try (FileInputStream fileIn = new FileInputStream("person.ser");
+             ObjectInputStream in = new ObjectInputStream(fileIn)) {
+            
+            Person deserializedPerson = (Person) in.readObject();
+            System.out.println("Person对象已从person.ser反序列化");
+            System.out.println("姓名: " + deserializedPerson.getName());
+            System.out.println("年龄: " + deserializedPerson.getAge());
+            System.out.println("密码: " + deserializedPerson.getPassword());
+            
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+输出结果：
+
+```
+Person对象已成功序列化到person.ser
+Person对象已从person.ser反序列化
+姓名: 张三
+年龄: 25
+密码: null  // 注意：password被标记为transient，所以反序列化后为null
+```
+
+:::caution 注意
+1. 序列化过程中，被标记为`transient`的字段不会被序列化，反序列化后这些字段的值将是默认值（对于对象是null，对于基本类型是0或false）。
+2. 使用对象流时，必须使用try-with-resources或在finally块中关闭流，以防止资源泄漏。
+:::
+
+## 序列化版本控制
+
+在对象序列化中，序列化版本ID（serialVersionUID）用于确保序列化和反序列化的兼容性。当一个类被序列化后，如果这个类的结构发生了变化，那么反序列化时可能会失败，除非serialVersionUID保持不变。
+
+```java
+private static final long serialVersionUID = 1L;
+```
+
+如果没有显式定义serialVersionUID，Java会根据类的结构自动生成一个，但这种方式在类结构变化时很容易导致不兼容。因此，强烈建议为可序列化的类显式定义serialVersionUID。
+
+## 自定义序列化过程
+
+对于某些复杂对象，我们可能需要自定义序列化过程。Java提供了两种方法：
+
+1. 实现`writeObject()`和`readObject()`方法
+2. 实现`Externalizable`接口
+
+### 使用writeObject和readObject方法
+
+```java
+import java.io.*;
+
+public class CustomPerson implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    private String name;
+    private int age;
+    private String password;
+    
+    // 自定义序列化方法
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject(); // 执行默认序列化
+        // 加密密码后再写入
+        out.writeObject("encrypted:" + password);
+    }
+    
+    // 自定义反序列化方法
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject(); // 执行默认反序列化
+        // 读取加密的密码并解密
+        String encryptedPassword = (String) in.readObject();
+        if (encryptedPassword.startsWith("encrypted:")) {
+            this.password = encryptedPassword.substring(10);
+        }
+    }
+    
+    // 构造器和getter/setter方法省略...
+}
+```
+
+### 实现Externalizable接口
+
+```java
+import java.io.*;
+
+public class ExternalizablePerson implements Externalizable {
+    private static final long serialVersionUID = 1L;
+    
+    private String name;
+    private int age;
+    private String password;
+    
+    // 必须提供无参构造器
+    public ExternalizablePerson() {}
+    
+    // 手动指定如何序列化
+    @Override
+    public void writeExternal(ObjectOutput out) throws IOException {
+        out.writeObject(name);
+        out.writeInt(age);
+        // 密码不序列化
+    }
+    
+    // 手动指定如何反序列化
+    @Override
+    public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
+        this.name = (String) in.readObject();
+        this.age = in.readInt();
+        this.password = null; // 密码不恢复
+    }
+    
+    // 构造器和getter/setter方法省略...
+}
+```
+
+:::tip 提示
+实现`Externalizable`接口时，必须提供一个公共的无参构造器，因为反序列化时会先调用该构造器创建对象实例，再调用`readExternal()`方法。
+:::
+
+## 实际应用案例
+
+### 案例1：游戏存档功能
+
+游戏中经常需要保存玩家的游戏进度，对象序列化是实现这一功能的好方法。
+
+```java
+import java.io.*;
+import java.util.*;
+
+class GameState implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    private String playerName;
+    private int level;
+    private int score;
+    private List<String> inventory;
+    private Date saveTime;
+    
+    // 构造器和getter/setter方法省略...
+    
+    public void saveGame(String fileName) {
+        this.saveTime = new Date(); // 记录保存时间
+        
+        try (FileOutputStream fileOut = new FileOutputStream(fileName);
+             ObjectOutputStream out = new ObjectOutputStream(fileOut)) {
+            
+            out.writeObject(this);
+            System.out.println("游戏进度已保存");
+            
+        } catch (IOException e) {
+            System.out.println("保存游戏失败: " + e.getMessage());
+        }
+    }
+    
+    public static GameState loadGame(String fileName) {
+        try (FileInputStream fileIn = new FileInputStream(fileName);
+             ObjectInputStream in = new ObjectInputStream(fileIn)) {
+            
+            GameState gameState = (GameState) in.readObject();
+            System.out.println("游戏进度已加载，保存时间: " + gameState.saveTime);
+            return gameState;
+            
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("加载游戏失败: " + e.getMessage());
+            return null;
+        }
+    }
+}
+```
+
+### 案例2：配置信息管理
+
+应用程序的配置信息可以通过对象序列化进行持久化存储：
+
+```java
+import java.io.*;
+import java.util.Properties;
+
+class AppConfig implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    private Properties properties = new Properties();
+    private static final String CONFIG_FILE = "app_config.ser";
+    
+    // 单例模式
+    private static AppConfig instance;
+    
+    private AppConfig() {
+        // 默认配置
+        properties.setProperty("theme", "light");
+        properties.setProperty("fontSize", "12");
+        properties.setProperty("language", "zh_CN");
+    }
+    
+    public static synchronized AppConfig getInstance() {
+        if (instance == null) {
+            // 尝试从文件加载
+            try (FileInputStream fileIn = new FileInputStream(CONFIG_FILE);
+                 ObjectInputStream in = new ObjectInputStream(fileIn)) {
+                
+                instance = (AppConfig) in.readObject();
+                System.out.println("配置已从文件加载");
+                
+            } catch (IOException | ClassNotFoundException e) {
+                // 加载失败，创建新实例
+                instance = new AppConfig();
+                System.out.println("创建默认配置");
+            }
+        }
+        return instance;
+    }
+    
+    public void setProperty(String key, String value) {
+        properties.setProperty(key, value);
+    }
+    
+    public String getProperty(String key) {
+        return properties.getProperty(key);
+    }
+    
+    public void saveConfig() {
+        try (FileOutputStream fileOut = new FileOutputStream(CONFIG_FILE);
+             ObjectOutputStream out = new ObjectOutputStream(fileOut)) {
+            
+            out.writeObject(this);
+            System.out.println("配置已保存到文件");
+            
+        } catch (IOException e) {
+            System.out.println("保存配置失败: " + e.getMessage());
+        }
+    }
+}
+```
+
+## 对象流的注意事项
+
+使用Java对象流时，需要注意以下几点：
+
+1. **安全性考虑**：序列化和反序列化可能导致安全问题，特别是在处理外部或不可信的序列化数据时。
+
+2. **性能影响**：序列化和反序列化是相对昂贵的操作，对于需要高性能的应用，可能需要考虑其他替代方案。
+
+3. **版本控制**：类的结构变化可能导致序列化兼容性问题，正确使用`serialVersionUID`很重要。
+
+4. **大型对象**：序列化大型对象可能占用大量内存和磁盘空间。
+
+5. **循环引用**：对象之间的循环引用在序列化时也能正确处理，但可能增加序列化数据的大小。
+
+6. **静态字段**：静态字段不会被序列化，因为它们属于类而不是对象实例。
+
+7. **敏感数据**：对于不应该被序列化的敏感数据，应使用`transient`关键字。
+
+## 序列化替代方案
+
+对象序列化虽然方便，但在某些情况下可能不是最佳选择。以下是一些常见的替代方案：
+
+1. **JSON/XML序列化**：使用如Jackson、Gson或JAXB等库，将对象转换为JSON或XML格式。这些格式更具可读性和跨平台性。
+
+2. **Protocol Buffers**：Google的开源序列化格式，比Java序列化更快、更小。
+
+3. **自定义二进制格式**：针对特定需求设计的二进制序列化格式。
+
+4. **数据库存储**：直接将对象映射到数据库表中存储。
+
+## 总结
+
+Java对象流是Java IO体系中的重要组成部分，通过序列化和反序列化机制，它允许我们将Java对象转换为字节序列并在需要时恢复。这一功能在对象持久化、网络传输和深拷贝等方面有广泛的应用。
+
+使用对象流时，需要记住以下要点：
+1. 要序列化的类必须实现`Serializable`接口
+2. 使用`transient`关键字排除不需要序列化的字段
+3. 显式定义`serialVersionUID`以控制版本兼容性
+4. 需要时可以自定义序列化过程
+
+虽然Java对象流使用简单直接，但在实际应用中也需要考虑安全性、性能和兼容性等问题，并在适当的情况下考虑使用替代方案。
+
+## 练习
+
+1. 创建一个包含多个属性的学生类，使其可序列化，并编写程序将多个学生对象序列化到同一个文件中，然后再读取出来。
+
+2. 实现一个简单的通讯录程序，能够将联系人信息序列化到文件中，并在程序启动时加载。
+
+3. 尝试修改一个已序列化类的结构（添加或删除字段），然后尝试反序列化之前保存的对象，观察会发生什么，并尝试解决兼容性问题。
+
+4. 实现一个自定义序列化过程，对敏感字段进行加密后再序列化。
+
+## 参考资源
+
+- Java官方文档：[Object Serialization](https://docs.oracle.com/javase/tutorial/jndi/objects/serial.html)
+- Oracle技术网络：[Java Object Serialization Specification](https://docs.oracle.com/javase/8/docs/platform/serialization/spec/serialTOC.html)
+
+祝你在Java对象流的学习中取得进步！

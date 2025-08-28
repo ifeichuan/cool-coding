@@ -1,0 +1,157 @@
+---
+title: Summary摘要
+description: 了解Prometheus中的Summary摘要指标类型，掌握其工作原理、使用场景以及如何在实际中应用。
+---
+
+# Summary摘要
+
+在Prometheus中，**Summary摘要**是一种用于记录和统计数值分布情况的指标类型。它可以帮助我们了解某个操作的耗时分布、请求大小分布等。与Histogram（直方图）类似，Summary也用于统计数据的分布，但它在客户端计算分位数，而不是在服务端。
+
+## 什么是Summary摘要？
+
+Summary摘要是一种用于记录数值分布情况的指标类型。它会记录一组数值的总和（`_sum`）和数量（`_count`），并且可以计算分位数（例如：50%、90%、99%等）。与Histogram不同，Summary的分位数是在客户端计算的，因此它更适合于需要高精度分位数的场景。
+
+### Summary的核心字段
+
+- `_sum`：所有观测值的总和。
+- `_count`：观测值的数量。
+- `{quantile="<φ>"}`：分位数，例如 `quantile=0.5` 表示中位数。
+
+## 如何使用Summary摘要？
+
+在Prometheus中，Summary摘要通常用于记录操作的耗时、请求的大小等。以下是一个使用Summary的示例：
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/prometheus/client_golang/prometheus/promhttp"
+    "net/http"
+    "time"
+)
+
+var (
+    requestDuration = prometheus.NewSummary(prometheus.SummaryOpts{
+        Name: "http_request_duration_seconds",
+        Help: "Duration of HTTP requests in seconds",
+        Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
+    })
+)
+
+func init() {
+    prometheus.MustRegister(requestDuration)
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start).Seconds()
+        requestDuration.Observe(duration)
+    }()
+    // 处理请求
+    w.Write([]byte("Hello, World!"))
+}
+
+func main() {
+    http.HandleFunc("/", handler)
+    http.Handle("/metrics", promhttp.Handler())
+    http.ListenAndServe(":8080", nil)
+}
+```
+
+在这个示例中，我们创建了一个名为 `http_request_duration_seconds` 的Summary指标，用于记录HTTP请求的耗时。每次请求处理完成后，我们会计算请求的耗时，并通过 `Observe` 方法将其记录到Summary中。
+
+### 输出示例
+
+假设我们运行了上述代码，并通过Prometheus抓取了指标，那么在Prometheus中我们可以看到类似以下的指标：
+
+```
+http_request_duration_seconds_sum 123.45
+http_request_duration_seconds_count 100
+http_request_duration_seconds{quantile="0.5"} 0.12
+http_request_duration_seconds{quantile="0.9"} 0.23
+http_request_duration_seconds{quantile="0.99"} 0.45
+```
+
+- `http_request_duration_seconds_sum` 表示所有请求耗时的总和。
+- `http_request_duration_seconds_count` 表示请求的总数。
+- `http_request_duration_seconds{quantile="0.5"}` 表示中位数（50%的请求耗时小于等于0.12秒）。
+
+## Summary与Histogram的区别
+
+:::note
+**Summary** 和 **Histogram** 都可以用于记录数值的分布情况，但它们有一些关键的区别：
+:::
+
+1. **分位数计算位置**：
+   - Summary的分位数是在客户端计算的，因此它可以提供更精确的分位数。
+   - Histogram的分位数是在服务端（Prometheus）计算的，因此它的分位数精度取决于分桶的配置。
+
+2. **存储和查询性能**：
+   - Summary的分位数计算在客户端完成，因此它不会增加Prometheus的存储和查询负担。
+   - Histogram的分位数计算在服务端完成，因此它会增加Prometheus的存储和查询负担。
+
+3. **灵活性**：
+   - Summary的分位数是固定的，无法在查询时动态调整。
+   - Histogram的分位数可以在查询时动态调整，因此它更适合于需要灵活分位数查询的场景。
+
+## 实际应用场景
+
+### 场景1：监控API请求耗时
+
+假设我们有一个Web服务，我们希望监控每个API请求的耗时分布。我们可以使用Summary来记录每个请求的耗时，并计算50%、90%、99%的分位数。
+
+```go
+var (
+    apiRequestDuration = prometheus.NewSummary(prometheus.SummaryOpts{
+        Name: "api_request_duration_seconds",
+        Help: "Duration of API requests in seconds",
+        Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
+    })
+)
+
+func handleAPIRequest(w http.ResponseWriter, r *http.Request) {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start).Seconds()
+        apiRequestDuration.Observe(duration)
+    }()
+    // 处理API请求
+    w.Write([]byte("API Response"))
+}
+```
+
+### 场景2：监控数据库查询耗时
+
+假设我们有一个数据库查询服务，我们希望监控每个查询的耗时分布。我们可以使用Summary来记录每个查询的耗时，并计算50%、90%、99%的分位数。
+
+```go
+var (
+    dbQueryDuration = prometheus.NewSummary(prometheus.SummaryOpts{
+        Name: "db_query_duration_seconds",
+        Help: "Duration of database queries in seconds",
+        Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
+    })
+)
+
+func executeQuery(query string) {
+    start := time.Now()
+    defer func() {
+        duration := time.Since(start).Seconds()
+        dbQueryDuration.Observe(duration)
+    }()
+    // 执行数据库查询
+}
+```
+
+## 总结
+
+Summary摘要是Prometheus中一种强大的指标类型，特别适合用于记录数值的分布情况，尤其是在需要高精度分位数的场景中。与Histogram相比，Summary的分位数计算在客户端完成，因此它不会增加Prometheus的存储和查询负担。然而，Summary的分位数是固定的，无法在查询时动态调整，因此在需要灵活分位数查询的场景中，Histogram可能是更好的选择。
+
+## 附加资源与练习
+
+- **练习1**：尝试在你的项目中实现一个Summary指标，用于记录某个操作的耗时分布。
+- **练习2**：比较Summary和Histogram的性能差异，分析它们在不同场景下的优缺点。
+
+:::tip
+如果你想深入了解Prometheus的指标类型，可以参考[Prometheus官方文档](https://prometheus.io/docs/concepts/metric_types/)。
+:::

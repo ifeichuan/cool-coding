@@ -1,0 +1,385 @@
+---
+title: JavaScript Mock测试
+description: 学习如何在JavaScript中使用Mock测试技术，模拟外部依赖并提高测试效率
+---
+
+# JavaScript Mock测试
+
+## 什么是Mock测试？
+
+在软件开发中，Mock测试是一种重要的测试技术，它通过创建模拟对象来替代真实系统中的组件，使我们能够专注于测试特定单元，而不受外部依赖的影响。
+
+:::tip
+Mock（模拟）是一种创建替代品的技术，可以让测试更加独立、快速和可靠。
+:::
+
+## 为什么需要Mock测试？
+
+在开发JavaScript应用时，你的代码可能会依赖于：
+
+- API调用
+- 数据库操作
+- 文件系统交互
+- 复杂的外部服务
+- 随机结果的函数
+
+这些依赖项会让测试变得困难，因为：
+
+1. 它们可能不稳定或不可用
+2. 可能速度慢
+3. 可能需要特定环境设置
+4. 可能产生不确定的结果
+
+Mock测试通过创建这些依赖的"假版本"来解决这些问题。
+
+## JavaScript 中常用的Mock测试工具
+
+最流行的JavaScript Mock测试库包括：
+
+1. **Jest** - Facebook开发的测试框架，内置了强大的Mock功能
+2. **Sinon.js** - 专门用于Mock、stub和spy的独立库
+3. **Jasmine** - 带有内置Mock功能的行为驱动开发框架
+
+本文我们将主要使用Jest来演示Mock测试概念，因为它是目前最流行的选择。
+
+## 基本Mock概念
+
+在深入探讨之前，让我们了解一些基本术语：
+
+- **Mock**: 模拟对象，用于替代实际对象
+- **Spy**: 监视函数调用，但不改变其行为
+- **Stub**: 替换函数，返回预定义的值
+- **Fake**: 简化版的实现，有一定的功能
+
+## 使用Jest进行Mock测试
+
+### 安装Jest
+
+```bash
+npm install --save-dev jest
+```
+
+在`package.json`中添加测试脚本：
+
+```json
+{
+  "scripts": {
+    "test": "jest"
+  }
+}
+```
+
+### 模拟函数 (Mock Functions)
+
+Jest提供了`jest.fn()`方法来创建Mock函数：
+
+```javascript
+// 创建一个基本的Mock函数
+const mockFunction = jest.fn();
+
+// 使用该函数
+mockFunction();
+mockFunction('hello');
+
+// 测试该函数是否被调用
+expect(mockFunction).toHaveBeenCalled();
+expect(mockFunction).toHaveBeenCalledTimes(2);
+expect(mockFunction).toHaveBeenCalledWith('hello');
+```
+
+### 设置Mock函数返回值
+
+```javascript
+const mockFunction = jest.fn();
+
+// 设置返回值
+mockFunction.mockReturnValue('default');
+console.log(mockFunction()); // 输出: 'default'
+
+// 设置特定调用的返回值
+mockFunction.mockReturnValueOnce('first call')
+            .mockReturnValueOnce('second call');
+
+console.log(mockFunction()); // 输出: 'first call'
+console.log(mockFunction()); // 输出: 'second call'
+console.log(mockFunction()); // 输出: 'default'
+```
+
+### 模拟模块
+
+假设有一个使用API的模块：
+
+```javascript
+// userApi.js
+export async function fetchUserData(userId) {
+  const response = await fetch(`https://api.example.com/users/${userId}`);
+  const data = await response.json();
+  return data;
+}
+```
+
+现在我们想测试使用该API的代码：
+
+```javascript
+// userService.js
+import { fetchUserData } from './userApi';
+
+export async function getUserDetails(userId) {
+  const userData = await fetchUserData(userId);
+  return {
+    name: userData.name,
+    email: userData.email,
+    membership: userData.subscription ? 'Premium' : 'Free'
+  };
+}
+```
+
+使用Jest模拟模块：
+
+```javascript
+// userService.test.js
+import { getUserDetails } from './userService';
+import { fetchUserData } from './userApi';
+
+// 模拟整个模块
+jest.mock('./userApi');
+
+test('formats user data correctly', async () => {
+  // 设置Mock返回值
+  fetchUserData.mockResolvedValue({
+    name: 'John Doe',
+    email: 'john@example.com',
+    subscription: true
+  });
+  
+  const result = await getUserDetails('123');
+  
+  // 验证结果
+  expect(result).toEqual({
+    name: 'John Doe',
+    email: 'john@example.com',
+    membership: 'Premium'
+  });
+  
+  // 验证API被调用
+  expect(fetchUserData).toHaveBeenCalledWith('123');
+});
+```
+
+## 实际案例：购物车功能测试
+
+让我们通过一个更复杂的例子来看看Mock测试如何在实际应用中工作。假设我们有一个购物车系统：
+
+```javascript
+// cartApi.js
+export async function getCartItems() {
+  const response = await fetch('https://api.shop.com/cart');
+  return response.json();
+}
+
+export async function addToCart(productId, quantity) {
+  const response = await fetch('https://api.shop.com/cart/add', {
+    method: 'POST',
+    body: JSON.stringify({ productId, quantity })
+  });
+  return response.json();
+}
+```
+
+```javascript
+// cartService.js
+import { getCartItems, addToCart } from './cartApi';
+import { calculateTax } from './taxCalculator';
+
+export async function getCartTotal() {
+  const items = await getCartItems();
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const tax = calculateTax(subtotal);
+  
+  return {
+    items: items.length,
+    subtotal,
+    tax,
+    total: subtotal + tax
+  };
+}
+
+export async function addProductToCart(productId, quantity) {
+  const result = await addToCart(productId, quantity);
+  return result.success;
+}
+```
+
+现在，让我们测试`getCartTotal`函数：
+
+```javascript
+// cartService.test.js
+import { getCartTotal } from './cartService';
+import { getCartItems } from './cartApi';
+import { calculateTax } from './taxCalculator';
+
+// 模拟依赖模块
+jest.mock('./cartApi');
+jest.mock('./taxCalculator');
+
+test('calculates cart totals correctly', async () => {
+  // 设置模拟返回值
+  getCartItems.mockResolvedValue([
+    { id: 1, name: "Product 1", price: 10, quantity: 2 },
+    { id: 2, name: "Product 2", price: 15, quantity: 1 }
+  ]);
+  
+  calculateTax.mockReturnValue(3.5); // 税率
+  
+  // 调用被测试函数
+  const result = await getCartTotal();
+  
+  // 验证结果
+  expect(result).toEqual({
+    items: 2,
+    subtotal: 35, // (10*2 + 15*1)
+    tax: 3.5,
+    total: 38.5 // 35 + 3.5
+  });
+  
+  // 验证依赖被正确调用
+  expect(getCartItems).toHaveBeenCalledTimes(1);
+  expect(calculateTax).toHaveBeenCalledWith(35);
+});
+```
+
+## 使用Sinon.js进行Mock测试
+
+除了Jest，Sinon.js也是一个流行的Mock库，尤其适合与其他测试框架（如Mocha或Jasmine）一起使用：
+
+```javascript
+// 使用Sinon示例
+import sinon from 'sinon';
+import { expect } from 'chai';
+import * as userApi from './userApi';
+import { getUserDetails } from './userService';
+
+describe('UserService', () => {
+  it('should format user data correctly', async () => {
+    // 创建stub
+    const fetchUserDataStub = sinon.stub(userApi, 'fetchUserData');
+    
+    // 设置stub返回值
+    fetchUserDataStub.resolves({
+      name: 'John Doe',
+      email: 'john@example.com',
+      subscription: true
+    });
+    
+    // 调用被测试函数
+    const result = await getUserDetails('123');
+    
+    // 验证结果
+    expect(result).to.deep.equal({
+      name: 'John Doe',
+      email: 'john@example.com',
+      membership: 'Premium'
+    });
+    
+    // 验证stub被调用
+    expect(fetchUserDataStub.calledWith('123')).to.be.true;
+    
+    // 恢复原始函数
+    fetchUserDataStub.restore();
+  });
+});
+```
+
+## Mock测试最佳实践
+
+为了获得最大的测试效益，请遵循这些最佳实践：
+
+1. **只模拟必要的部分** - 尽量减少Mock的使用，只模拟外部依赖
+2. **保持模拟简单** - 模拟应该返回最小的必要数据
+3. **验证交互** - 确保模拟被正确调用，但不要过度测试实现细节
+4. **清理模拟** - 测试后重置或恢复模拟状态
+5. **不要模拟被测试的代码** - 只模拟该代码的依赖项
+
+## 常见Mock测试模式
+
+### 1. 模拟HTTP请求
+
+使用Jest模拟fetch或axios：
+
+```javascript
+// 模拟全局fetch
+global.fetch = jest.fn(() => 
+  Promise.resolve({
+    json: () => Promise.resolve({ data: 'mocked data' })
+  })
+);
+
+// 模拟axios
+jest.mock('axios');
+axios.get.mockResolvedValue({ data: 'mocked data' });
+```
+
+### 2. 模拟计时器
+
+对于依赖时间的代码：
+
+```javascript
+// 设置模拟计时器
+jest.useFakeTimers();
+
+test('setTimeout test', () => {
+  const callback = jest.fn();
+  
+  setTimeout(callback, 1000);
+  
+  // 立即运行所有计时器
+  jest.runAllTimers();
+  
+  expect(callback).toHaveBeenCalledTimes(1);
+});
+```
+
+### 3. 模拟DOM API
+
+当测试依赖于DOM API的代码：
+
+```javascript
+// 模拟localStorage
+const localStorageMock = {
+  getItem: jest.fn(),
+  setItem: jest.fn(),
+  clear: jest.fn()
+};
+
+Object.defineProperty(window, 'localStorage', { value: localStorageMock });
+```
+
+## 总结
+
+Mock测试是JavaScript开发中不可或缺的工具，它可以帮助你：
+
+- 提高测试速度和可靠性
+- 隔离代码单元进行测试
+- 模拟复杂或不可用的依赖
+- 测试边缘情况和错误处理
+
+通过使用Jest、Sinon.js等工具，你可以轻松创建和管理Mock，使你的测试套件更加强大和可维护。
+
+:::caution
+虽然Mock测试非常有用，但过度使用可能导致测试变得脆弱。始终确保你的测试足够真实，能够反映出代码的实际行为。
+:::
+
+## 练习
+
+1. 创建一个简单的函数，该函数调用外部API获取天气数据，然后编写测试，使用Mock来测试这个函数。
+2. 使用Mock测试一个依赖于`localStorage`的用户设置保存功能。
+3. 创建一个使用计时器的函数，并使用Jest的模拟计时器功能测试它。
+
+## 附加资源
+
+- [Jest官方文档](https://jestjs.io/docs/mock-functions)
+- [Sinon.js官方网站](https://sinonjs.org/)
+- [测试驱动开发(TDD)简介](https://www.agilealliance.org/glossary/tdd/)
+- [Martin Fowler关于Mock和Stub的文章](https://martinfowler.com/articles/mocksArentStubs.html)
+
+现在，你已经掌握了JavaScript Mock测试的基础知识，可以开始在你的项目中实施这些技术，提高代码的稳定性和可靠性。

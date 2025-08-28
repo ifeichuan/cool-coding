@@ -1,0 +1,112 @@
+---
+title: Zipkin 数据存储 - 数据压缩策略
+description: 学习Zipkin中如何通过数据压缩策略优化存储空间和查询性能，包含常见算法对比和实战案例。
+---
+
+# 数据压缩策略
+
+## 介绍
+
+在分布式追踪系统中，Zipkin会产生大量跨度（Span）数据。随着时间推移，这些数据可能占用大量存储空间。**数据压缩策略**通过减少数据体积来优化存储成本，同时保持查询效率。本文将介绍Zipkin支持的压缩方法、适用场景及实现原理。
+
+:::note 为什么需要压缩？
+- 减少存储占用（尤其是高流量系统）
+- 降低网络传输开销
+- 加速冷数据检索
+:::
+
+## 基础压缩方法
+
+### 1. 列式存储压缩
+Zipkin默认使用Cassandra/Elasticsearch等支持列式存储的数据库，天然适合压缩：
+
+```mermaid
+graph LR
+    A[原始行式存储] -->|压缩后| B[列式存储]
+    B --> C[重复值合并]
+    C --> D[字典编码]
+```
+
+### 2. GZIP压缩
+适用于大文本字段（如`tags`），通过Java内置库实现：
+
+```java
+// 压缩示例
+byte[] input = "original data".getBytes(StandardCharsets.UTF_8);
+ByteArrayOutputStream bos = new ByteArrayOutputStream();
+try (GZIPOutputStream gzipOS = new GZIPOutputStream(bos)) {
+    gzipOS.write(input);
+}
+byte[] compressed = bos.toByteArray();
+```
+
+:::tip 压缩率对比
+| 数据类型       | 原始大小 | GZIP后 |
+|----------------|----------|--------|
+| 100个Span JSON | 150KB    | 32KB   |
+| 错误堆栈信息   | 80KB     | 12KB   |
+:::
+
+## Zipkin 专用优化
+
+### 1. Span ID去重
+相同Trace下的Span共享Trace ID，存储时可进行差分编码：
+
+```
+原始存储: [trace1-span1, trace1-span2, trace1-span3]
+优化存储: trace1 -> [span1, span2, span3]
+```
+
+### 2. 时间戳Delta编码
+相邻Span的时间戳通常接近，存储差值而非绝对值：
+
+```json
+// 原始数据
+{"timestamp": 1625097600000}
+{"timestamp": 1625097600015}
+
+// 压缩后
+{
+  "base_timestamp": 1625097600000,
+  "deltas": [0, 15]
+}
+```
+
+## 实战案例
+
+### 电商系统优化实践
+某电商平台每日产生20亿Span，采用以下策略后存储减少62%：
+
+1. **层级压缩**：
+   - 第一层：Snappy快速压缩（写入时）
+   - 第二层：Zstandard深度压缩（冷数据归档）
+
+2. **字段裁剪**：
+   ```sql
+   ALTER TABLE zipkin_spans 
+   DROP COLUMN debug_info;
+   ```
+
+3. **TTL设置**：
+   ```yaml
+   # Elasticsearch配置
+   lifecycle:
+     hot:
+       actions:
+         rollover:
+           max_size: "50GB"
+     delete:
+       min_age: "30d"
+   ```
+
+## 总结与进阶
+
+### 关键要点
+- 优先使用数据库内置压缩（如Cassandra的`LZ4Compressor`）
+- 对文本数据采用流式压缩（GZIP/Zstandard）
+- 结合业务特点设计分层存储策略
+
+### 延伸阅读
+- [Zipkin存储后端设计文档](https://zipkin.io/architecture)
+- 《大规模分布式系统追踪技术》第5章
+- 练习：尝试用`zipkin-dependencies`分析压缩前后的存储差异

@@ -1,0 +1,116 @@
+---
+title: Kafka 偏移量管理
+description: 了解Kafka消费者如何管理偏移量，确保消息的可靠消费和故障恢复。
+---
+
+# Kafka 偏移量管理
+
+在Kafka中，偏移量（Offset）是消费者在分区中读取消息的位置标识。每个分区中的每条消息都有一个唯一的偏移量，消费者通过管理偏移量来跟踪已经消费的消息，并在故障恢复时从正确的位置继续消费。本文将详细介绍Kafka偏移量管理的概念、实现方式以及实际应用场景。
+
+## 什么是偏移量？
+
+偏移量是Kafka分区中每条消息的唯一标识符。它表示消息在分区中的位置，类似于数组中的索引。消费者通过读取偏移量来确定从哪里开始消费消息，并在消费完成后更新偏移量以记录进度。
+
+:::note
+偏移量是分区级别的，每个分区都有自己的偏移量序列。
+:::
+
+## 偏移量的存储方式
+
+Kafka提供了两种主要的偏移量存储方式：
+
+1. **自动提交偏移量**：消费者自动定期将偏移量提交到Kafka的内部主题 `__consumer_offsets` 中。
+2. **手动提交偏移量**：开发者通过代码手动控制偏移量的提交时机。
+
+### 自动提交偏移量
+
+自动提交偏移量是最简单的管理方式，适合对消息处理可靠性要求不高的场景。消费者会在后台定期提交偏移量，默认情况下每5秒提交一次。
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("group.id", "test-group");
+props.put("enable.auto.commit", "true");
+props.put("auto.commit.interval.ms", "5000");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Arrays.asList("my-topic"));
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+    }
+}
+```
+
+:::caution
+自动提交偏移量可能会导致消息丢失或重复消费。例如，如果消费者在处理消息时崩溃，偏移量可能已经提交，但消息并未被完全处理。
+:::
+
+### 手动提交偏移量
+
+手动提交偏移量提供了更高的控制权，适合对消息处理可靠性要求较高的场景。开发者可以在消息处理完成后显式提交偏移量。
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("group.id", "test-group");
+props.put("enable.auto.commit", "false");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Arrays.asList("my-topic"));
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+    }
+    consumer.commitSync(); // 手动提交偏移量
+}
+```
+
+:::tip
+手动提交偏移量可以确保消息在处理完成后才提交偏移量，从而避免消息丢失或重复消费。
+:::
+
+## 偏移量的重置
+
+在某些情况下，消费者可能需要从分区的起始位置或指定位置重新开始消费。Kafka提供了几种偏移量重置策略：
+
+- **earliest**：从分区的起始位置开始消费。
+- **latest**：从分区的末尾开始消费，只消费新消息。
+- **none**：如果没有找到之前的偏移量，抛出异常。
+
+```java
+props.put("auto.offset.reset", "earliest");
+```
+
+## 实际应用场景
+
+### 场景1：消息重放
+
+在某些业务场景中，可能需要重新消费历史消息。例如，当业务逻辑发生变化时，可能需要重新处理所有消息。通过重置偏移量到 `earliest`，消费者可以从头开始消费所有消息。
+
+### 场景2：故障恢复
+
+当消费者崩溃或重启时，Kafka会根据提交的偏移量恢复消费。如果使用手动提交偏移量，可以确保消费者从上次成功处理的消息之后继续消费，避免消息丢失或重复。
+
+## 总结
+
+Kafka偏移量管理是确保消息可靠消费的关键机制。通过自动或手动提交偏移量，消费者可以跟踪消费进度并在故障恢复时从正确的位置继续消费。理解偏移量的存储方式、提交策略以及重置方法，有助于开发者构建可靠的消息处理系统。
+
+## 附加资源
+
+- [Kafka官方文档](https://kafka.apache.org/documentation/)
+- [Kafka消费者API](https://kafka.apache.org/28/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html)
+- [Kafka偏移量管理最佳实践](https://www.confluent.io/blog/)
+
+## 练习
+
+1. 修改上述代码示例，尝试使用手动提交偏移量，并观察消费者在崩溃后的行为。
+2. 创建一个新的Kafka主题，并使用 `earliest` 和 `latest` 策略重置偏移量，观察消费者的行为差异。

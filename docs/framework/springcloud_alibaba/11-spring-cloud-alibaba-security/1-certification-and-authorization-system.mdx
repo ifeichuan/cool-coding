@@ -1,0 +1,194 @@
+---
+title: 认证授权体系
+description: 了解 Spring Cloud Alibaba 中的认证授权体系，掌握如何通过认证和授权机制保护微服务应用。
+---
+
+## 介绍
+
+在现代微服务架构中，**认证（Authentication）**和**授权（Authorization）**是确保系统安全的关键机制。认证用于验证用户的身份，而授权则用于确定用户是否有权限访问特定资源。Spring Cloud Alibaba 提供了强大的工具和框架来帮助开发者实现这些功能。
+
+本文将逐步介绍如何在 Spring Cloud Alibaba 中构建认证授权体系，并通过实际案例展示其应用。
+
+## 认证与授权的基本概念
+
+### 认证（Authentication）
+认证是验证用户身份的过程。常见的认证方式包括：
+- **用户名和密码**：用户提供用户名和密码，系统验证其正确性。
+- **OAuth2**：一种开放标准，允许用户授权第三方应用访问其资源。
+- **JWT（JSON Web Token）**：一种轻量级的认证方式，通过令牌传递用户信息。
+
+### 授权（Authorization）
+授权是确定用户是否有权限访问特定资源的过程。常见的授权方式包括：
+- **基于角色的访问控制（RBAC）**：根据用户的角色分配权限。
+- **基于资源的访问控制（ABAC）**：根据资源的属性动态决定访问权限。
+
+## Spring Cloud Alibaba 中的认证授权实现
+
+### 1. 使用 Spring Security 实现认证
+Spring Security 是 Spring 生态中用于实现认证和授权的核心框架。以下是一个简单的用户名和密码认证示例：
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth.inMemoryAuthentication()
+            .withUser("user")
+            .password("{noop}password") // {noop} 表示明文密码
+            .roles("USER");
+    }
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http.authorizeRequests()
+            .antMatchers("/public/**").permitAll()
+            .anyRequest().authenticated()
+            .and()
+            .formLogin();
+    }
+}
+```
+
+:::note
+在上述代码中，我们使用 `inMemoryAuthentication` 创建了一个内存用户，并配置了基本的访问控制规则。
+:::
+
+### 2. 使用 OAuth2 实现认证
+OAuth2 是一种广泛使用的认证协议。Spring Cloud Alibaba 提供了对 OAuth2 的支持。以下是一个简单的 OAuth2 配置示例：
+
+```java
+@Configuration
+@EnableAuthorizationServer
+public class OAuth2Config extends AuthorizationServerConfigurerAdapter {
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @Override
+    public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+        clients.inMemory()
+            .withClient("client")
+            .secret("{noop}secret")
+            .authorizedGrantTypes("password", "refresh_token")
+            .scopes("read", "write")
+            .accessTokenValiditySeconds(3600);
+    }
+
+    @Override
+    public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+        endpoints.authenticationManager(authenticationManager);
+    }
+}
+```
+
+:::tip
+在上述代码中，我们配置了一个 OAuth2 授权服务器，支持 `password` 和 `refresh_token` 两种授权类型。
+:::
+
+### 3. 使用 JWT 实现认证
+JWT 是一种轻量级的认证方式，适合在微服务架构中使用。以下是一个简单的 JWT 配置示例：
+
+```java
+@Configuration
+public class JwtConfig {
+
+    @Bean
+    public JwtAccessTokenConverter accessTokenConverter() {
+        JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
+        converter.setSigningKey("secret");
+        return converter;
+    }
+
+    @Bean
+    public TokenStore tokenStore() {
+        return new JwtTokenStore(accessTokenConverter());
+    }
+}
+```
+
+:::caution
+在上述代码中，我们配置了一个 JWT 令牌存储和转换器，用于生成和验证 JWT 令牌。
+:::
+
+## 实际案例：电商平台的认证授权体系
+
+假设我们正在开发一个电商平台，需要实现以下功能：
+1. 用户登录后可以查看自己的订单。
+2. 只有管理员可以管理商品。
+
+### 1. 用户认证
+用户登录时，系统会验证其用户名和密码，并生成一个 JWT 令牌。
+
+```java
+@RestController
+public class AuthController {
+
+    @Autowired
+    private AuthenticationManager authenticationManager;
+
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+        Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword())
+        );
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        String jwt = jwtProvider.generateToken(authentication);
+        return ResponseEntity.ok(new JwtResponse(jwt));
+    }
+}
+```
+
+### 2. 订单访问控制
+只有登录用户才能访问自己的订单。
+
+```java
+@RestController
+@RequestMapping("/orders")
+public class OrderController {
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<Order> getOrder(@PathVariable Long id) {
+        // 获取订单逻辑
+        return ResponseEntity.ok(order);
+    }
+}
+```
+
+### 3. 商品管理访问控制
+只有管理员才能管理商品。
+
+```java
+@RestController
+@RequestMapping("/products")
+public class ProductController {
+
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Product> createProduct(@RequestBody Product product) {
+        // 创建商品逻辑
+        return ResponseEntity.ok(product);
+    }
+}
+```
+
+:::warning
+在上述代码中，我们使用 `@PreAuthorize` 注解来实现基于角色的访问控制。
+:::
+
+## 总结
+
+在本文中，我们介绍了 Spring Cloud Alibaba 中的认证授权体系，并通过实际案例展示了如何实现用户认证和访问控制。通过合理使用 Spring Security、OAuth2 和 JWT，我们可以构建一个安全可靠的微服务应用。
+
+## 附加资源与练习
+
+- **练习 1**：尝试在本地环境中实现一个简单的用户登录系统，并使用 JWT 进行认证。
+- **练习 2**：扩展电商平台的案例，添加更多的角色和权限控制。
+- **资源**：
+  - [Spring Security 官方文档](https://spring.io/projects/spring-security)
+  - [OAuth2 官方文档](https://oauth.net/2/)
+  - [JWT 官方文档](https://jwt.io/)
+
+通过不断实践和学习，你将能够掌握 Spring Cloud Alibaba 中的认证授权体系，并应用于实际项目中。

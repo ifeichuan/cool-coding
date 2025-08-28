@@ -1,0 +1,115 @@
+---
+title: 多租户最佳实践
+description: 学习如何在Grafana Loki中实现和管理多租户架构，包括隔离策略、配置示例和实际应用场景。
+---
+
+# 多租户最佳实践
+
+## 介绍
+
+多租户（Multi-tenancy）是Grafana Loki中的一个核心功能，它允许不同团队或项目共享同一个Loki实例，同时保持数据的逻辑隔离。每个租户（tenant）拥有独立的日志流、存储和查询权限，确保安全性和资源分配的公平性。本指南将介绍Loki多租户的实现原理、配置方法和最佳实践。
+
+:::note 关键概念
+- **租户标识符（Tenant ID）**：唯一标识一个租户的字符串（如团队名称或项目ID）。
+- **隔离级别**：数据存储、查询和权限的隔离程度。
+:::
+
+---
+
+## 多租户工作原理
+
+Loki通过HTTP请求头 `X-Scope-OrgID` 区分租户。以下是一个简单的请求示例：
+
+```bash
+# 查询租户 "team-a" 的日志
+curl -H "X-Scope-OrgID: team-a" http://loki:3100/loki/api/v1/query?query={...}
+```
+
+### 隔离机制
+1. **存储隔离**：每个租户的日志数据单独存储，避免混合。
+2. **查询隔离**：租户只能访问自己的数据。
+3. **资源限制**：可为租户配置独立的速率限制和缓存策略。
+
+---
+
+## 配置多租户
+
+### 1. 启用多租户模式
+在Loki配置文件（`loki.yaml`）中设置多租户参数：
+```yaml
+auth_enabled: true  # 必须开启认证
+
+limits_config:
+  enforce_metric_name: false
+  reject_old_samples: true
+  per_tenant_override_config: /etc/loki/overrides.yaml  # 租户级配置覆盖
+```
+
+### 2. 配置租户权限
+使用 `overrides.yaml` 定义租户的独立限制：
+```yaml
+overrides:
+  team-a:
+    ingestion_rate_mb: 10  # 限制摄入速率
+    max_streams_per_user: 1000
+  team-b:
+    ingestion_rate_mb: 50
+```
+
+---
+
+## 实际案例
+
+### 场景：跨团队日志管理
+假设公司有两个团队：
+- **前端团队（team-frontend）**：需要高频日志采集，但保留时间短。
+- **后端团队（team-backend）**：日志量少但需长期存储。
+
+配置示例：
+```yaml
+overrides:
+  team-frontend:
+    retention_period: 7d  # 保留7天
+    ingestion_rate_mb: 20
+  team-backend:
+    retention_period: 30d
+    ingestion_rate_mb: 5
+```
+
+---
+
+## 最佳实践
+
+1. **租户命名规范**：
+   - 使用有意义的ID（如 `team-product` 而非随机字符串）。
+   - 避免特殊字符，仅使用小写字母、数字和连字符。
+
+2. **资源分配**：
+   ```mermaid
+   pie
+       title 租户资源配额示例
+       "team-frontend" : 40
+       "team-backend" : 30
+       "infra" : 30
+   ```
+
+3. **安全建议**：
+   - 结合OpenID Connect（OIDC）实现租户认证。
+   - 定期审计租户的日志访问权限。
+
+:::warning 注意
+生产环境中务必启用TLS加密，避免 `X-Scope-OrgID` 被窃取。
+:::
+
+---
+
+## 总结
+
+多租户功能使Loki成为企业级日志系统的理想选择，通过合理的配置和隔离策略，可以平衡资源共享与数据安全的需求。关键步骤包括：
+1. 启用 `auth_enabled` 并配置租户ID。
+2. 通过 `overrides.yaml` 定制租户限制。
+3. 实施命名规范和资源监控。
+
+### 延伸学习
+- [官方多租户文档](https://grafana.com/docs/loki/latest/operations/multi-tenancy/)
+- 练习：使用Docker部署多租户Loki，并模拟两个租户的日志摄入。

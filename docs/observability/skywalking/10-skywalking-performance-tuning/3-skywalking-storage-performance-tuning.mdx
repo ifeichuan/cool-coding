@@ -1,0 +1,108 @@
+---
+title: SkyWalking 存储性能调优
+description: "学习如何优化SkyWalking的存储性能，包括配置调整、存储策略选择以及实际调优案例。"
+---
+
+## 介绍
+
+SkyWalking作为一款分布式系统的应用性能监控工具，其存储性能直接影响监控数据的查询效率和系统稳定性。本章将介绍如何通过调整存储配置、选择合适的存储策略以及优化查询方式，提升SkyWalking的存储性能。
+
+:::note
+存储性能调优的核心目标是：**减少磁盘I/O**、**降低查询延迟**、**提高数据压缩率**。
+:::
+
+---
+
+## 存储配置优化
+
+### 1. 存储后端选择
+SkyWalking支持多种存储后端，包括Elasticsearch、H2、MySQL等。生产环境推荐使用**Elasticsearch**（ES），因其具备优秀的分布式能力和查询性能。
+
+#### 配置示例（`application.yml`）：
+```yaml
+storage:
+  selector: ${SW_STORAGE:elasticsearch}
+  elasticsearch:
+    nameSpace: ${SW_NAMESPACE:""}
+    clusterNodes: ${SW_STORAGE_ES_CLUSTER_NODES:localhost:9200}
+    protocol: ${SW_STORAGE_ES_HTTP_PROTOCOL:"http"}
+```
+:::tip
+对于高负载场景，建议部署独立的Elasticsearch集群，并启用分片和副本机制。
+:::
+
+---
+
+### 2. 索引分片与滚动策略
+Elasticsearch的性能与索引分片（Shard）数量密切相关。SkyWalking默认按天滚动索引，可通过以下配置调整：
+
+```yaml
+elasticsearch:
+  indexShardsNumber: ${SW_STORAGE_ES_INDEX_SHARDS_NUMBER:2}  # 分片数
+  indexReplicasNumber: ${SW_STORAGE_ES_INDEX_REPLICAS_NUMBER:1}  # 副本数
+  dayStep: ${SW_STORAGE_DAY_STEP:1}  # 索引滚动周期（天）
+```
+
+:::caution
+分片数过多会增加集群开销，过少会导致查询瓶颈。建议根据数据量调整（例如：每日数据量超过10GB时，分片数设置为3-5）。
+:::
+
+---
+
+## 数据降采样与TTL
+
+### 1. 降采样（Downsampling）
+降采样是通过聚合历史数据减少存储占用的有效手段。SkyWalking支持以下降采样策略：
+- **原始数据**：保留7天
+- **小时粒度数据**：保留30天
+- **天粒度数据**：保留90天
+
+配置示例：
+```yaml
+recordDataTTL: ${SW_RECORD_DATA_TTL:7}  # 原始数据保留天数
+metricsDataTTL: ${SW_METRICS_DATA_TTL:30}  # 小时粒度数据保留天数
+```
+
+### 2. TTL（Time-To-Live）
+通过定期清理过期数据减少存储压力：
+```yaml
+elasticsearch:
+  logicSharding: ${SW_STORAGE_ES_LOGIC_SHARDING:false}  # 是否启用逻辑分片
+  segmentDayStep: ${SW_STORAGE_ES_SEGMENT_DAY_STEP:7}  # 分段清理周期
+```
+
+---
+
+## 实际案例
+
+### 案例：电商平台性能调优
+**问题**：某电商平台SkyWalking存储占用快速增长，查询延迟超过5秒。
+
+**解决方案**：
+1. 将Elasticsearch分片数从1调整为3，副本数设为1。
+2. 启用降采样，仅保留3天原始数据。
+3. 配置每日自动清理90天前的历史数据。
+
+**效果**：
+- 存储空间减少60%
+- 平均查询延迟降至1秒内
+
+---
+
+## 总结
+
+| 优化方向         | 关键措施                          | 预期效果                     |
+|------------------|-----------------------------------|-----------------------------|
+| 存储后端         | 使用Elasticsearch集群             | 提升查询并发能力             |
+| 分片与副本       | 合理设置分片数（如3-5）           | 均衡负载，避免热点           |
+| 数据生命周期     | 启用降采样和TTL                   | 减少存储占用                 |
+
+---
+
+## 附加资源
+1. [Elasticsearch性能调优指南](https://www.elastic.co/guide/en/elasticsearch/reference/current/tune-for-indexing-speed.html)
+2. [SkyWalking官方文档 - 存储配置](https://skywalking.apache.org/docs/main/latest/en/setup/backend/backend-storage/)
+
+## 练习
+1. 修改本地SkyWalking的`application.yml`，将索引分片数设置为2并观察启动日志。
+2. 使用Elasticsearch的`_cat/indices?v`接口查看索引分片分布。

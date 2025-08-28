@@ -1,0 +1,139 @@
+---
+title: Seata JDBC 集成
+description: 学习如何在微服务架构中使用 Seata 实现分布式事务，并通过 JDBC 集成确保数据一致性。
+---
+
+# Seata JDBC 集成
+
+在微服务架构中，分布式事务管理是一个复杂但至关重要的任务。Seata 是一个开源的分布式事务解决方案，它通过提供简单易用的 API 和工具，帮助开发者在微服务中实现事务的一致性。本文将详细介绍如何通过 JDBC 集成 Seata，并展示其在实际应用中的使用。
+
+## 什么是 Seata？
+
+Seata（Simple Extensible Autonomous Transaction Architecture）是一个分布式事务框架，旨在解决微服务架构中的事务一致性问题。它支持多种事务模式，包括 AT（自动补偿事务）、TCC（Try-Confirm-Cancel）和 SAGA 模式。Seata 的核心思想是通过全局事务管理器（Transaction Coordinator）和资源管理器（Resource Manager）来协调多个微服务之间的本地事务，确保它们要么全部成功，要么全部回滚。
+
+## Seata JDBC 集成概述
+
+Seata 的 JDBC 集成允许开发者通过标准的 JDBC 接口与数据库交互，同时利用 Seata 的分布式事务管理能力。通过这种方式，开发者可以在不改变现有代码结构的情况下，轻松地将 Seata 集成到微服务中。
+
+### 集成步骤
+
+1. **引入 Seata 依赖**：首先，需要在项目中引入 Seata 的相关依赖。
+2. **配置 Seata 客户端**：配置 Seata 客户端以连接到 Seata 服务器。
+3. **配置数据源**：使用 Seata 提供的 `DataSourceProxy` 包装原有的数据源。
+4. **启用全局事务**：在需要管理事务的方法上添加 `@GlobalTransactional` 注解。
+
+### 代码示例
+
+以下是一个简单的 Spring Boot 项目示例，展示了如何集成 Seata JDBC。
+
+#### 1. 引入依赖
+
+在 `pom.xml` 中添加 Seata 和 Spring Boot 的依赖：
+
+```xml
+<dependency>
+    <groupId>io.seata</groupId>
+    <artifactId>seata-spring-boot-starter</artifactId>
+    <version>1.4.2</version>
+</dependency>
+<dependency>
+    <groupId>com.alibaba</groupId>
+    <artifactId>druid-spring-boot-starter</artifactId>
+    <version>1.2.6</version>
+</dependency>
+```
+
+#### 2. 配置 Seata 客户端
+
+在 `application.yml` 中配置 Seata 客户端：
+
+```yaml
+seata:
+  enabled: true
+  application-id: seata-demo
+  tx-service-group: my_test_tx_group
+  service:
+    vgroup-mapping:
+      my_test_tx_group: default
+    grouplist:
+      default: 127.0.0.1:8091
+```
+
+#### 3. 配置数据源
+
+在 Spring Boot 中配置数据源时，使用 `DataSourceProxy` 包装原有的数据源：
+
+```java
+@Configuration
+public class DataSourceConfig {
+
+    @Bean
+    @ConfigurationProperties(prefix = "spring.datasource")
+    public DruidDataSource druidDataSource() {
+        return new DruidDataSource();
+    }
+
+    @Primary
+    @Bean("dataSource")
+    public DataSource dataSource(DruidDataSource druidDataSource) {
+        return new DataSourceProxy(druidDataSource);
+    }
+}
+```
+
+#### 4. 启用全局事务
+
+在需要管理事务的方法上添加 `@GlobalTransactional` 注解：
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        orderMapper.insert(order);
+        // 其他业务逻辑
+    }
+}
+```
+
+### 实际应用场景
+
+假设我们有一个电商系统，用户下单时需要同时更新订单表和库存表。如果订单创建成功但库存更新失败，我们需要回滚整个事务。通过 Seata 的 JDBC 集成，我们可以轻松实现这一需求。
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @Autowired
+    private InventoryService inventoryService;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        orderMapper.insert(order);
+        inventoryService.decreaseStock(order.getProductId(), order.getQuantity());
+    }
+}
+```
+
+在这个例子中，`createOrder` 方法被 `@GlobalTransactional` 注解标记，Seata 会自动管理该方法中的事务。如果 `inventoryService.decreaseStock` 方法抛出异常，Seata 会回滚 `orderMapper.insert` 的操作，确保数据一致性。
+
+## 总结
+
+通过 Seata 的 JDBC 集成，开发者可以轻松地在微服务架构中实现分布式事务管理。本文介绍了 Seata 的基本概念、JDBC 集成的步骤，并通过实际案例展示了其应用场景。希望本文能帮助你更好地理解和使用 Seata。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [Spring Boot 官方文档](https://spring.io/projects/spring-boot)
+
+## 练习
+
+1. 尝试在自己的 Spring Boot 项目中集成 Seata，并实现一个简单的分布式事务。
+2. 修改 `createOrder` 方法，使其在库存不足时抛出异常，并观察事务的回滚行为。

@@ -1,0 +1,137 @@
+---
+title: Kafka CDC 实现
+description: 了解如何使用 Kafka 实现变更数据捕获（CDC），并探索其在实际应用中的使用场景。
+---
+
+# Kafka CDC 实现
+
+## 介绍
+
+变更数据捕获（Change Data Capture, CDC）是一种用于捕获和跟踪数据库中的数据变更的技术。它通常用于将数据库中的变更实时同步到其他系统，例如数据仓库、缓存或搜索引擎。Kafka 是一个分布式流处理平台，非常适合用于实现 CDC，因为它能够高效地处理大量数据流。
+
+在本教程中，我们将探讨如何使用 Kafka 实现 CDC，并通过实际案例展示其应用场景。
+
+## 什么是 CDC？
+
+CDC 是一种技术，用于捕获数据库中的插入、更新和删除操作，并将这些变更以事件的形式发布到消息队列中。这些事件可以被其他系统消费，从而实现数据的实时同步。
+
+### CDC 的主要用途
+- **数据同步**：将数据库中的变更实时同步到其他系统。
+- **数据审计**：跟踪数据库中的变更历史。
+- **事件驱动架构**：基于数据库变更触发其他系统的操作。
+
+## Kafka CDC 的实现步骤
+
+### 1. 配置数据库以支持 CDC
+
+首先，我们需要确保数据库支持 CDC。不同的数据库有不同的实现方式。例如，MySQL 可以通过 `binlog` 来捕获变更，而 PostgreSQL 则可以通过 `logical decoding` 来实现。
+
+#### MySQL 示例
+在 MySQL 中，我们需要启用 `binlog` 并配置其为 `ROW` 格式：
+
+```sql
+SET GLOBAL log_bin = ON;
+SET GLOBAL binlog_format = 'ROW';
+```
+
+### 2. 使用 Kafka Connect 捕获变更
+
+Kafka Connect 是一个用于将数据从外部系统导入 Kafka 或从 Kafka 导出到外部系统的工具。我们可以使用 Kafka Connect 的 Debezium 插件来捕获数据库的变更。
+
+#### 安装 Debezium 插件
+首先，下载并安装 Debezium 插件：
+
+```bash
+wget https://repo1.maven.org/maven2/io/debezium/debezium-connector-mysql/1.7.0.Final/debezium-connector-mysql-1.7.0.Final-plugin.tar.gz
+tar -xzf debezium-connector-mysql-1.7.0.Final-plugin.tar.gz -C /path/to/kafka/connect/plugins/
+```
+
+#### 配置 Kafka Connect
+接下来，配置 Kafka Connect 以使用 Debezium 插件：
+
+```json
+{
+  "name": "mysql-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "database.hostname": "localhost",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "password",
+    "database.server.id": "184054",
+    "database.server.name": "dbserver1",
+    "database.include.list": "mydatabase",
+    "table.include.list": "mydatabase.mytable",
+    "database.history.kafka.bootstrap.servers": "localhost:9092",
+    "database.history.kafka.topic": "dbhistory.mydatabase"
+  }
+}
+```
+
+### 3. 消费 Kafka 中的变更事件
+
+一旦 Kafka Connect 开始捕获数据库的变更，这些变更事件将被发布到 Kafka 主题中。我们可以使用 Kafka 消费者来消费这些事件。
+
+#### 示例消费者代码
+以下是一个简单的 Kafka 消费者示例，用于消费变更事件：
+
+```java
+Properties props = new Properties();
+props.put("bootstrap.servers", "localhost:9092");
+props.put("group.id", "test");
+props.put("enable.auto.commit", "true");
+props.put("auto.commit.interval.ms", "1000");
+props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+
+KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+consumer.subscribe(Arrays.asList("dbserver1.mydatabase.mytable"));
+
+while (true) {
+    ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+    for (ConsumerRecord<String, String> record : records) {
+        System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value());
+    }
+}
+```
+
+### 4. 处理变更事件
+
+消费到变更事件后，我们可以根据业务需求进行处理。例如，将变更同步到另一个数据库、更新缓存或触发其他系统的事件。
+
+## 实际案例
+
+### 案例：实时数据同步
+
+假设我们有一个电子商务网站，用户下单后，订单信息需要实时同步到数据仓库进行分析。我们可以使用 Kafka CDC 来实现这一需求。
+
+1. **捕获订单表的变更**：使用 Kafka Connect 和 Debezium 捕获订单表的插入、更新和删除操作。
+2. **发布变更事件**：将变更事件发布到 Kafka 主题中。
+3. **消费变更事件**：数据仓库系统消费这些变更事件，并将订单信息同步到数据仓库中。
+
+```mermaid
+graph LR
+    A[订单表] --> B[Kafka Connect]
+    B --> C[Kafka 主题]
+    C --> D[数据仓库]
+```
+
+## 总结
+
+Kafka CDC 是一种强大的技术，能够帮助我们实时捕获数据库中的变更，并将这些变更同步到其他系统。通过 Kafka Connect 和 Debezium，我们可以轻松地实现 CDC，并将其应用于各种实际场景中。
+
+## 附加资源
+
+- [Debezium 官方文档](https://debezium.io/documentation/)
+- [Kafka Connect 官方文档](https://kafka.apache.org/documentation/#connect)
+- [MySQL binlog 配置指南](https://dev.mysql.com/doc/refman/8.0/en/binary-log.html)
+
+## 练习
+
+1. 配置 MySQL 的 `binlog` 并启用 `ROW` 格式。
+2. 使用 Kafka Connect 和 Debezium 捕获一个表的变更，并将变更事件发布到 Kafka 主题中。
+3. 编写一个 Kafka 消费者，消费变更事件并将其打印到控制台。
+
+:::tip
+在完成练习时，确保 Kafka 和 MySQL 都已正确安装并运行。
+:::

@@ -1,0 +1,145 @@
+---
+title: 非结构化日志处理
+description: 学习如何使用Grafana Loki处理非结构化日志，包括日志提取、转换和存储的最佳实践。
+---
+
+# 非结构化日志处理
+
+## 介绍
+
+非结构化日志是指没有固定格式的日志数据，通常包含自由文本、多行消息或混合格式的内容（如错误堆栈、应用程序输出等）。这类日志在调试和分析时极具价值，但由于缺乏统一的模式，处理起来比结构化日志更复杂。Grafana Loki通过**日志管道**和**Promtail**等工具，提供了高效处理非结构化日志的能力。
+
+:::tip 关键概念
+- **日志行（Log Line）**: 原始的非结构化文本（如 `"ERROR: Failed to connect to database"`）。
+- **标签（Labels）**: 用于索引日志的键值对（如 `job="api-server"`）。
+- **提取（Extraction）**: 从日志中解析出结构化字段（如将时间戳提取为 `timestamp`）。
+:::
+
+---
+
+## 非结构化日志的挑战
+
+1. **格式多样性**：不同服务可能输出完全不同的日志格式。
+2. **多行日志**：例如Java异常堆栈可能跨越多行。
+3. **高基数问题**：避免使用动态值（如请求ID）作为标签。
+
+---
+
+## 处理步骤
+
+### 1. 日志收集（以Promtail为例）
+
+使用Promtail收集非结构化日志并添加基础标签：
+
+```yaml
+# promtail-config.yaml
+scrape_configs:
+  - job_name: app_logs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: 'my_app'
+          __path__: '/var/log/app/*.log'
+```
+
+### 2. 日志提取
+
+通过**Pipeline Stages**从非结构化日志中提取字段。例如，使用 `regex` 提取错误级别：
+
+```yaml
+pipeline_stages:
+  - regex:
+      expression: '^(?P<level>\\w+): (?P<message>.+)'
+  - labels:
+      level:
+```
+
+输入日志示例：
+```
+ERROR: Disk full
+```
+
+输出结果：
+- 提取字段：`level="ERROR"`, `message="Disk full"`
+- 新增标签：`level="ERROR"`
+
+### 3. 处理多行日志
+
+使用 `multiline` 阶段合并堆栈跟踪：
+
+```yaml
+- multiline:
+    firstline: '^\$$\\d{4}-\\d{2}-\\d{2}'
+    max_wait_time: 3s
+```
+
+匹配以日期开头的行作为多日志组的起始行。
+
+---
+
+## 实际案例：解析Nginx访问日志
+
+原始日志（非结构化）：
+```
+192.168.1.1 - - [10/Jul/2023:14:30:22 +0000] "GET /api/users HTTP/1.1" 200 1234
+```
+
+Promtail配置：
+```yaml
+- regex:
+    expression: '^(?P<ip>\\S+) \\S+ \\S+ \$$(?P<timestamp>[^\$$]+)\$$ "(?P<method>\\S+) (?P<path>\\S+) HTTP/\\d\\.\\d" (?P<status>\\d+) (?P<size>\\d+)'
+- labels:
+    method:
+    status:
+```
+
+提取后的结构化字段：
+```json
+{
+  "ip": "192.168.1.1",
+  "timestamp": "10/Jul/2023:14:30:22 +0000",
+  "method": "GET",
+  "path": "/api/users",
+  "status": "200",
+  "size": "1234"
+}
+```
+
+---
+
+## 高级技巧
+
+### 使用LogQL进一步处理
+
+在Grafana中通过LogQL过滤非结构化日志：
+```logql
+{job="my_app"} |= "error"
+| json | status >= 500
+```
+
+### 性能优化
+
+:::caution 注意
+避免过度使用标签！每个唯一标签组合会创建新的数据流。
+:::
+
+---
+
+## 总结
+
+非结构化日志处理的核心步骤：
+1. **收集**：通过Promtail配置日志源和基础标签。
+2. **提取**：使用Pipeline Stages解析关键字段。
+3. **存储**：合理选择标签避免高基数问题。
+
+---
+
+## 延伸练习
+
+1. 尝试从自定义应用程序日志中提取`request_id`字段。
+2. 配置Promtail将多行Java异常合并为单个日志条目。
+
+## 附加资源
+
+- [Loki官方文档：日志管道](https://grafana.com/docs/loki/latest/logql/log_queries/)
+- [Promtail配置指南](https://grafana.com/docs/loki/latest/clients/promtail/configuration/)

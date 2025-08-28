@@ -1,0 +1,106 @@
+---
+title: Seata 读写分离支持
+description: 了解Seata如何支持读写分离，提升分布式事务的性能和扩展性。
+---
+
+# Seata 读写分离支持
+
+在分布式系统中，读写分离是一种常见的优化策略，用于提升数据库的性能和扩展性。Seata作为一款开源的分布式事务解决方案，也提供了对读写分离的支持。本文将详细介绍Seata如何实现读写分离，并通过实际案例展示其应用场景。
+
+## 什么是读写分离？
+
+读写分离是一种数据库优化技术，通过将读操作和写操作分配到不同的数据库实例上，从而减轻主数据库的负载，提升系统的整体性能。通常情况下，写操作（如插入、更新、删除）会集中在主数据库（Master），而读操作（如查询）则会分散到多个从数据库（Slave）上。
+
+## Seata 如何支持读写分离？
+
+Seata通过其全局事务管理功能，支持在分布式事务中实现读写分离。具体来说，Seata允许开发者在事务中指定不同的数据源，从而实现读写操作的分离。以下是Seata支持读写分离的关键点：
+
+1. **数据源路由**：Seata可以根据事务的类型（读或写）自动路由到不同的数据源。
+2. **事务一致性**：即使在读写分离的情况下，Seata仍能保证事务的一致性。
+3. **配置灵活**：开发者可以通过配置文件或代码灵活地配置读写分离的策略。
+
+## 代码示例
+
+以下是一个简单的代码示例，展示如何在Seata中配置和使用读写分离。
+
+```java
+@Configuration
+public class DataSourceConfig {
+
+    @Bean(name = "masterDataSource")
+    public DataSource masterDataSource() {
+        // 配置主数据源
+        return DataSourceBuilder.create().build();
+    }
+
+    @Bean(name = "slaveDataSource")
+    public DataSource slaveDataSource() {
+        // 配置从数据源
+        return DataSourceBuilder.create().build();
+    }
+
+    @Primary
+    @Bean(name = "routingDataSource")
+    public DataSource routingDataSource(
+            @Qualifier("masterDataSource") DataSource masterDataSource,
+            @Qualifier("slaveDataSource") DataSource slaveDataSource) {
+        // 配置数据源路由
+        Map<Object, Object> targetDataSources = new HashMap<>();
+        targetDataSources.put("master", masterDataSource);
+        targetDataSources.put("slave", slaveDataSource);
+
+        AbstractRoutingDataSource routingDataSource = new AbstractRoutingDataSource() {
+            @Override
+            protected Object determineCurrentLookupKey() {
+                return DataSourceContextHolder.getDataSourceType();
+            }
+        };
+        routingDataSource.setDefaultTargetDataSource(masterDataSource);
+        routingDataSource.setTargetDataSources(targetDataSources);
+        return routingDataSource;
+    }
+}
+```
+
+在上述代码中，我们配置了两个数据源：`masterDataSource` 和 `slaveDataSource`，并通过 `routingDataSource` 实现了数据源的路由。
+
+## 实际案例
+
+假设我们有一个电商系统，用户在下单时需要写入订单信息（写操作），而在查看订单历史时需要读取订单信息（读操作）。通过Seata的读写分离支持，我们可以将写操作路由到主数据库，而将读操作路由到从数据库，从而提升系统的性能和扩展性。
+
+```java
+@Service
+public class OrderService {
+
+    @Autowired
+    private OrderMapper orderMapper;
+
+    @GlobalTransactional
+    public void createOrder(Order order) {
+        // 写操作，路由到主数据库
+        DataSourceContextHolder.setDataSourceType("master");
+        orderMapper.insert(order);
+    }
+
+    public List<Order> getOrderHistory(Long userId) {
+        // 读操作，路由到从数据库
+        DataSourceContextHolder.setDataSourceType("slave");
+        return orderMapper.selectByUserId(userId);
+    }
+}
+```
+
+在上述代码中，`createOrder` 方法执行写操作，路由到主数据库；`getOrderHistory` 方法执行读操作，路由到从数据库。
+
+## 总结
+
+Seata的读写分离支持为分布式事务提供了更高的性能和扩展性。通过合理配置数据源路由，开发者可以轻松实现读写分离，从而提升系统的整体性能。希望本文能帮助你更好地理解和使用Seata的读写分离功能。
+
+## 附加资源
+
+- [Seata官方文档](https://seata.io/zh-cn/docs/)
+- [分布式事务与读写分离](https://example.com/distributed-transactions-read-write-splitting)
+
+:::tip
+建议在实际项目中，根据业务需求和数据库负载情况，灵活调整读写分离的策略。
+:::

@@ -1,0 +1,172 @@
+---
+title: OpenTelemetry 日志最佳实践
+description: 学习如何通过OpenTelemetry高效收集、处理和分析应用程序日志的最佳实践方法，适合初学者入门分布式追踪与日志整合。
+---
+
+# OpenTelemetry 日志最佳实践
+
+## 介绍
+
+OpenTelemetry是一个开源的观测性框架，用于生成、收集和管理**日志(Logs)**、**指标(Metrics)**和**追踪(Traces)**。本文将重点介绍日志模块的最佳实践，帮助你在分布式系统中实现高效的日志记录与分析。
+
+:::note 为什么需要日志整合？
+在微服务架构中，日志分散在不同服务中。OpenTelemetry通过统一格式（如LogRecord）和上下文传播，让跨服务日志关联成为可能。
+:::
+
+---
+
+## 核心概念
+
+### 1. 日志与追踪的关联
+OpenTelemetry通过`TraceId`和`SpanId`将日志与分布式追踪关联：
+
+```mermaid
+graph LR
+    A[前端服务] -->|HTTP请求| B[订单服务]
+    B -->|DB查询| C[数据库]
+    style A fill:#f9f,stroke:#333
+    style B fill:#bbf,stroke:#333
+    style C fill:#f96,stroke:#333
+```
+
+对应的日志关联字段示例：
+```python
+{
+    "timestamp": "2023-08-20T12:00:00Z",
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "span_id": "00f067aa0ba902b7",
+    "severity": "ERROR",
+    "body": "订单处理超时"
+}
+```
+
+### 2. 日志严重性等级
+使用标准化的严重性等级（参考Syslog标准）：
+
+| 数值 | 等级       | 说明                     |
+|------|------------|--------------------------|
+| 1    | FATAL      | 服务不可用               |
+| 3    | ERROR      | 错误事件但服务仍运行     |
+| 4    | WARN       | 警告事件                 |
+| 6    | INFO       | 常规信息                 |
+| 7    | DEBUG      | 调试信息                 |
+
+---
+
+## 最佳实践
+
+### 实践1：结构化日志记录
+避免纯文本日志，使用JSON等结构化格式：
+
+```go
+// 错误示例（非结构化）
+log.Printf("用户登录失败: %s", err)
+
+// 正确示例（结构化）
+logger.Error("用户操作日志",
+    zap.String("event", "login_failed"),
+    zap.String("user_id", "u123"),
+    zap.Error(err),
+    zap.String("trace_id", trace.SpanContext().TraceID().String()))
+```
+
+输出结果：
+```json
+{
+    "timestamp": "2023-08-20T12:00:01Z",
+    "severity": "ERROR",
+    "body": "用户操作日志",
+    "attributes": {
+        "event": "login_failed",
+        "user_id": "u123",
+        "error": "invalid credentials",
+        "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736"
+    }
+}
+```
+
+### 实践2：采样策略
+通过采样避免日志爆炸：
+
+```yaml
+# OpenTelemetry Collector配置示例
+processors:
+    probabilistic_sampler:
+        sampling_percentage: 30    # 只采集30%的日志
+```
+
+:::tip 采样原则
+- 对ERROR级别日志全量采集
+- 对DEBUG日志按比例采样
+- 生产环境建议采样率10-30%
+:::
+
+### 实践3：敏感信息过滤
+使用处理器过滤敏感字段：
+
+```python
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk._logs import LogEmitterProvider
+
+resource = Resource.create({
+    "service.name": "payment-service",
+    "telemetry.sdk.language": "python"
+})
+
+# 自动过滤密码字段
+log_emitter_provider = LogEmitterProvider(
+    resource=resource,
+    log_record_processors=[RedactingFilter(["password", "credit_card"])]
+)
+```
+
+---
+
+## 真实案例：电商系统日志分析
+
+### 问题场景
+用户投诉"支付成功后订单状态未更新"，需要排查支付服务(Payment)与订单服务(Order)间的交互。
+
+### 解决方案
+1. 通过`TraceId`关联两个服务的日志
+2. 发现支付服务日志显示：
+```json
+{
+    "trace_id": "abc123",
+    "severity": "INFO",
+    "message": "支付成功",
+    "payment_id": "pay_789"
+}
+```
+3. 但订单服务日志显示：
+```json
+{
+    "trace_id": "abc123",
+    "severity": "WARN",
+    "message": "支付状态回调超时",
+    "payment_id": "pay_789"
+}
+```
+4. 结论：网络问题导致回调失败
+
+---
+
+## 总结
+
+### 关键要点
+- 始终使用结构化日志格式
+- 通过`TraceId`实现跨服务日志关联
+- 实施合理的采样策略控制成本
+- 严格过滤敏感信息
+
+### 后续学习
+1. 尝试在本地搭建OpenTelemetry Collector
+2. 为你的项目添加日志与追踪的关联
+3. 使用Grafana Labs等工具可视化日志数据
+
+:::warning 注意事项
+避免过度日志记录，这会导致：
+- 存储成本增加
+- 关键信息被淹没
+- 性能下降
+:::

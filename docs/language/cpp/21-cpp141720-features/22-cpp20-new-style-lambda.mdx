@@ -1,0 +1,349 @@
+---
+title: C++ 20新式Lambda
+description: 本文详细介绍C++20中引入的Lambda表达式新特性，包括模板参数、捕获this指针的新方式以及无状态Lambda作为非类型模板参数等功能
+---
+
+# C++ 20新式Lambda
+
+Lambda表达式是C++11引入的一项重要特性，允许我们创建匿名函数对象。随着C++的发展，Lambda表达式在C++20中获得了多项强大的新功能。本文将介绍这些新特性，帮助你掌握现代C++中Lambda的高级用法。
+
+## Lambda表达式回顾
+
+在深入了解C++20的新特性之前，让我们简单回顾一下Lambda表达式的基本语法：
+
+```cpp
+[capture-list](parameters) specifiers -> return-type { body }
+```
+
+其中：
+- `[capture-list]`：捕获外部变量的列表
+- `(parameters)`：参数列表
+- `specifiers`：可选的说明符（如`mutable`、`constexpr`等）
+- `-> return-type`：可选的返回类型
+- `{ body }`：函数体
+
+## C++ 20 Lambda的新特性
+
+### 1. Lambda表达式中的模板参数
+
+在C++20之前，如果你想在Lambda中使用泛型编程，只能使用`auto`参数，这种方式有一定的局限性。C++20允许在Lambda表达式中直接声明模板参数。
+
+#### 旧式方法（使用auto）：
+
+```cpp
+auto oldStyleLambda = [](auto x, auto y) {
+    return x + y;
+};
+
+int result1 = oldStyleLambda(5, 3);      // 8
+double result2 = oldStyleLambda(5.5, 3.2);  // 8.7
+```
+
+#### C++ 20新式方法（使用模板语法）：
+
+```cpp
+auto newStyleLambda = []<typename T>(T x, T y) {
+    return x + y;
+};
+
+int result1 = newStyleLambda(5, 3);          // 8
+double result2 = newStyleLambda(5.5, 3.2);   // 8.7
+```
+
+使用模板语法的主要优势：
+
+1. **类型一致性**：可以确保多个参数是相同类型
+2. **访问类型信息**：可以在Lambda内部访问模板类型的信息
+3. **特化处理**：可以对不同类型进行特殊处理
+
+例如，访问类型信息的示例：
+
+```cpp
+auto processList = []<typename T>(std::vector<T>& items) {
+    // 在这里我们可以访问元素类型T
+    T sum = T{};
+    for(const auto& item : items) {
+        sum += item;
+    }
+    return sum;
+};
+
+std::vector<int> numbers = {1, 2, 3, 4, 5};
+int total = processList(numbers);  // 返回15
+```
+
+:::tip
+使用模板Lambda可以实现更精确的类型约束和更清晰的代码意图，特别是在处理容器或复杂数据结构时。
+:::
+
+### 2. 捕获this的新方式
+
+在C++20之前，捕获类成员中的`this`指针可能导致悬空指针问题。C++20引入了`[=, this]`和`[=, *this]`两种新的捕获方式。
+
+#### 之前的捕获方式：
+
+```cpp
+class Widget {
+    int value = 42;
+public:
+    auto getLambda() {
+        // 隐式捕获this指针
+        return [=]() { return value; };
+        // 或显式捕获this
+        // return [this]() { return value; };
+    }
+};
+```
+
+#### C++ 20的新捕获方式：
+
+```cpp
+class Widget {
+    int value = 42;
+public:
+    auto getLambdaByRef() {
+        // 显式按引用捕获this
+        return [=, this]() { return value; };
+    }
+    
+    auto getLambdaByCopy() {
+        // 按值捕获整个对象
+        return [=, *this]() { return value; };
+    }
+};
+```
+
+`[=, *this]`的优势是即使原始对象被销毁，Lambda仍然可以安全使用，因为它拥有对象的完整副本。
+
+### 3. 无状态Lambda作为非类型模板参数
+
+C++20允许将没有捕获变量的Lambda（无状态Lambda）用作非类型模板参数。这为编译时计算和策略模式提供了新的可能性。
+
+```cpp
+template<auto F>
+void execute() {
+    F();
+}
+
+// 使用无状态Lambda作为模板参数
+constexpr auto printHello = []() { 
+    std::cout << "Hello, World!" << std::endl; 
+};
+
+int main() {
+    execute<printHello>();  // 输出: Hello, World!
+    return 0;
+}
+```
+
+这个特性对于编译时策略特别有用：
+
+```cpp
+template<typename T, auto Comparator>
+class SortedVector {
+    std::vector<T> data;
+public:
+    void insert(T value) {
+        auto pos = std::lower_bound(data.begin(), data.end(), value, Comparator);
+        data.insert(pos, value);
+    }
+    
+    const std::vector<T>& getData() const { return data; }
+};
+
+int main() {
+    // 使用不同的比较策略
+    constexpr auto ascending = [](int a, int b) { return a < b; };
+    constexpr auto descending = [](int a, int b) { return a > b; };
+    
+    SortedVector<int, ascending> ascendingVector;
+    ascendingVector.insert(3);
+    ascendingVector.insert(1);
+    ascendingVector.insert(4);
+    // ascendingVector内容: 1, 3, 4
+    
+    SortedVector<int, descending> descendingVector;
+    descendingVector.insert(3);
+    descendingVector.insert(1);
+    descendingVector.insert(4);
+    // descendingVector内容: 4, 3, 1
+    
+    return 0;
+}
+```
+
+:::caution
+无状态Lambda作为模板参数时必须是`constexpr`的，并且不能捕获任何变量。
+:::
+
+### 4. Lambda中的包展开
+
+C++20增强了Lambda中变参模板的支持，使包展开（pack expansion）更加便捷：
+
+```cpp
+auto sum = []<typename... Args>(Args... args) {
+    return (... + args);  // 折叠表达式
+};
+
+int result = sum(1, 2, 3, 4, 5);  // 返回15
+```
+
+## 实际应用案例
+
+### 案例1：自定义STL算法的比较函数
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <algorithm>
+
+int main() {
+    std::vector<std::pair<int, std::string>> items = {
+        {3, "apple"},
+        {1, "banana"},
+        {4, "orange"},
+        {2, "grape"}
+    };
+
+    // 使用模板Lambda进行自定义排序
+    std::sort(items.begin(), items.end(), []<typename T>(const T& a, const T& b) {
+        // 根据string部分进行排序
+        return a.second < b.second;
+    });
+
+    for (const auto& [id, name] : items) {
+        std::cout << id << ": " << name << std::endl;
+    }
+    // 输出:
+    // 3: apple
+    // 1: banana
+    // 2: grape
+    // 4: orange
+
+    return 0;
+}
+```
+
+### 案例2：编译时策略模式
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <numeric>
+
+// 不同的数值处理策略
+constexpr auto sumStrategy = [](const auto& values) {
+    return std::accumulate(values.begin(), values.end(), 0);
+};
+
+constexpr auto averageStrategy = [](const auto& values) {
+    if (values.empty()) return 0;
+    return std::accumulate(values.begin(), values.end(), 0) / 
+           static_cast<int>(values.size());
+};
+
+constexpr auto maxValueStrategy = [](const auto& values) {
+    if (values.empty()) return 0;
+    return *std::max_element(values.begin(), values.end());
+};
+
+// 数据处理器模板类
+template<auto ProcessingStrategy>
+class DataProcessor {
+public:
+    int process(const std::vector<int>& data) {
+        return ProcessingStrategy(data);
+    }
+};
+
+int main() {
+    std::vector<int> data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    
+    DataProcessor<sumStrategy> sumProcessor;
+    std::cout << "Sum: " << sumProcessor.process(data) << std::endl;  // 输出: Sum: 55
+    
+    DataProcessor<averageStrategy> avgProcessor;
+    std::cout << "Average: " << avgProcessor.process(data) << std::endl;  // 输出: Average: 5
+    
+    DataProcessor<maxValueStrategy> maxProcessor;
+    std::cout << "Max: " << maxProcessor.process(data) << std::endl;  // 输出: Max: 10
+    
+    return 0;
+}
+```
+
+### 案例3：安全地在多线程环境中使用Lambda
+
+```cpp
+#include <iostream>
+#include <thread>
+#include <vector>
+
+class ThreadWorker {
+private:
+    int id;
+    std::vector<int> data;
+
+public:
+    ThreadWorker(int id, std::vector<int> initialData) 
+        : id(id), data(std::move(initialData)) {}
+
+    void processData() {
+        // 创建线程，使用[=, *this]捕获整个对象的副本
+        std::thread worker([=, *this]() {
+            std::cout << "Worker " << id << " processing " << data.size() 
+                      << " elements" << std::endl;
+            // 即使原始ThreadWorker对象被销毁，这个Lambda仍然可以安全运行
+            for (auto& item : data) {
+                item *= 2;
+            }
+            
+            std::cout << "Worker " << id << " finished. First element: " 
+                      << (data.empty() ? 0 : data[0]) << std::endl;
+        });
+        
+        worker.detach();  // 分离线程，主线程不等待它完成
+        // 即使ThreadWorker实例现在销毁，Lambda仍然可以安全运行
+    }
+};
+
+int main() {
+    {
+        ThreadWorker worker(1, {1, 2, 3, 4, 5});
+        worker.processData();
+        // worker即将离开作用域被销毁，但Lambda有自己的this副本
+    }
+    
+    // 给分离的线程一些时间完成
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    
+    return 0;
+}
+```
+
+## 总结
+
+C++20为Lambda表达式带来了一系列强大的新特性：
+
+1. **模板参数**：通过`[]<typename T>(T x)`语法，让Lambda具备真正的泛型编程能力。
+2. **新的this捕获方式**：`[=, this]`（按引用捕获）和`[=, *this]`（按值捕获），提高了在类中使用Lambda的安全性。
+3. **Lambda作为非类型模板参数**：使无状态Lambda可用作编译时策略。
+4. **增强的变参模板支持**：使Lambda能更好地处理可变参数。
+
+这些新特性极大地增强了Lambda表达式的能力和灵活性，让我们能够编写更安全、更通用、更高效的代码。随着C++20的普及，学习和掌握这些新式Lambda特性将成为现代C++开发者的必备技能。
+
+## 练习
+
+1. 编写一个接受任何容器类型的模板Lambda，计算容器中元素的平均值。
+2. 创建一个类，包含一个使用`[=, *this]`捕获的Lambda，并验证即使原始对象被销毁，Lambda仍然可以正常工作。
+3. 实现一个排序函数，使用Lambda作为非类型模板参数来自定义排序策略。
+4. 编写一个变参模板Lambda，能够计算传入参数的最大值。
+
+## 额外资源
+
+- [C++20标准](https://isocpp.org/)
+- [Compiler Explorer](https://godbolt.org/)：用于测试和查看不同编译器对C++20特性的支持情况
+
+:::note
+要使用C++20的这些特性，请确保你的编译器支持C++20标准。主流的编译器如GCC 10+、Clang 10+和MSVC 19.25+都已经支持了这些特性。
+:::

@@ -1,0 +1,303 @@
+---
+title: C++ 模拟对象
+description: 学习如何在C++中创建和使用模拟对象进行单元测试，提高代码的可测性和质量
+---
+
+# C++ 模拟对象
+
+## 什么是模拟对象？
+
+在软件测试中，模拟对象（Mock Objects）是指模仿真实对象行为的假对象，用于在受控的环境中测试代码。当你需要测试的组件依赖于其他复杂组件时，模拟对象特别有用。使用模拟对象可以帮助你隔离测试目标代码，避免外部依赖带来的不确定性。
+
+:::tip
+模拟对象和存根（Stub）的区别：存根只提供预定义的响应，而模拟对象不仅能返回预设值，还能验证它们被正确调用。
+:::
+
+## 为什么需要模拟对象？
+
+在C++开发中，模拟对象有以下几个重要的用途：
+
+1. **隔离测试单元**：让测试专注于特定代码，而不受外部依赖影响
+2. **加速测试**：替换耗时操作（如数据库访问、网络请求）
+3. **模拟难以创建的场景**：如异常、错误状态等
+4. **验证交互行为**：检查被测代码是否正确地调用了依赖项
+
+## C++ 模拟对象的实现方式
+
+### 1. 手动实现模拟对象
+
+最基本的方法是手动创建一个实现相同接口的类：
+
+```cpp
+// 原始接口
+class Database {
+public:
+    virtual ~Database() {}
+    virtual bool connect() = 0;
+    virtual bool query(const std::string& sql) = 0;
+    virtual void disconnect() = 0;
+};
+
+// 手动实现的模拟对象
+class MockDatabase : public Database {
+public:
+    MockDatabase() : connected_(false), queryCallCount_(0) {}
+    
+    bool connect() override { 
+        connected_ = true; 
+        return true; 
+    }
+    
+    bool query(const std::string& sql) override {
+        if (!connected_) return false;
+        queryCallCount_++;
+        lastQuery_ = sql;
+        return true;
+    }
+    
+    void disconnect() override { 
+        connected_ = false; 
+    }
+    
+    // 验证方法 - 用于测试
+    bool isConnected() const { return connected_; }
+    int getQueryCallCount() const { return queryCallCount_; }
+    std::string getLastQuery() const { return lastQuery_; }
+    
+private:
+    bool connected_;
+    int queryCallCount_;
+    std::string lastQuery_;
+};
+```
+
+使用示例：
+
+```cpp
+void testDatabaseUsage() {
+    MockDatabase mockDb;
+    
+    // 使用模拟数据库
+    mockDb.connect();
+    mockDb.query("SELECT * FROM users");
+    
+    // 验证交互
+    assert(mockDb.isConnected() == true);
+    assert(mockDb.getQueryCallCount() == 1);
+    assert(mockDb.getLastQuery() == "SELECT * FROM users");
+    
+    mockDb.disconnect();
+    assert(mockDb.isConnected() == false);
+}
+```
+
+### 2. 使用Google Mock框架
+
+手动创建模拟对象工作量大且容易出错。Google Mock (gmock) 是一个强大的C++模拟框架，它是Google Test的一部分。
+
+首先，安装Google Test和Google Mock。然后：
+
+```cpp
+#include <gtest/gtest.h>
+#include <gmock/gmock.h>
+
+// 原始接口
+class Database {
+public:
+    virtual ~Database() {}
+    virtual bool connect() = 0;
+    virtual bool query(const std::string& sql) = 0;
+    virtual void disconnect() = 0;
+};
+
+// 使用Google Mock创建模拟对象
+class MockDatabase : public Database {
+public:
+    MOCK_METHOD(bool, connect, (), (override));
+    MOCK_METHOD(bool, query, (const std::string&), (override));
+    MOCK_METHOD(void, disconnect, (), (override));
+};
+
+// 测试
+TEST(DatabaseTest, QueryExecutesSuccessfully) {
+    MockDatabase mockDb;
+    
+    // 设置预期行为
+    EXPECT_CALL(mockDb, connect())
+        .WillOnce(testing::Return(true));
+    EXPECT_CALL(mockDb, query("SELECT * FROM users"))
+        .WillOnce(testing::Return(true));
+    EXPECT_CALL(mockDb, disconnect());
+    
+    // 使用模拟数据库
+    bool connected = mockDb.connect();
+    bool queryResult = mockDb.query("SELECT * FROM users");
+    mockDb.disconnect();
+    
+    EXPECT_TRUE(connected);
+    EXPECT_TRUE(queryResult);
+}
+```
+
+:::note
+Google Mock会自动验证所有预期的调用是否发生，调用次数是否正确，以及参数是否匹配。
+:::
+
+## 高级模拟技术
+
+### 部分模拟
+
+有时你可能只想模拟类的一部分方法，让其他方法保持原样：
+
+```cpp
+class PartialMockDatabase : public Database {
+public:
+    // 只模拟query方法
+    MOCK_METHOD(bool, query, (const std::string&), (override));
+    
+    // 其他方法使用真实实现
+    bool connect() override { /* 真实实现 */ }
+    void disconnect() override { /* 真实实现 */ }
+};
+```
+
+### 模拟行为匹配器
+
+Google Mock提供了强大的匹配器来验证方法调用：
+
+```cpp
+// 精确匹配参数
+EXPECT_CALL(mockDb, query("SELECT * FROM users"));
+
+// 使用参数匹配器
+EXPECT_CALL(mockDb, query(testing::StartsWith("SELECT")));
+EXPECT_CALL(mockDb, query(testing::ContainsRegex("FROM users")));
+
+// 匹配调用次数
+EXPECT_CALL(mockDb, connect())
+    .Times(1);  // 精确调用一次
+EXPECT_CALL(mockDb, query(testing::_))
+    .Times(testing::AtLeast(1));  // 至少调用一次
+```
+
+### 模拟动作
+
+```cpp
+// 返回值
+EXPECT_CALL(mockDb, connect())
+    .WillOnce(testing::Return(true));
+
+// 抛出异常
+EXPECT_CALL(mockDb, query("BAD QUERY"))
+    .WillOnce(testing::Throw(std::runtime_error("SQL syntax error")));
+
+// 调用自定义函数
+EXPECT_CALL(mockDb, query(testing::_))
+    .WillRepeatedly(testing::Invoke([](const std::string& sql) {
+        return sql.length() > 10;
+    }));
+```
+
+## 实际案例：用户服务测试
+
+下面展示一个实际的案例，我们将测试一个依赖于数据库的`UserService`类：
+
+```cpp
+// 用户服务类
+class UserService {
+private:
+    Database& db_;
+    
+public:
+    UserService(Database& db) : db_(db) {}
+    
+    bool addUser(const std::string& username) {
+        if (!db_.connect()) {
+            return false;
+        }
+        
+        bool result = db_.query("INSERT INTO users (name) VALUES ('" + username + "')");
+        db_.disconnect();
+        return result;
+    }
+    
+    bool userExists(const std::string& username) {
+        if (!db_.connect()) {
+            return false;
+        }
+        
+        bool result = db_.query("SELECT * FROM users WHERE name='" + username + "'");
+        db_.disconnect();
+        return result;
+    }
+};
+```
+
+测试用例：
+
+```cpp
+TEST(UserServiceTest, AddUserSuccess) {
+    MockDatabase mockDb;
+    UserService service(mockDb);
+    
+    // 设置预期
+    EXPECT_CALL(mockDb, connect())
+        .WillOnce(testing::Return(true));
+    EXPECT_CALL(mockDb, query(testing::HasSubstr("INSERT INTO users")))
+        .WillOnce(testing::Return(true));
+    EXPECT_CALL(mockDb, disconnect());
+    
+    // 测试
+    EXPECT_TRUE(service.addUser("johndoe"));
+}
+
+TEST(UserServiceTest, AddUserFailsWhenDbConnectionFails) {
+    MockDatabase mockDb;
+    UserService service(mockDb);
+    
+    // 设置预期：连接失败
+    EXPECT_CALL(mockDb, connect())
+        .WillOnce(testing::Return(false));
+    // 连接失败时不应调用query和disconnect
+    
+    // 测试
+    EXPECT_FALSE(service.addUser("johndoe"));
+}
+```
+
+## 模拟对象的最佳实践
+
+1. **依赖注入**：设计类时使用依赖注入模式，使其易于模拟
+2. **面向接口编程**：针对接口而非具体实现编程
+3. **只模拟必要的部分**：不要过度模拟，可能掩盖真实问题
+4. **验证行为而非状态**：关注测试对象与依赖的交互
+5. **避免脆弱测试**：不要过度指定调用细节，以免代码重构时测试失败
+
+:::caution
+模拟对象应仅用于测试，不要在生产代码中使用。
+:::
+
+## 总结
+
+C++模拟对象是单元测试中的重要工具，它们可以：
+
+- 隔离测试单元，排除外部依赖
+- 加速测试执行
+- 模拟难以重现的场景
+- 验证代码间交互的正确性
+
+尽管可以手动创建模拟对象，但Google Mock等框架能极大简化这一工作。掌握模拟对象的使用将帮助你编写更加健壮、可维护的测试代码，提高整体代码质量。
+
+## 练习
+
+1. 创建一个`FileSystem`接口和它的模拟实现，包含读取、写入和删除文件的方法
+2. 使用Google Mock创建一个网络客户端的模拟对象，并测试依赖于它的下载管理器
+3. 实现一个缓存管理器，并使用模拟对象测试其缓存失效策略
+4. 使用部分模拟测试数据库连接池的行为
+
+## 进一步学习资源
+
+- Google Test和Google Mock官方文档
+- 《Working Effectively with Unit Tests》- Jay Fields
+- 《Growing Object-Oriented Software, Guided by Tests》- Steve Freeman & Nat Pryce
+- C++测试驱动开发相关课程和教程

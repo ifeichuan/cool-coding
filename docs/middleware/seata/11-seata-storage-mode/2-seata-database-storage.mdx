@@ -1,0 +1,134 @@
+---
+title: Seata 数据库存储
+description: 了解Seata数据库存储模式的工作原理、配置方法及其在实际应用中的使用场景。
+---
+
+# Seata 数据库存储
+
+## 介绍
+
+Seata 是一款开源的分布式事务解决方案，旨在简化微服务架构中的事务管理。Seata 提供了多种存储模式，其中**数据库存储模式**是最常用的一种。通过将事务日志存储在数据库中，Seata 能够确保事务的一致性和持久性。
+
+在数据库存储模式下，Seata 会将事务的全局锁、分支事务状态等信息存储在数据库中。这种模式适用于需要高可靠性和数据一致性的场景。
+
+## Seata 数据库存储的工作原理
+
+Seata 数据库存储模式的核心是将事务日志存储在数据库中。具体来说，Seata 会在数据库中创建以下三张表：
+
+1. **global_table**：存储全局事务的状态信息。
+2. **branch_table**：存储分支事务的状态信息。
+3. **lock_table**：存储全局锁信息。
+
+这些表的结构如下：
+
+```sql
+CREATE TABLE IF NOT EXISTS `global_table` (
+  `xid` VARCHAR(128) NOT NULL,
+  `transaction_id` BIGINT,
+  `status` TINYINT NOT NULL,
+  `application_id` VARCHAR(32),
+  `transaction_service_group` VARCHAR(32),
+  `transaction_name` VARCHAR(128),
+  `timeout` INT,
+  `begin_time` BIGINT,
+  `application_data` VARCHAR(2000),
+  `gmt_create` DATETIME,
+  `gmt_modified` DATETIME,
+  PRIMARY KEY (`xid`),
+  KEY `idx_gmt_modified_status` (`gmt_modified`, `status`),
+  KEY `idx_transaction_id` (`transaction_id`)
+);
+
+CREATE TABLE IF NOT EXISTS `branch_table` (
+  `branch_id` BIGINT NOT NULL,
+  `xid` VARCHAR(128) NOT NULL,
+  `transaction_id` BIGINT,
+  `resource_group_id` VARCHAR(32),
+  `resource_id` VARCHAR(256),
+  `lock_key` VARCHAR(128),
+  `branch_type` VARCHAR(8),
+  `status` TINYINT,
+  `client_id` VARCHAR(64),
+  `application_data` VARCHAR(2000),
+  `gmt_create` DATETIME,
+  `gmt_modified` DATETIME,
+  PRIMARY KEY (`branch_id`),
+  KEY `idx_xid` (`xid`)
+);
+
+CREATE TABLE IF NOT EXISTS `lock_table` (
+  `row_key` VARCHAR(128) NOT NULL,
+  `xid` VARCHAR(96),
+  `transaction_id` LONG,
+  `branch_id` LONG,
+  `resource_id` VARCHAR(256),
+  `table_name` VARCHAR(32),
+  `pk` VARCHAR(36),
+  `gmt_create` DATETIME,
+  `gmt_modified` DATETIME,
+  PRIMARY KEY (`row_key`)
+);
+```
+
+:::note
+**注意**：在实际使用中，你需要根据数据库的类型（如 MySQL、PostgreSQL 等）调整表结构和数据类型。
+:::
+
+## 配置Seata数据库存储
+
+要启用 Seata 的数据库存储模式，你需要在 Seata 的配置文件中进行相应的配置。以下是一个典型的配置示例：
+
+```yaml
+store:
+  mode: db
+  db:
+    datasource: druid
+    db-type: mysql
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/seata?useSSL=false
+    user: root
+    password: root
+    min-conn: 1
+    max-conn: 10
+    global-table: global_table
+    branch-table: branch_table
+    lock-table: lock_table
+    query-limit: 100
+```
+
+:::tip
+**提示**：确保数据库连接信息正确，并且数据库中存在上述三张表。
+:::
+
+## 实际应用场景
+
+假设你正在开发一个电商系统，用户下单时需要同时更新订单表和库存表。为了确保这两个操作要么同时成功，要么同时失败，你可以使用 Seata 的数据库存储模式来管理分布式事务。
+
+以下是一个简单的代码示例：
+
+```java
+@GlobalTransactional
+public void placeOrder(Order order) {
+    // 创建订单
+    orderService.create(order);
+    // 扣减库存
+    inventoryService.deduct(order.getProductId(), order.getQuantity());
+}
+```
+
+在这个例子中，`@GlobalTransactional` 注解表示这是一个全局事务。如果订单创建成功但库存扣减失败，Seata 会自动回滚整个事务，确保数据一致性。
+
+## 总结
+
+Seata 的数据库存储模式通过将事务日志存储在数据库中，确保了分布式事务的一致性和持久性。它适用于需要高可靠性和数据一致性的场景。通过合理的配置和使用，你可以轻松地在微服务架构中管理复杂的分布式事务。
+
+## 附加资源
+
+- [Seata 官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务解决方案对比](https://dzone.com/articles/distributed-transaction-solutions-comparison)
+
+## 练习
+
+1. 在你的本地环境中配置 Seata 的数据库存储模式，并尝试运行一个简单的分布式事务示例。
+2. 修改 Seata 的配置文件，尝试使用不同的数据库（如 PostgreSQL）作为存储后端。
+3. 阅读 Seata 的源码，了解其数据库存储模式的实现细节。

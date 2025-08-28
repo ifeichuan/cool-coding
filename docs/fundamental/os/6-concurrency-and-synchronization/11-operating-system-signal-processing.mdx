@@ -1,0 +1,256 @@
+---
+title: 操作系统信号处理
+description: 了解操作系统中的信号处理机制，掌握信号的基本概念、常见信号类型以及如何在程序中处理信号。
+---
+
+# 操作系统信号处理
+
+## 介绍
+
+在操作系统中，**信号**是一种用于通知进程发生了某种事件的机制。信号可以由操作系统、其他进程或进程自身发送。信号处理是操作系统和应用程序之间通信的重要方式之一，常用于处理异常、终止进程或通知进程某些事件的发生。
+
+信号处理的核心思想是：当某个事件发生时，操作系统会向目标进程发送一个信号，进程可以选择忽略信号、执行默认操作或自定义处理函数来响应信号。
+
+## 信号的基本概念
+
+### 信号的类型
+
+操作系统定义了多种信号类型，每种信号对应不同的事件。以下是一些常见的信号：
+
+- `SIGINT`：中断信号，通常由用户按下 `Ctrl+C` 触发。
+- `SIGTERM`：终止信号，通常用于请求进程正常终止。
+- `SIGKILL`：强制终止信号，进程无法捕获或忽略该信号。
+- `SIGSEGV`：段错误信号，通常由非法内存访问触发。
+- `SIGALRM`：定时器信号，通常由定时器到期触发。
+
+:::tip
+可以使用 `kill -l` 命令查看系统中所有支持的信号列表。
+:::
+
+### 信号的默认行为
+
+每个信号都有一个默认行为，常见的默认行为包括：
+
+- **终止进程**：例如 `SIGTERM` 和 `SIGKILL`。
+- **忽略信号**：例如 `SIGCHLD`（子进程状态改变）。
+- **暂停进程**：例如 `SIGSTOP`。
+- **继续进程**：例如 `SIGCONT`。
+
+## 信号处理机制
+
+### 捕获信号
+
+进程可以通过注册信号处理函数来捕获信号并自定义处理逻辑。在 Unix/Linux 系统中，可以使用 `signal` 或 `sigaction` 函数来注册信号处理函数。
+
+以下是一个简单的示例，展示如何捕获 `SIGINT` 信号并自定义处理逻辑：
+
+```c
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+void handle_signal(int signal) {
+    printf("捕获到信号: %d\n", signal);
+}
+
+int main() {
+    // 注册信号处理函数
+    signal(SIGINT, handle_signal);
+
+    while (1) {
+        printf("运行中...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+```
+
+**输入/输出示例：**
+
+```
+运行中...
+运行中...
+^C捕获到信号: 2
+运行中...
+```
+
+:::note
+在上面的示例中，按下 `Ctrl+C` 会触发 `SIGINT` 信号，程序会调用 `handle_signal` 函数并继续运行。
+:::
+
+### 忽略信号
+
+进程可以选择忽略某些信号。例如，以下代码展示了如何忽略 `SIGINT` 信号：
+
+```c
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+int main() {
+    // 忽略 SIGINT 信号
+    signal(SIGINT, SIG_IGN);
+
+    while (1) {
+        printf("运行中...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+```
+
+**输入/输出示例：**
+
+```
+运行中...
+运行中...
+^C运行中...
+```
+
+:::caution
+忽略信号可能会导致进程无法被用户中断，因此需要谨慎使用。
+:::
+
+### 阻塞信号
+
+在某些情况下，进程可能需要暂时阻塞信号，以防止信号在处理关键代码段时中断进程。可以使用 `sigprocmask` 函数来阻塞或解除阻塞信号。
+
+以下是一个示例，展示如何阻塞 `SIGINT` 信号：
+
+```c
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+int main() {
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+
+    // 阻塞 SIGINT 信号
+    sigprocmask(SIG_BLOCK, &set, NULL);
+
+    printf("SIGINT 信号已被阻塞，按下 Ctrl+C 无效\n");
+    sleep(5);
+
+    // 解除阻塞 SIGINT 信号
+    sigprocmask(SIG_UNBLOCK, &set, NULL);
+    printf("SIGINT 信号已解除阻塞\n");
+
+    while (1) {
+        printf("运行中...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+```
+
+**输入/输出示例：**
+
+```
+SIGINT 信号已被阻塞，按下 Ctrl+C 无效
+^C^C^C^C^C
+SIGINT 信号已解除阻塞
+运行中...
+运行中...
+^C
+```
+
+:::warning
+阻塞信号可能会导致进程无法及时响应某些事件，因此需要合理使用。
+:::
+
+## 实际应用场景
+
+### 优雅地终止进程
+
+在服务器程序中，通常需要处理 `SIGTERM` 信号以优雅地终止进程。例如，以下代码展示了如何在接收到 `SIGTERM` 信号时释放资源并退出：
+
+```c
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+void handle_sigterm(int signal) {
+    printf("接收到 SIGTERM 信号，正在释放资源...\n");
+    // 释放资源
+    exit(0);
+}
+
+int main() {
+    signal(SIGTERM, handle_sigterm);
+
+    while (1) {
+        printf("服务器运行中...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+```
+
+**输入/输出示例：**
+
+```
+服务器运行中...
+服务器运行中...
+接收到 SIGTERM 信号，正在释放资源...
+```
+
+### 定时任务
+
+`SIGALRM` 信号通常用于实现定时任务。以下代码展示了如何使用 `alarm` 函数和 `SIGALRM` 信号实现一个简单的定时器：
+
+```c
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+void handle_alarm(int signal) {
+    printf("定时器到期！\n");
+}
+
+int main() {
+    signal(SIGALRM, handle_alarm);
+
+    // 设置 5 秒定时器
+    alarm(5);
+
+    while (1) {
+        printf("等待定时器...\n");
+        sleep(1);
+    }
+
+    return 0;
+}
+```
+
+**输入/输出示例：**
+
+```
+等待定时器...
+等待定时器...
+等待定时器...
+等待定时器...
+等待定时器...
+定时器到期！
+等待定时器...
+```
+
+## 总结
+
+信号处理是操作系统中用于进程间通信和异常处理的重要机制。通过捕获、忽略或阻塞信号，进程可以灵活地响应各种事件。在实际应用中，信号处理常用于优雅地终止进程、实现定时任务等场景。
+
+## 附加资源与练习
+
+- **练习 1**：编写一个程序，捕获 `SIGUSR1` 和 `SIGUSR2` 信号，并为每个信号定义不同的处理逻辑。
+- **练习 2**：研究 `sigaction` 函数，并尝试使用它替代 `signal` 函数来实现信号处理。
+- **附加资源**：
+  - [Linux 信号手册](https://man7.org/linux/man-pages/man7/signal.7.html)
+  - 《UNIX 环境高级编程》—— W. Richard Stevens
+
+通过学习和实践，你将能够更好地理解信号处理机制，并在实际编程中灵活运用。

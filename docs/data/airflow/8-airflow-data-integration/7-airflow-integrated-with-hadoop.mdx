@@ -1,0 +1,152 @@
+---
+title: Airflow 与Hadoop集成
+description: "了解如何使用Apache Airflow与Hadoop集成，实现高效的数据处理和任务调度。本文将从基础概念讲起，逐步深入，并提供实际案例和代码示例。"
+---
+
+## 介绍
+
+Apache Airflow 是一个开源的工作流管理平台，用于编排和调度复杂的数据管道。Hadoop 是一个分布式计算框架，广泛用于大数据处理。将 Airflow 与 Hadoop 集成，可以让你在 Airflow 中调度和管理 Hadoop 任务，从而实现高效的数据处理和工作流管理。
+
+本文将介绍如何将 Airflow 与 Hadoop 集成，包括如何配置 Airflow 以与 Hadoop 集群通信，以及如何使用 Airflow 调度 Hadoop 任务。
+
+## 前置条件
+
+在开始之前，请确保你已经具备以下条件：
+
+- 安装并配置了 Apache Airflow。
+- 安装并配置了 Hadoop 集群。
+- 熟悉 Airflow 的基本概念，如 DAG、Task 和 Operator。
+
+## 配置 Airflow 与 Hadoop 集成
+
+要将 Airflow 与 Hadoop 集成，首先需要在 Airflow 中配置 Hadoop 连接。Airflow 提供了 `HdfsHook` 和 `HdfsSensor` 等工具，用于与 Hadoop 交互。
+
+### 1. 安装必要的依赖
+
+首先，确保你已经安装了 `apache-airflow-providers-apache-hdfs` 包。如果没有安装，可以使用以下命令进行安装：
+
+```bash
+pip install apache-airflow-providers-apache-hdfs
+```
+
+### 2. 配置 Hadoop 连接
+
+在 Airflow 的 Web UI 中，导航到 `Admin -> Connections`，然后点击 `Create` 按钮来创建一个新的连接。填写以下信息：
+
+- **Conn Id**: `hadoop_default`
+- **Conn Type**: `HDFS`
+- **Host**: 你的 Hadoop NameNode 的主机名或 IP 地址
+- **Port**: Hadoop NameNode 的端口号（默认是 50070）
+- **Login**: 你的 Hadoop 用户名
+- **Password**: 你的 Hadoop 密码（如果有）
+
+保存连接后，Airflow 就可以通过这个连接与 Hadoop 集群通信了。
+
+## 使用 Airflow 调度 Hadoop 任务
+
+在 Airflow 中，你可以使用 `HdfsOperator` 来调度 Hadoop 任务。以下是一个简单的示例，展示如何在 Airflow 中调度一个 Hadoop MapReduce 任务。
+
+### 示例：调度 Hadoop MapReduce 任务
+
+```python
+from airflow import DAG
+from airflow.providers.apache.hdfs.operators.hdfs import HdfsOperator
+from airflow.utils.dates import days_ago
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': days_ago(1),
+}
+
+with DAG(
+    'hadoop_mapreduce_example',
+    default_args=default_args,
+    schedule_interval='@daily',
+) as dag:
+
+    run_mapreduce = HdfsOperator(
+        task_id='run_mapreduce',
+        hdfs_conn_id='hadoop_default',
+        command='hadoop jar /path/to/your/hadoop-mapreduce-example.jar input_path output_path',
+    )
+
+    run_mapreduce
+```
+
+在这个示例中，我们创建了一个名为 `hadoop_mapreduce_example` 的 DAG，并定义了一个 `HdfsOperator` 任务 `run_mapreduce`。这个任务会执行一个 Hadoop MapReduce 任务，输入路径为 `input_path`，输出路径为 `output_path`。
+
+### 输入和输出
+
+- **输入**: `input_path` 是 Hadoop 集群上的输入数据路径。
+- **输出**: `output_path` 是 Hadoop 集群上的输出数据路径。
+
+## 实际应用场景
+
+假设你有一个每天生成大量日志文件的应用，你需要将这些日志文件上传到 Hadoop 集群，并运行一个 MapReduce 任务来分析这些日志。你可以使用 Airflow 来调度这个工作流，确保每天自动执行以下步骤：
+
+1. 将日志文件上传到 Hadoop 集群。
+2. 运行 MapReduce 任务分析日志。
+3. 将分析结果存储到 HDFS 或数据库中。
+
+以下是一个完整的工作流示例：
+
+```python
+from airflow import DAG
+from airflow.providers.apache.hdfs.operators.hdfs import HdfsOperator
+from airflow.providers.apache.hdfs.sensors.hdfs import HdfsSensor
+from airflow.utils.dates import days_ago
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': days_ago(1),
+}
+
+with DAG(
+    'daily_log_analysis',
+    default_args=default_args,
+    schedule_interval='@daily',
+) as dag:
+
+    upload_logs = HdfsOperator(
+        task_id='upload_logs',
+        hdfs_conn_id='hadoop_default',
+        command='hdfs dfs -put /local/path/to/logs /hdfs/path/to/logs',
+    )
+
+    wait_for_logs = HdfsSensor(
+        task_id='wait_for_logs',
+        hdfs_conn_id='hadoop_default',
+        filepath='/hdfs/path/to/logs',
+        timeout=300,
+    )
+
+    run_mapreduce = HdfsOperator(
+        task_id='run_mapreduce',
+        hdfs_conn_id='hadoop_default',
+        command='hadoop jar /path/to/your/hadoop-mapreduce-example.jar /hdfs/path/to/logs /hdfs/path/to/output',
+    )
+
+    upload_logs >> wait_for_logs >> run_mapreduce
+```
+
+在这个示例中，`upload_logs` 任务将本地日志文件上传到 HDFS，`wait_for_logs` 任务会等待文件上传完成，`run_mapreduce` 任务会运行 MapReduce 任务来分析日志。
+
+## 总结
+
+通过本文，你已经了解了如何将 Airflow 与 Hadoop 集成，并使用 Airflow 调度 Hadoop 任务。我们介绍了如何配置 Airflow 以与 Hadoop 集群通信，并提供了一个实际应用场景的示例。
+
+## 附加资源
+
+- [Apache Airflow 官方文档](https://airflow.apache.org/docs/)
+- [Hadoop 官方文档](https://hadoop.apache.org/docs/current/)
+- [Airflow HDFS Provider 文档](https://airflow.apache.org/docs/apache-airflow-providers-apache-hdfs/stable/index.html)
+
+## 练习
+
+1. 尝试在本地环境中配置 Airflow 与 Hadoop 集成。
+2. 创建一个新的 DAG，调度一个 Hadoop MapReduce 任务，并观察任务的执行情况。
+3. 修改示例中的工作流，使其能够处理多个输入文件，并将结果存储到数据库中。
+
+:::tip
+如果你在配置过程中遇到问题，可以参考 Airflow 和 Hadoop 的官方文档，或者在社区论坛中寻求帮助。
+:::

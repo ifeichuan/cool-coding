@@ -1,0 +1,139 @@
+---
+title: PRISM 与mCRL2集成
+description: 学习如何将概率模型检测工具PRISM与形式化建模工具mCRL2集成，用于复杂系统的联合分析与验证。
+---
+
+## 简介
+
+PRISM和mCRL2是形式化方法领域中两个强大的工具：PRISM专注于**概率模型检测**，而mCRL2擅长**进程代数和模态逻辑**的建模与验证。通过集成两者，可以结合PRISM的概率分析能力和mCRL2的精确行为描述，适用于分布式系统、通信协议等场景。
+
+:::tip 为什么需要集成？
+- **互补优势**：mCRL2的精细行为建模 + PRISM的概率分析
+- **复杂系统验证**：例如验证带故障概率的通信协议
+:::
+
+---
+
+## 集成原理
+
+集成主要通过以下步骤实现：
+1. 在mCRL2中建模系统行为
+2. 将模型转换为PRISM兼容格式（通常通过LTS或Markov链）
+3. 在PRISM中定义概率参数并进行分析
+
+```mermaid
+graph LR
+  A[mCRL2模型] -->|导出| B(LTS标记转移系统)
+  B -->|转换| C(PRISM模型)
+  C --> D[概率验证]
+```
+
+---
+
+## 操作步骤
+
+### 1. 创建mCRL2模型
+以下是一个简单的通信协议模型（`protocol.mcrl2`）：
+```mcrl2
+act send, receive, timeout;
+
+proc Sender = send . Receiver;
+proc Receiver = (receive + timeout) . Sender;
+
+init Sender;
+```
+
+### 2. 导出为LTS
+使用mCRL2工具链生成状态空间：
+```bash
+mcrl22lps protocol.mcrl2 | lps2lts - protocol.lts
+```
+
+### 3. 转换为PRISM模型
+手动转换关键部分（需注意概率扩展）：
+```prism
+dtmc
+
+module Sender
+  s : [0..1] init 0;
+  [send] s=0 -> 0.9:(s'=1) + 0.1:(s'=0); // 添加概率
+endmodule
+
+module Receiver
+  r : [0..1] init 0;
+  [receive] r=0 -> 0.8:(r'=1);
+  [timeout] r=0 -> 0.2:(r'=1);
+endmodule
+```
+
+:::caution 注意
+自动转换工具（如`lts2prism`）可能需要自定义脚本处理概率扩展
+:::
+
+---
+
+## 实际案例：故障容忍系统
+
+### 场景描述
+- 系统需在90%成功率下发送消息
+- 失败后以30%概率重试
+
+### mCRL2模型扩展
+```mcrl2
+act try_success, try_fail, retry;
+
+proc System = try_success . System 
+            + try_fail . (retry . System + try_fail . System);
+```
+
+### PRISM 中对应的DTMC模型
+```prism
+dtmc
+
+module System
+  state : [0..2] init 0;
+  [try_success] state=0 -> 0.9: state'=0;
+  [try_fail] state=0 -> 0.1: state'=1;
+  [retry] state=1 -> 0.3: state'=0;
+  [try_fail] state=1 -> 0.7: state'=2;
+  [try_fail] state=2 -> 1: state'=2;
+endmodule
+```
+
+### 验证属性
+```prism
+P>=0.95 [ F state=0 ]  // 最终成功概率≥95%?
+```
+
+---
+
+## 总结
+
+| 工具      | 角色                  | 优势                  |
+|-----------|-----------------------|-----------------------|
+| mCRL2     | 行为建模              | 精确的非确定性描述    |
+| PRISM     | 概率分析              | 定量验证              |
+
+**典型工作流**：
+1. 用mCRL2建立基础行为模型
+2. 添加概率参数转换为PRISM模型
+3. 验证概率性质（如"消息在3次重试内到达的概率"）
+
+---
+
+## 扩展练习
+
+1. 尝试将以下mCRL2模型转换为PRISM模型：
+   ```mcrl2
+   act up, down;
+   proc Counter = up . Counter + down . Counter;
+   init Counter;
+   ```
+   并添加概率：up概率60%，down概率40%
+
+2. 在PRISM中验证："长期运行中up操作占比超过55%"的概率
+
+## 资源推荐
+- mCRL2用户手册（转换工具章节）
+- PRISM官方文档《Importing External Models》
+- 论文《Combining Process Algebra and Model Checking》

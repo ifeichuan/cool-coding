@@ -1,0 +1,144 @@
+---
+title: Seata RM与TC交互
+description: 了解Seata中资源管理器（RM）与事务协调器（TC）之间的交互机制，掌握分布式事务的核心流程。
+---
+
+## 介绍
+
+在分布式事务框架Seata中，资源管理器（Resource Manager, RM）和事务协调器（Transaction Coordinator, TC）是两个核心组件。RM负责管理本地资源（如数据库连接），而TC负责协调全局事务的提交或回滚。理解RM与TC之间的交互机制，是掌握Seata分布式事务实现的关键。
+
+本文将逐步讲解RM与TC的交互流程，并通过代码示例和实际案例帮助你深入理解这一过程。
+
+---
+
+## RM与TC的交互流程
+
+RM与TC的交互主要发生在以下阶段：
+
+1. **事务注册**：RM向TC注册分支事务。
+2. **事务提交/回滚**：RM根据TC的指令执行本地事务的提交或回滚。
+3. **状态上报**：RM向TC上报本地事务的执行状态。
+
+下面我们将详细讲解每个阶段。
+
+---
+
+### 1. 事务注册
+
+在分布式事务开始时，RM需要向TC注册分支事务。注册的目的是让TC知道哪些资源参与了当前全局事务。
+
+```java
+// 示例：RM向TC注册分支事务
+BranchRegisterRequest request = new BranchRegisterRequest();
+request.setXid(globalTransactionId); // 全局事务ID
+request.setBranchType(BranchType.AT); // 分支事务类型
+request.setResourceId("jdbc:mysql://localhost:3306/test"); // 资源ID
+request.setLockKey("order:1"); // 锁定的资源
+
+BranchRegisterResponse response = rmClient.branchRegister(request);
+if (response.getResultCode() == ResultCode.Success) {
+    System.out.println("分支事务注册成功，分支ID：" + response.getBranchId());
+}
+```
+
+:::note
+- `globalTransactionId` 是全局事务的唯一标识。
+- `BranchType` 指定分支事务的类型，如AT（自动补偿）或TCC（手动补偿）。
+- `ResourceId` 是资源的唯一标识，通常是数据库连接字符串。
+- `LockKey` 是RM需要锁定的资源，用于防止并发冲突。
+:::
+
+---
+
+### 2. 事务提交/回滚
+
+当全局事务进入提交或回滚阶段时，TC会向RM发送相应的指令。RM根据指令执行本地事务的提交或回滚操作。
+
+```java
+// 示例：RM根据TC指令提交或回滚分支事务
+BranchCommitRequest commitRequest = new BranchCommitRequest();
+commitRequest.setXid(globalTransactionId);
+commitRequest.setBranchId(branchId);
+
+BranchCommitResponse commitResponse = rmClient.branchCommit(commitRequest);
+if (commitResponse.getResultCode() == ResultCode.Success) {
+    System.out.println("分支事务提交成功");
+}
+
+BranchRollbackRequest rollbackRequest = new BranchRollbackRequest();
+rollbackRequest.setXid(globalTransactionId);
+rollbackRequest.setBranchId(branchId);
+
+BranchRollbackResponse rollbackResponse = rmClient.branchRollback(rollbackRequest);
+if (rollbackResponse.getResultCode() == ResultCode.Success) {
+    System.out.println("分支事务回滚成功");
+}
+```
+
+:::tip
+- 提交操作会执行本地事务的提交逻辑。
+- 回滚操作会根据事务类型（AT或TCC）执行相应的补偿逻辑。
+:::
+
+---
+
+### 3. 状态上报
+
+RM需要定期向TC上报本地事务的执行状态，以便TC能够及时了解全局事务的进展。
+
+```java
+// 示例：RM向TC上报分支事务状态
+BranchStatusReportRequest statusRequest = new BranchStatusReportRequest();
+statusRequest.setXid(globalTransactionId);
+statusRequest.setBranchId(branchId);
+statusRequest.setStatus(BranchStatus.PhaseOne_Done); // 状态
+
+BranchStatusReportResponse statusResponse = rmClient.branchStatusReport(statusRequest);
+if (statusResponse.getResultCode() == ResultCode.Success) {
+    System.out.println("状态上报成功");
+}
+```
+
+:::caution
+- 状态上报是确保全局事务一致性的重要机制。
+- 如果RM未能及时上报状态，TC可能会认为事务失败并触发回滚。
+:::
+
+---
+
+## 实际案例
+
+假设我们有一个电商系统，用户下单时需要同时更新订单表和库存表。以下是RM与TC交互的实际应用场景：
+
+1. **事务注册**：
+   - 订单服务RM向TC注册分支事务，锁定订单表。
+   - 库存服务RM向TC注册分支事务，锁定库存表。
+
+2. **事务提交/回滚**：
+   - 如果全局事务成功，TC通知订单服务和库存服务提交本地事务。
+   - 如果全局事务失败，TC通知订单服务和库存服务回滚本地事务。
+
+3. **状态上报**：
+   - 订单服务和库存服务定期向TC上报事务状态，确保全局事务的一致性。
+
+---
+
+## 总结
+
+通过本文的学习，你应该已经掌握了Seata中RM与TC的交互机制。以下是关键点总结：
+
+1. **事务注册**：RM向TC注册分支事务，告知TC参与全局事务的资源。
+2. **事务提交/回滚**：RM根据TC的指令执行本地事务的提交或回滚。
+3. **状态上报**：RM定期向TC上报事务状态，确保全局事务的一致性。
+
+---
+
+## 附加资源
+
+- [Seata官方文档](https://seata.io/zh-cn/docs/overview/what-is-seata.html)
+- [分布式事务原理与实践](https://example.com/distributed-transaction-guide)
+
+## 练习
+
+1. 编写一个简单的RM与TC交互的示例程序，模拟分支事务的注册、提交和回滚。
+2. 尝试在分布式系统中实现一个完整的Seata事务流程，并观察RM与TC的交互日志。

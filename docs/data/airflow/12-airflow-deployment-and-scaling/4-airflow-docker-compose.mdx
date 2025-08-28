@@ -1,0 +1,151 @@
+---
+title: Airflow Docker Compose
+description: "学习如何使用 Docker Compose 快速部署和扩展 Apache Airflow，适合初学者的全面指南。"
+---
+
+# Airflow Docker Compose
+
+Apache Airflow 是一个强大的工作流管理平台，广泛用于数据管道的编排和调度。为了简化 Airflow 的部署和扩展，Docker Compose 是一个非常实用的工具。本文将带你逐步了解如何使用 Docker Compose 部署 Airflow，并展示其在实际场景中的应用。
+
+## 什么是 Docker Compose？
+
+Docker Compose 是一个用于定义和运行多容器 Docker 应用程序的工具。通过一个 `docker-compose.yml` 文件，你可以轻松地配置、启动和管理多个容器。对于 Airflow 来说，Docker Compose 可以帮助你快速搭建一个包含 Web 服务器、调度器、工作器和数据库的完整环境。
+
+## 为什么使用 Docker Compose 部署 Airflow？
+
+使用 Docker Compose 部署 Airflow 有以下几个优点：
+
+1. **快速启动**：只需一个命令即可启动所有服务。
+2. **环境一致性**：确保开发、测试和生产环境的一致性。
+3. **易于扩展**：可以根据需要轻松扩展工作器数量。
+4. **隔离性**：每个服务运行在独立的容器中，互不干扰。
+
+## 安装 Docker 和 Docker Compose
+
+在开始之前，请确保你已经安装了 Docker 和 Docker Compose。如果尚未安装，可以参考以下步骤：
+
+1. **安装 Docker**：访问 [Docker 官方网站](https://docs.docker.com/get-docker/) 并按照说明进行安装。
+2. **安装 Docker Compose**：Docker Compose 通常与 Docker 一起安装。你可以通过运行 `docker-compose --version` 来验证是否已安装。
+
+## 创建 `docker-compose.yml` 文件
+
+接下来，我们将创建一个 `docker-compose.yml` 文件来定义 Airflow 的服务。以下是一个基本的配置示例：
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+
+  webserver:
+    image: apache/airflow:2.5.1
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - ./dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    command: webserver
+    depends_on:
+      - postgres
+
+  scheduler:
+    image: apache/airflow:2.5.1
+    environment:
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    volumes:
+      - ./dags:/opt/airflow/dags
+    command: scheduler
+    depends_on:
+      - postgres
+
+volumes:
+  postgres-db-volume:
+```
+
+### 配置说明
+
+- **postgres**：使用 PostgreSQL 作为 Airflow 的元数据数据库。
+- **webserver**：运行 Airflow 的 Web 服务器，提供用户界面。
+- **scheduler**：运行 Airflow 的调度器，负责调度任务。
+- **volumes**：将本地目录挂载到容器中，以便持久化数据和 DAG 文件。
+
+## 启动 Airflow
+
+在 `docker-compose.yml` 文件所在的目录中，运行以下命令启动 Airflow：
+
+```bash
+docker-compose up -d
+```
+
+这将启动所有定义的服务。你可以通过访问 `http://localhost:8080` 来查看 Airflow 的 Web 界面。
+
+## 实际应用场景
+
+假设你有一个数据管道，需要每天从多个数据源提取数据，进行转换后加载到数据仓库中。你可以使用 Airflow 来编排这个流程，并通过 Docker Compose 快速部署和扩展。
+
+### 示例 DAG
+
+以下是一个简单的 DAG 示例，用于每天执行数据提取任务：
+
+```python
+from airflow import DAG
+from airflow.operators.bash import BashOperator
+from datetime import datetime
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2023, 1, 1),
+}
+
+dag = DAG(
+    'data_pipeline',
+    default_args=default_args,
+    schedule_interval='@daily',
+)
+
+extract_data = BashOperator(
+    task_id='extract_data',
+    bash_command='echo "Extracting data..."',
+    dag=dag,
+)
+
+transform_data = BashOperator(
+    task_id='transform_data',
+    bash_command='echo "Transforming data..."',
+    dag=dag,
+)
+
+load_data = BashOperator(
+    task_id='load_data',
+    bash_command='echo "Loading data..."',
+    dag=dag,
+)
+
+extract_data >> transform_data >> load_data
+```
+
+将此 DAG 文件保存到 `./dags` 目录中，Airflow 将自动加载并调度该任务。
+
+## 总结
+
+通过 Docker Compose，你可以轻松地部署和管理 Apache Airflow。本文介绍了如何使用 Docker Compose 快速搭建 Airflow 环境，并展示了一个简单的 DAG 示例。希望这篇指南能帮助你更好地理解和使用 Airflow。
+
+## 附加资源
+
+- [Apache Airflow 官方文档](https://airflow.apache.org/docs/)
+- [Docker Compose 官方文档](https://docs.docker.com/compose/)
+- [Airflow Docker 镜像](https://hub.docker.com/r/apache/airflow)
+
+:::tip
+练习：尝试修改 `docker-compose.yml` 文件，增加一个工作器（worker）服务，并使用 CeleryExecutor 来扩展 Airflow 的并行处理能力。
+:::

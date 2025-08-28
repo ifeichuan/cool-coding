@@ -1,0 +1,104 @@
+---
+title: ELK栈集成
+description: "学习如何将Zipkin与ELK（Elasticsearch、Logstash、Kibana）栈集成，实现分布式追踪与日志分析的统一可观测性解决方案。"
+---
+
+# ELK栈集成
+
+## 介绍
+
+在微服务架构中，Zipkin作为分布式追踪工具，能够帮助开发者可视化请求链路。而ELK栈（Elasticsearch、Logstash、Kibana）则是日志收集、存储和分析的经典组合。将两者集成，可以实现**追踪数据与日志的关联分析**，进一步提升故障排查效率。
+
+:::tip 为什么需要集成？
+- **数据关联**：通过Trace ID将日志与追踪数据关联。
+- **统一视图**：在Kibana中同时查看日志和链路信息。
+- **增强分析**：结合日志上下文分析链路异常。
+:::
+
+---
+
+## 集成方案
+
+### 1. 数据流设计
+Zipkin的追踪数据（JSON格式）可以通过Logstash转发到Elasticsearch，最终由Kibana展示。
+
+```mermaid
+flowchart LR
+    Zipkin -->|导出JSON| Logstash -->|索引数据| Elasticsearch --> Kibana
+```
+
+### 2. 配置Zipkin数据导出
+Zipkin支持通过`STORAGE_TYPE=elasticsearch`直接写入Elasticsearch，但通过Logstash可以更灵活地处理数据。
+
+**示例：启动Zipkin时启用Elasticsearch存储**
+```bash
+# 使用Docker启动Zipkin并连接Elasticsearch
+docker run -d \
+  -e STORAGE_TYPE=elasticsearch \
+  -e ES_HOSTS=http://elasticsearch:9200 \
+  -p 9411:9411 \
+  openzipkin/zipkin
+```
+
+### 3. Logstash管道配置
+创建一个Logstash配置文件（如`zipkin-to-es.conf`），处理Zipkin的JSON数据：
+
+```ruby
+input {
+  http {
+    port => 9411
+    codec => json
+  }
+}
+filter {
+  mutate {
+    rename => {
+      "traceId" => "[trace][id]"
+      "id" => "[span][id]"
+    }
+  }
+}
+output {
+  elasticsearch {
+    hosts => ["http://elasticsearch:9200"]
+    index => "zipkin-%{+YYYY.MM.dd}"
+  }
+}
+```
+
+:::note 字段映射
+- 将Zipkin的`traceId`映射为Elasticsearch兼容的`trace.id`字段。
+- 确保时间戳字段被正确解析。
+:::
+
+---
+
+## 实际案例：错误排查
+
+### 场景描述
+用户提交订单失败，但仅通过日志无法确定是哪个微服务超时。
+
+### 解决方案
+1. **在Kibana中搜索错误日志**，找到对应的`trace_id`。
+2. **通过`trace_id`在Zipkin中查询链路**，发现`payment-service`存在延迟。
+3. **关联分析**：在Elasticsearch中过滤该`trace_id`的所有日志，确认是数据库连接池耗尽。
+
+---
+
+## 总结
+
+通过ELK栈集成，Zipkin的追踪数据获得了：
+- **长期存储**：Elasticsearch替代Zipkin默认的内存存储。
+- **全文检索**：利用Kibana的搜索能力快速定位问题。
+- **上下文扩展**：结合日志补充链路信息。
+
+---
+
+## 延伸练习
+1. 使用Docker Compose部署Zipkin + ELK栈。
+2. 在Kibana中创建包含`trace_id`字段的日志仪表盘。
+3. 尝试通过Logstash将业务日志与Zipkin数据索引到同一Elasticsearch集群。
+
+## 附加资源
+- [Zipkin Elasticsearch存储文档](https://zipkin.io/zipkin/2.23/storage/elasticsearch/)
+- [Logstash HTTP输入插件配置](https://www.elastic.co/guide/en/logstash/current/plugins-inputs-http.html)

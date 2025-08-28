@@ -1,0 +1,170 @@
+---
+title: Jaeger 健康检查使用指南
+description: "学习如何使用Jaeger的健康检查功能来监控和诊断分布式追踪系统的运行状态。"
+---
+
+# Jaeger 健康检查使用
+
+## 介绍
+
+健康检查(Health Check)是监控分布式系统组件可用性的基础机制。在Jaeger中，健康检查接口可以帮助运维人员快速判断服务是否正常运行。本文将详细介绍Jaeger健康检查的使用方法和实际应用场景。
+
+Jaeger提供了标准的HTTP健康检查端点，通过简单的HTTP请求即可获取服务的健康状态。这对于容器化部署、负载均衡和自动化运维特别有用。
+
+:::tip 为什么需要健康检查？
+- 自动化部署时判断服务是否就绪
+- Kubernetes等编排系统的存活/就绪探针
+- 负载均衡器剔除不健康节点
+- 快速诊断服务问题
+:::
+
+## 健康检查端点
+
+Jaeger组件默认暴露的健康检查端点如下：
+
+| 组件        | 默认端点                   |
+|------------|---------------------------|
+| Collector  | `/` 或 `/health`          |
+| Query      | `/` 或 `/health`          |
+| Agent      | `/` 或 `/health`          |
+
+### 基本使用
+
+使用`curl`检查Jaeger Query服务的健康状态：
+
+```bash
+curl http://jaeger-query:16686/health
+```
+
+正常响应示例：
+```json
+{
+  "status": "UP",
+  "components": {
+    "jaeger": {
+      "status": "UP",
+      "details": {
+        "CollectorConnected": true
+      }
+    }
+  }
+}
+```
+
+异常响应示例（当连接不到存储后端时）：
+```json
+{
+  "status": "DOWN",
+  "components": {
+    "jaeger": {
+      "status": "DOWN",
+      "details": {
+        "error": "storage error: cannot connect to Cassandra"
+      }
+    }
+  }
+}
+```
+
+## 健康状态详解
+
+Jaeger的健康检查返回JSON格式的响应，包含以下关键信息：
+
+1. **总体状态(status)**:
+   - `UP`: 服务健康
+   - `DOWN`: 服务不可用
+
+2. **组件状态(components)**:
+   - 详细列出各子系统的状态
+   - 可能包含依赖服务的连接状态
+
+3. **详情(details)**:
+   - 提供具体错误信息（当状态为DOWN时）
+
+## 实际应用案例
+
+### 案例1：Kubernetes就绪探针配置
+
+在Kubernetes部署中，可以使用健康检查端点配置就绪探针：
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 16686
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+### 案例2：自动化部署验证
+
+在CI/CD流水线中，部署后可以添加健康检查验证：
+
+```bash
+#!/bin/bash
+RETRY=0
+MAX_RETRIES=10
+while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://jaeger-query:16686/health)" != "200" ]]; do
+  if [ $RETRY -eq $MAX_RETRIES ]; then
+    echo "Jaeger服务健康检查失败"
+    exit 1
+  fi
+  echo "等待Jaeger服务就绪... ($((RETRY+1))/$MAX_RETRIES)"
+  sleep 5
+  RETRY=$((RETRY+1))
+done
+echo "Jaeger服务健康检查通过"
+```
+
+## 高级配置
+
+### 自定义健康检查端点
+
+可以通过Jaeger的配置参数修改健康检查端点：
+
+```yaml
+# collector.yaml
+health-check-http-path: /custom-health
+```
+
+### 依赖项检查
+
+Jaeger的健康检查会验证关键依赖项（如存储后端）的连接状态。如果使用Cassandra存储，健康检查会包含存储连接状态。
+
+## 故障排除
+
+常见健康检查问题及解决方案：
+
+:::warning 健康检查返回DOWN状态
+1. **存储连接问题**:
+   - 检查存储后端（Cassandra/Elasticsearch）是否可访问
+   - 验证存储配置参数是否正确
+
+2. **端口冲突**:
+   - 确认健康检查端口未被占用
+   - 检查防火墙设置
+
+3. **服务未完全启动**:
+   - 等待服务完全初始化
+   - 增加健康检查的重试间隔
+:::
+
+## 总结
+
+Jaeger的健康检查功能为系统监控提供了简单而强大的工具。通过本文，你应该已经了解：
+
+- 如何访问Jaeger的健康检查端点
+- 如何解读健康检查响应
+- 在实际环境中应用健康检查的方法
+- 常见问题的解决方案
+
+## 延伸学习
+
+1. 尝试为你的Jaeger部署配置Kubernetes健康探针
+2. 编写脚本定期检查Jaeger健康状态并发送告警
+3. 研究Jaeger健康检查的源码实现（位于`pkg/healthcheck`目录）
+
+:::note 附加资源
+- [Jaeger官方文档](https://www.jaegertracing.io/docs/)
+- [Kubernetes探针配置指南](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+:::

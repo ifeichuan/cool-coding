@@ -1,0 +1,197 @@
+---
+title: Elasticsearch 时序数据建模
+description: 了解如何在Elasticsearch中为时序数据设计高效的数据模型，包括基本概念、实际案例和代码示例。
+---
+
+# Elasticsearch 时序数据建模
+
+时序数据（Time Series Data）是指按时间顺序记录的数据点集合，通常用于监控、日志记录、传感器数据等场景。Elasticsearch 是一个强大的分布式搜索引擎，特别适合存储和查询时序数据。本文将介绍如何在 Elasticsearch 中为时序数据设计高效的数据模型。
+
+## 什么是时序数据？
+
+时序数据是按时间顺序排列的数据点集合。每个数据点通常包含一个时间戳和一个或多个值。例如，温度传感器的读数、股票价格、网站访问量等都可以被视为时序数据。
+
+:::note
+时序数据的特点：
+- 数据按时间顺序排列。
+- 数据量通常非常大。
+- 查询通常基于时间范围。
+:::
+
+## Elasticsearch 中的时序数据建模
+
+在 Elasticsearch 中，时序数据建模的关键是设计一个能够高效存储和查询数据的索引结构。以下是建模时序数据时需要考虑的几个关键点：
+
+### 1. 时间戳字段
+
+时序数据的核心是时间戳。在 Elasticsearch 中，通常会将时间戳字段设置为 `date` 类型。例如：
+
+```json
+{
+  "mappings": {
+    "properties": {
+      "timestamp": {
+        "type": "date"
+      },
+      "value": {
+        "type": "float"
+      }
+    }
+  }
+}
+```
+
+### 2. 索引命名策略
+
+为了高效管理时序数据，通常会将数据按时间分片存储在不同的索引中。例如，可以按天、周或月创建索引。这种策略称为**索引生命周期管理（ILM）**。
+
+```json
+PUT /logs-2023-10-01
+{
+  "mappings": {
+    "properties": {
+      "timestamp": {
+        "type": "date"
+      },
+      "value": {
+        "type": "float"
+      }
+    }
+  }
+}
+```
+
+### 3. 数据压缩与聚合
+
+时序数据通常具有高重复性，因此可以通过压缩和聚合来减少存储空间和提高查询性能。Elasticsearch 提供了多种聚合功能，如 `date_histogram`、`avg` 等。
+
+```json
+GET /logs-*/_search
+{
+  "size": 0,
+  "aggs": {
+    "per_hour": {
+      "date_histogram": {
+        "field": "timestamp",
+        "calendar_interval": "hour"
+      },
+      "aggs": {
+        "avg_value": {
+          "avg": {
+            "field": "value"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### 4. 使用 Rollup 进行数据汇总
+
+对于历史数据，可以使用 Elasticsearch 的 Rollup 功能将原始数据汇总为更粗粒度的数据，以减少存储空间并提高查询性能。
+
+```json
+PUT _rollup/job/metrics
+{
+  "index_pattern": "metrics-*",
+  "rollup_index": "metrics_rollup",
+  "cron": "0 */30 * * * ?",
+  "page_size": 1000,
+  "groups": {
+    "date_histogram": {
+      "field": "timestamp",
+      "fixed_interval": "1h"
+    }
+  },
+  "metrics": [
+    {
+      "field": "value",
+      "metrics": ["min", "max", "sum", "avg"]
+    }
+  ]
+}
+```
+
+## 实际案例：监控系统
+
+假设我们正在构建一个监控系统，需要记录服务器的 CPU 使用率。我们可以使用 Elasticsearch 来存储和查询这些时序数据。
+
+### 数据模型设计
+
+```json
+PUT /cpu_metrics-2023-10-01
+{
+  "mappings": {
+    "properties": {
+      "timestamp": {
+        "type": "date"
+      },
+      "host": {
+        "type": "keyword"
+      },
+      "cpu_usage": {
+        "type": "float"
+      }
+    }
+  }
+}
+```
+
+### 插入数据
+
+```json
+POST /cpu_metrics-2023-10-01/_doc
+{
+  "timestamp": "2023-10-01T12:00:00Z",
+  "host": "server1",
+  "cpu_usage": 75.5
+}
+```
+
+### 查询数据
+
+```json
+GET /cpu_metrics-*/_search
+{
+  "query": {
+    "range": {
+      "timestamp": {
+        "gte": "2023-10-01T00:00:00Z",
+        "lte": "2023-10-01T23:59:59Z"
+      }
+    }
+  },
+  "aggs": {
+    "per_hour": {
+      "date_histogram": {
+        "field": "timestamp",
+        "calendar_interval": "hour"
+      },
+      "aggs": {
+        "avg_cpu_usage": {
+          "avg": {
+            "field": "cpu_usage"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## 总结
+
+在 Elasticsearch 中建模时序数据时，关键是要设计一个能够高效存储和查询数据的索引结构。通过合理使用时间戳字段、索引命名策略、数据压缩与聚合以及 Rollup 功能，可以显著提高时序数据的存储和查询效率。
+
+:::tip
+附加资源：
+- [Elasticsearch 官方文档](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
+- [Elasticsearch 时序数据最佳实践](https://www.elastic.co/blog/elasticsearch-time-series-data)
+:::
+
+:::caution
+练习：
+1. 尝试为你的项目设计一个时序数据模型。
+2. 使用 Elasticsearch 的 Rollup 功能对历史数据进行汇总。
+:::

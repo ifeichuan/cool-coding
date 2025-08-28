@@ -1,0 +1,133 @@
+---
+title: RabbitMQ 故障排查
+description: 学习如何排查RabbitMQ中的常见问题，确保消息队列的稳定运行。本文适合初学者，涵盖故障排查的基本步骤、工具和实际案例。
+---
+
+# RabbitMQ 故障排查
+
+RabbitMQ 是一个广泛使用的消息队列系统，用于在分布式系统中传递消息。然而，在实际使用中，可能会遇到各种问题，例如消息丢失、队列阻塞、节点崩溃等。本文将介绍如何排查 RabbitMQ 中的常见故障，并提供一些实用的工具和技巧。
+
+## 1. 故障排查的基本步骤
+
+### 1.1 检查 RabbitMQ 日志
+
+RabbitMQ 的日志是排查问题的第一手资料。默认情况下，日志文件位于 `/var/log/rabbitmq/` 目录下。你可以通过以下命令查看日志：
+
+```bash
+tail -f /var/log/rabbitmq/rabbit@your-hostname.log
+```
+
+:::tip
+如果日志文件过大，可以使用 `grep` 命令过滤出关键信息。例如，查找错误信息：
+```bash
+grep "ERROR" /var/log/rabbitmq/rabbit@your-hostname.log
+```
+:::
+
+### 1.2 检查 RabbitMQ 状态
+
+使用 `rabbitmqctl` 命令可以检查 RabbitMQ 的状态。以下是一些常用的命令：
+
+- 查看节点状态：
+  ```bash
+  rabbitmqctl status
+  ```
+- 查看队列状态：
+  ```bash
+  rabbitmqctl list_queues
+  ```
+- 查看连接状态：
+  ```bash
+  rabbitmqctl list_connections
+  ```
+
+### 1.3 检查网络连接
+
+RabbitMQ 依赖于网络连接，因此网络问题可能导致消息传递失败。你可以使用 `ping` 或 `telnet` 命令检查网络连接是否正常：
+
+```bash
+ping your-rabbitmq-host
+telnet your-rabbitmq-host 5672
+```
+
+:::caution
+如果 `telnet` 连接失败，可能是防火墙或网络配置问题。请确保端口 `5672`（AMQP 默认端口）和 `15672`（管理界面端口）是开放的。
+:::
+
+## 2. 常见故障及解决方案
+
+### 2.1 消息丢失
+
+消息丢失是 RabbitMQ 中最常见的问题之一。可能的原因包括：
+
+- **消息未持久化**：如果消息未设置为持久化，RabbitMQ 重启后消息会丢失。确保在发布消息时设置 `delivery_mode` 为 `2`：
+  ```python
+  channel.basic_publish(exchange='',
+                        routing_key='your_queue',
+                        body='Hello World!',
+                        properties=pika.BasicProperties(
+                            delivery_mode=2,  # 使消息持久化
+                        ))
+  ```
+
+- **消费者未确认消息**：如果消费者在处理消息时崩溃，且未发送确认（ACK），消息可能会被重新排队或丢失。确保消费者正确处理消息并发送 ACK：
+  ```python
+  def callback(ch, method, properties, body):
+      try:
+          # 处理消息
+          print("Received:", body)
+          ch.basic_ack(delivery_tag=method.delivery_tag)  # 发送 ACK
+      except Exception as e:
+          print("Error:", e)
+          ch.basic_nack(delivery_tag=method.delivery_tag)  # 发送 NACK
+  ```
+
+### 2.2 队列阻塞
+
+队列阻塞通常是由于消费者处理速度过慢或消息积压导致的。你可以通过以下步骤排查：
+
+- **查看队列长度**：使用 `rabbitmqctl list_queues` 查看队列中的消息数量。
+- **增加消费者**：如果队列积压严重，可以增加消费者以提高处理速度。
+- **设置队列最大长度**：可以通过设置队列的最大长度来防止消息无限积压：
+  ```bash
+  rabbitmqctl set_policy max-length "your_queue" '{"max-length":1000}' --apply-to queues
+  ```
+
+### 2.3 节点崩溃
+
+RabbitMQ 节点崩溃可能是由于内存不足、磁盘空间不足或配置错误导致的。你可以通过以下步骤排查：
+
+- **检查内存和磁盘使用情况**：使用 `free -m` 和 `df -h` 命令检查系统资源。
+- **调整内存和磁盘阈值**：RabbitMQ 默认的内存和磁盘阈值分别为 40% 和 50MB。你可以通过以下命令调整：
+  ```bash
+  rabbitmqctl set_vm_memory_high_watermark 0.6  # 设置内存阈值为 60%
+  rabbitmqctl set_disk_free_limit 1GB  # 设置磁盘阈值为 1GB
+  ```
+
+## 3. 实际案例
+
+### 案例 1：消息丢失
+
+某公司的 RabbitMQ 集群在重启后丢失了大量消息。经过排查，发现消息未设置为持久化。解决方案是在发布消息时设置 `delivery_mode` 为 `2`，并确保队列和交换机都是持久化的。
+
+### 案例 2：队列阻塞
+
+某电商网站在促销活动期间，订单队列积压了数十万条消息，导致消费者处理速度过慢。解决方案是增加消费者数量，并设置队列的最大长度，防止消息无限积压。
+
+## 4. 总结
+
+RabbitMQ 故障排查是确保消息队列稳定运行的重要环节。通过检查日志、状态和网络连接，可以快速定位问题。常见的故障包括消息丢失、队列阻塞和节点崩溃，通过合理的配置和优化，可以有效避免这些问题。
+
+## 5. 附加资源
+
+- [RabbitMQ 官方文档](https://www.rabbitmq.com/documentation.html)
+- [RabbitMQ 故障排查指南](https://www.rabbitmq.com/troubleshooting.html)
+- [RabbitMQ 管理界面使用指南](https://www.rabbitmq.com/management.html)
+
+## 6. 练习
+
+1. 在你的 RabbitMQ 集群中模拟消息丢失的场景，并尝试通过设置消息持久化来解决。
+2. 使用 `rabbitmqctl` 命令查看队列状态，并尝试增加消费者以提高处理速度。
+3. 调整 RabbitMQ 的内存和磁盘阈值，观察系统资源使用情况的变化。
+
+通过以上练习，你将更好地掌握 RabbitMQ 故障排查的技巧。

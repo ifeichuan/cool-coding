@@ -1,0 +1,122 @@
+---
+title: LogQL解析表达式
+description: 学习如何使用Grafana Loki的LogQL解析表达式提取和转换日志数据，适合初学者的详细指南。
+---
+
+# LogQL解析表达式
+
+LogQL是Grafana Loki的查询语言，类似于PromQL，但专为日志设计。**解析表达式**是LogQL的核心功能之一，允许你从原始日志行中提取结构化数据，进行过滤、转换和聚合。本文将逐步介绍解析表达式的语法、常见模式及实际应用。
+
+---
+
+## 1. 解析表达式基础
+
+解析表达式通过**解析器**（Parser）从非结构化的日志中提取字段。常用解析器包括：
+- `pattern`：基于预定义模式提取字段
+- `json`：解析JSON格式日志
+- `logfmt`：解析键值对格式（如 `key=value`）
+- `regexp`：使用正则表达式提取
+
+### 示例1：`json`解析器
+假设日志行如下：
+```json
+{"level":"error","message":"Failed to connect to DB","time":"2023-01-01T12:00:00Z"}
+```
+
+使用`json`解析器提取字段：
+```logql
+{job="myapp"} | json
+```
+输出结果将自动解构为可查询的标签：
+- `level="error"`
+- `message="Failed to connect to DB"`
+
+---
+
+## 2. 逐步解析
+
+### 步骤1：选择日志流
+```logql
+{job="nginx"} 
+```
+
+### 步骤2：应用解析器
+```logql
+{job="nginx"} | logfmt 
+```
+提取`logfmt`格式的键值对（如 `method=GET path=/ status=200`）。
+
+### 步骤3：过滤和转换
+```logql
+{job="nginx"} 
+  | logfmt 
+  | status >= 400 
+  | line_format "{{.method}} {{.path}} failed: {{.status}}"
+```
+
+---
+
+## 3. 实际案例
+
+### 案例：分析Nginx错误日志
+原始日志：
+```
+192.168.1.1 - - [01/Jan/2023:12:00:00 +0000] "GET /api/users HTTP/1.1" 500 1024
+```
+
+查询：
+```logql
+{job="nginx"} 
+  | regexp `^(?P<ip>\\S+) .*?\$$(?P<timestamp>[^\$$]+)\$$ "(?P<method>\\S+) (?P<path>\\S+).*?" (?P<status>\\d+)`
+  | status = 500
+  | line_format "IP {{.ip}} 访问 {{.path}} 时失败"
+```
+
+输出：
+```
+IP 192.168.1.1 访问 /api/users 时失败
+```
+
+:::tip 正则表达式提示
+使用命名捕获组（如`?P<name>`）将匹配内容转换为标签。
+:::
+
+---
+
+## 4. 高级解析技巧
+
+### 组合解析器
+```logql
+{job="docker"} 
+  | json 
+  | message=`.*error.*` 
+  | pattern "<level> <message>"
+```
+
+### 使用`unpack`展开嵌套JSON
+```logql
+{job="k8s"} 
+  | json 
+  | unpack 
+  | kubernetes_pod_name="frontend-*"
+```
+
+---
+
+## 5. 总结与练习
+
+### 关键点总结
+- **解析器选择**：根据日志格式选择`json`、`logfmt`或`regexp`。
+- **流水线操作**：支持多阶段过滤和转换。
+- **性能优化**：优先使用`logfmt`或`json`，正则表达式开销较大。
+
+### 练习建议
+1. 尝试从以下日志中提取`user_id`和`duration_ms`：
+   ```
+   level=info user_id=123 duration_ms=150
+   ```
+2. 编写查询，统计HTTP状态码的分布。
+
+### 进一步学习
+- [Loki官方文档](https://grafana.com/docs/loki/latest/logql/)
+- 实践Grafana Explore中的LogQL查询自动补全功能。

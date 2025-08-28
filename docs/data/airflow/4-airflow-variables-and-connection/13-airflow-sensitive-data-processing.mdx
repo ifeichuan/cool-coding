@@ -1,0 +1,153 @@
+---
+title: Airflow 敏感数据处理
+description: 了解如何在 Apache Airflow 中安全地处理敏感数据，包括变量、连接和加密的最佳实践。
+---
+
+# Airflow 敏感数据处理
+
+在 Apache Airflow 中，敏感数据处理是一个关键的安全问题。无论是数据库连接信息、API 密钥，还是其他敏感数据，都需要以安全的方式存储和访问。本文将介绍如何在 Airflow 中处理敏感数据，包括使用变量（Variables）和连接（Connections）的最佳实践。
+
+## 什么是敏感数据？
+
+敏感数据是指任何需要保护以防止未经授权访问的信息。在 Airflow 中，常见的敏感数据包括：
+
+- 数据库连接字符串
+- API 密钥
+- 用户名和密码
+- 加密密钥
+
+## 使用 Airflow 变量存储敏感数据
+
+Airflow 提供了 `Variables` 功能，允许你存储和检索键值对。虽然变量可以用于存储任何类型的数据，但在处理敏感数据时，需要特别注意。
+
+### 创建加密变量
+
+Airflow 支持使用 Fernet 加密来保护敏感数据。首先，你需要生成一个 Fernet 密钥，并将其配置到 Airflow 中。
+
+```bash
+# 生成 Fernet 密钥
+fernet_key=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+echo $fernet_key
+```
+
+将生成的密钥添加到 `airflow.cfg` 文件中：
+
+```ini
+[core]
+fernet_key = your_generated_fernet_key
+```
+
+### 存储加密变量
+
+在 Airflow UI 或命令行中，你可以创建加密变量：
+
+```bash
+airflow variables set my_secret_key "sensitive_data"
+```
+
+### 访问加密变量
+
+在 DAG 中，你可以通过以下方式访问加密变量：
+
+```python
+from airflow.models import Variable
+
+secret_value = Variable.get("my_secret_key")
+print(secret_value)
+```
+
+## 使用 Airflow 连接存储敏感数据
+
+Airflow 的 `Connections` 功能用于存储和管理外部系统的连接信息。与变量类似，连接信息也可以加密存储。
+
+### 创建加密连接
+
+在 Airflow UI 中，你可以通过以下步骤创建加密连接：
+
+1. 导航到 **Admin > Connections**。
+2. 点击 **Create** 按钮。
+3. 填写连接信息，包括 `Conn Id`、`Conn Type`、`Host`、`Login`、`Password` 等。
+4. 点击 **Save** 按钮。
+
+### 访问加密连接
+
+在 DAG 中，你可以通过以下方式访问加密连接：
+
+```python
+from airflow.hooks.base_hook import BaseHook
+
+connection = BaseHook.get_connection("my_connection_id")
+print(connection.host)
+print(connection.login)
+print(connection.password)
+```
+
+## 实际案例：保护数据库连接信息
+
+假设你有一个 DAG，需要连接到 PostgreSQL 数据库。为了保护数据库连接信息，你可以使用 Airflow 的加密连接功能。
+
+### 创建 PostgreSQL 连接
+
+1. 在 Airflow UI 中，导航到 **Admin > Connections**。
+2. 创建一个新的连接，填写以下信息：
+   - Conn Id: `my_postgres_conn`
+   - Conn Type: `Postgres`
+   - Host: `my_postgres_host`
+   - Schema: `my_database`
+   - Login: `my_username`
+   - Password: `my_password`
+   - Port: `5432`
+
+### 在 DAG 中使用加密连接
+
+```python
+from airflow import DAG
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime
+
+def query_postgres():
+    hook = PostgresHook(postgres_conn_id="my_postgres_conn")
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM my_table")
+    results = cursor.fetchall()
+    for row in results:
+        print(row)
+
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2023, 1, 1),
+}
+
+with DAG('postgres_example', default_args=default_args, schedule_interval='@daily') as dag:
+    run_query = PythonOperator(
+        task_id='run_query',
+        python_callable=query_postgres,
+    )
+```
+
+## 总结
+
+在 Apache Airflow 中处理敏感数据时，使用加密变量和连接是保护数据安全的关键。通过本文的介绍，你应该已经掌握了如何在 Airflow 中安全地存储和访问敏感数据。
+
+:::tip
+**最佳实践：**
+- 定期轮换 Fernet 密钥。
+- 使用最小权限原则，确保只有必要的用户和系统可以访问敏感数据。
+- 定期审查和更新连接信息。
+:::
+
+## 附加资源
+
+- [Airflow 官方文档 - Variables](https://airflow.apache.org/docs/apache-airflow/stable/concepts/variables.html)
+- [Airflow 官方文档 - Connections](https://airflow.apache.org/docs/apache-airflow/stable/concepts/connections.html)
+- [Airflow 官方文档 - Security](https://airflow.apache.org/docs/apache-airflow/stable/security.html)
+
+## 练习
+
+1. 生成一个新的 Fernet 密钥，并将其配置到你的 Airflow 环境中。
+2. 创建一个加密变量，并在 DAG 中访问它。
+3. 创建一个加密的 PostgreSQL 连接，并在 DAG 中使用它执行查询。
+
+通过完成这些练习，你将更深入地理解如何在 Airflow 中安全地处理敏感数据。

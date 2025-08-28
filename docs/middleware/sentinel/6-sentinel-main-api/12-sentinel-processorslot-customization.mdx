@@ -1,0 +1,152 @@
+---
+title: Sentinel ProcessorSlot 自定义
+description: 了解如何自定义 Sentinel 的 ProcessorSlot，以实现更灵活的流量控制和资源保护。
+---
+
+## 介绍
+
+Sentinel 是阿里巴巴开源的一款轻量级流量控制组件，广泛用于微服务架构中。Sentinel 的核心功能之一是 **ProcessorSlot**，它是 Sentinel 处理链中的一个关键组件，负责执行各种流量控制规则（如限流、熔断、系统保护等）。通过自定义 ProcessorSlot，开发者可以根据业务需求扩展 Sentinel 的功能，实现更灵活的流量控制策略。
+
+本文将逐步讲解如何自定义 ProcessorSlot，并通过实际案例展示其应用场景。
+
+---
+
+## ProcessorSlot 的基本概念
+
+在 Sentinel 中，ProcessorSlot 是处理链中的一个节点，每个节点负责执行特定的逻辑。Sentinel 默认提供了一系列 ProcessorSlot，例如：
+
+- `NodeSelectorSlot`：负责选择资源节点。
+- `ClusterBuilderSlot`：负责构建集群节点。
+- `StatisticSlot`：负责统计资源调用的指标。
+- `FlowSlot`：负责流量控制。
+- `DegradeSlot`：负责熔断降级。
+
+开发者可以通过自定义 ProcessorSlot 来扩展 Sentinel 的功能，例如添加自定义的流量控制逻辑或监控指标。
+
+---
+
+## 自定义 ProcessorSlot 的步骤
+
+### 1. 实现 `ProcessorSlot` 接口
+
+要自定义 ProcessorSlot，首先需要实现 `com.alibaba.csp.sentinel.slotchain.ProcessorSlot` 接口。该接口定义了两个方法：
+
+- `entry`：在资源进入时调用。
+- `exit`：在资源退出时调用。
+
+以下是一个简单的自定义 ProcessorSlot 示例：
+
+```java
+import com.alibaba.csp.sentinel.context.Context;
+import com.alibaba.csp.sentinel.slotchain.AbstractLinkedProcessorSlot;
+import com.alibaba.csp.sentinel.slotchain.ResourceWrapper;
+
+public class CustomProcessorSlot extends AbstractLinkedProcessorSlot<Object> {
+
+    @Override
+    public void entry(Context context, ResourceWrapper resourceWrapper, Object param, int count, boolean prioritized, Object... args) throws Throwable {
+        // 自定义逻辑：在资源进入时执行
+        System.out.println("CustomProcessorSlot: Entry for resource " + resourceWrapper.getName());
+        // 调用下一个 ProcessorSlot
+        fireEntry(context, resourceWrapper, param, count, prioritized, args);
+    }
+
+    @Override
+    public void exit(Context context, ResourceWrapper resourceWrapper, int count, Object... args) {
+        // 自定义逻辑：在资源退出时执行
+        System.out.println("CustomProcessorSlot: Exit for resource " + resourceWrapper.getName());
+        // 调用下一个 ProcessorSlot
+        fireExit(context, resourceWrapper, count, args);
+    }
+}
+```
+
+:::tip
+`AbstractLinkedProcessorSlot` 是 `ProcessorSlot` 的一个抽象实现类，提供了 `fireEntry` 和 `fireExit` 方法，用于调用下一个 ProcessorSlot。建议直接继承此类以简化开发。
+:::
+
+### 2. 注册自定义 ProcessorSlot
+
+自定义 ProcessorSlot 完成后，需要将其注册到 Sentinel 的处理链中。可以通过以下方式实现：
+
+```java
+import com.alibaba.csp.sentinel.slotchain.SlotChainBuilder;
+import com.alibaba.csp.sentinel.slotchain.ProcessorSlotChain;
+import com.alibaba.csp.sentinel.slots.DefaultSlotChainBuilder;
+
+public class CustomSlotChainBuilder implements SlotChainBuilder {
+
+    @Override
+    public ProcessorSlotChain build() {
+        ProcessorSlotChain chain = new DefaultSlotChainBuilder().build();
+        // 将自定义 ProcessorSlot 添加到链中
+        chain.addLast(new CustomProcessorSlot());
+        return chain;
+    }
+}
+```
+
+然后，通过 SPI 机制将 `CustomSlotChainBuilder` 注册为 Sentinel 的默认 SlotChainBuilder：
+
+1. 在 `resources/META-INF/services` 目录下创建文件 `com.alibaba.csp.sentinel.slotchain.SlotChainBuilder`。
+2. 在文件中写入自定义 SlotChainBuilder 的全限定类名，例如：`com.example.CustomSlotChainBuilder`。
+
+---
+
+## 实际案例：自定义限流规则
+
+假设我们需要实现一个自定义的限流规则，当某个资源的调用频率超过阈值时，记录日志并拒绝请求。以下是实现步骤：
+
+### 1. 自定义 ProcessorSlot
+
+```java
+public class CustomRateLimitSlot extends AbstractLinkedProcessorSlot<Object> {
+
+    private static final int RATE_LIMIT_THRESHOLD = 10; // 每秒最大请求数
+    private final AtomicInteger counter = new AtomicInteger(0);
+
+    @Override
+    public void entry(Context context, ResourceWrapper resourceWrapper, Object param, int count, boolean prioritized, Object... args) throws Throwable {
+        int currentCount = counter.incrementAndGet();
+        if (currentCount > RATE_LIMIT_THRESHOLD) {
+            // 超过阈值，记录日志并抛出异常
+            System.out.println("Rate limit exceeded for resource: " + resourceWrapper.getName());
+            throw new RuntimeException("Rate limit exceeded");
+        }
+        // 调用下一个 ProcessorSlot
+        fireEntry(context, resourceWrapper, param, count, prioritized, args);
+    }
+
+    @Override
+    public void exit(Context context, ResourceWrapper resourceWrapper, int count, Object... args) {
+        counter.decrementAndGet();
+        // 调用下一个 ProcessorSlot
+        fireExit(context, resourceWrapper, count, args);
+    }
+}
+```
+
+### 2. 注册自定义 ProcessorSlot
+
+按照前面的步骤，将 `CustomRateLimitSlot` 添加到处理链中。
+
+---
+
+## 总结
+
+通过自定义 ProcessorSlot，开发者可以灵活扩展 Sentinel 的功能，满足特定的业务需求。本文介绍了如何实现和注册自定义 ProcessorSlot，并通过一个实际案例展示了其应用场景。
+
+:::note
+自定义 ProcessorSlot 时，请确保逻辑简洁高效，避免影响系统性能。
+:::
+
+---
+
+## 附加资源与练习
+
+1. **练习**：尝试实现一个自定义 ProcessorSlot，用于统计某个资源的平均响应时间。
+2. **资源**：
+   - [Sentinel 官方文档](https://sentinelguard.io/)
+   - [Sentinel GitHub 仓库](https://github.com/alibaba/Sentinel)
+
+通过实践和深入学习，您将更好地掌握 Sentinel 的高级功能！

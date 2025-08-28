@@ -1,0 +1,129 @@
+---
+title: Redis 分布式锁
+description: 了解Redis分布式锁的概念、实现方式及其在实际应用中的使用场景。
+---
+
+# Redis 分布式锁
+
+在现代分布式系统中，多个进程或服务可能需要同时访问共享资源。为了避免竞争条件和数据不一致问题，我们需要一种机制来确保同一时间只有一个进程可以访问这些资源。这就是**分布式锁**的用武之地。Redis作为一种高性能的内存数据库，常被用来实现分布式锁。
+
+## 什么是分布式锁？
+
+分布式锁是一种在分布式系统中用于协调多个进程或服务对共享资源的访问的机制。它的核心思想是确保在同一时间只有一个进程可以持有锁，从而避免资源冲突。
+
+### 为什么需要分布式锁？
+
+在单机环境中，我们可以使用线程锁（如Java中的`synchronized`或`ReentrantLock`）来确保线程安全。但在分布式系统中，多个服务可能运行在不同的机器上，传统的线程锁无法跨进程工作。因此，我们需要一种跨进程的锁机制，这就是分布式锁。
+
+## Redis 实现分布式锁
+
+Redis提供了多种实现分布式锁的方式，其中最常用的是基于`SET`命令的**Redlock算法**。下面我们将逐步讲解如何使用Redis实现分布式锁。
+
+### 使用`SET`命令实现分布式锁
+
+Redis的`SET`命令可以设置一个键值对，并且可以通过`NX`选项确保只有在键不存在时才会设置成功。我们可以利用这一特性来实现分布式锁。
+
+```bash
+SET lock_key unique_value NX PX 30000
+```
+
+- `lock_key`：锁的键名。
+- `unique_value`：一个唯一的值，用于标识锁的持有者。
+- `NX`：只有在键不存在时才会设置成功。
+- `PX 30000`：设置键的过期时间为30000毫秒（30秒）。
+
+如果命令执行成功，表示当前进程成功获取了锁；如果失败，则表示锁已被其他进程持有。
+
+### 释放锁
+
+释放锁时，我们需要确保只有锁的持有者才能释放它。可以通过以下步骤实现：
+
+1. 使用`GET`命令获取锁的值。
+2. 如果值与当前进程的唯一标识匹配，则使用`DEL`命令删除锁。
+
+```bash
+GET lock_key
+DEL lock_key
+```
+
+### 代码示例
+
+以下是一个使用Python和Redis实现分布式锁的简单示例：
+
+```python
+import redis
+import time
+import uuid
+
+# 连接Redis
+r = redis.Redis(host='localhost', port=6379, db=0)
+
+# 生成唯一标识
+lock_key = "resource_lock"
+unique_value = str(uuid.uuid4())
+
+# 尝试获取锁
+lock_acquired = r.set(lock_key, unique_value, nx=True, px=30000)
+
+if lock_acquired:
+    try:
+        # 执行业务逻辑
+        print("Lock acquired, processing...")
+        time.sleep(10)  # 模拟业务处理
+    finally:
+        # 释放锁
+        if r.get(lock_key) == unique_value:
+            r.delete(lock_key)
+            print("Lock released")
+else:
+    print("Failed to acquire lock")
+```
+
+### 输出示例
+
+如果成功获取锁，输出如下：
+
+```
+Lock acquired, processing...
+Lock released
+```
+
+如果获取锁失败，输出如下：
+
+```
+Failed to acquire lock
+```
+
+## 实际应用场景
+
+### 1. 订单处理系统
+
+在电商系统中，多个用户可能同时下单，为了避免超卖问题，可以使用分布式锁来确保同一时间只有一个订单处理进程在操作库存。
+
+### 2. 分布式任务调度
+
+在分布式任务调度系统中，多个调度器可能同时尝试执行同一个任务。使用分布式锁可以确保只有一个调度器执行任务，避免重复执行。
+
+### 3. 缓存更新
+
+在缓存更新场景中，多个服务可能同时尝试更新缓存。使用分布式锁可以确保缓存更新的原子性，避免缓存不一致问题。
+
+## 总结
+
+Redis分布式锁是一种简单而强大的机制，用于在分布式系统中协调多个进程对共享资源的访问。通过使用`SET`命令和唯一标识，我们可以轻松实现分布式锁，并在实际应用中解决资源竞争问题。
+
+:::tip
+在实际使用中，建议使用成熟的分布式锁库（如Redisson）来避免手动实现时可能遇到的边缘情况。
+:::
+
+## 附加资源
+
+- [Redis官方文档](https://redis.io/documentation)
+- [Redlock算法](https://redis.io/topics/distlock)
+- [Redisson分布式锁](https://github.com/redisson/redisson)
+
+## 练习
+
+1. 尝试在本地环境中运行上述Python代码，观察锁的获取和释放过程。
+2. 修改代码，模拟多个进程同时尝试获取锁的场景，观察锁的竞争情况。
+3. 研究Redlock算法，并尝试实现一个简单的Redlock分布式锁。

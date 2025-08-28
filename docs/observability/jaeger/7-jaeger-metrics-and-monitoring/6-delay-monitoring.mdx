@@ -1,0 +1,140 @@
+---
+title: 延迟监控
+description: 学习如何使用Jaeger进行分布式系统的延迟监控，理解延迟指标的重要性及其分析方法。
+---
+
+# 延迟监控
+
+## 介绍
+
+在分布式系统中，**延迟**（Latency）是指从请求发出到接收到响应所花费的时间。它是衡量系统性能的关键指标之一，直接影响用户体验和系统可靠性。通过Jaeger等分布式追踪工具，我们可以监控和分析延迟问题，从而优化系统性能。
+
+延迟监控的核心目标包括：
+- 识别高延迟的服务或接口
+- 定位性能瓶颈
+- 验证优化措施的效果
+
+## 为什么需要延迟监控？
+
+:::note 延迟的影响
+- 用户体验：高延迟会导致用户等待时间增加，降低满意度
+- 系统吞吐量：延迟增加可能引发请求堆积，最终导致系统崩溃
+- 业务指标：例如电商网站的延迟增加可能导致转化率下降
+:::
+
+## Jaeger 中的延迟指标
+
+Jaeger通过追踪（Traces）收集延迟数据，每个Span包含以下关键时间信息：
+- `startTime`：Span开始时间
+- `duration`：Span持续时间（即延迟）
+
+### 示例Trace结构
+
+```json
+{
+  "traceID": "abc123",
+  "spans": [
+    {
+      "spanID": "def456",
+      "operationName": "GET /api/users",
+      "startTime": 1620000000000,
+      "duration": 150,
+      "tags": [
+        {"key": "http.status_code", "value": 200}
+      ]
+    }
+  ]
+}
+```
+
+## 分析延迟数据
+
+### 1. 延迟直方图
+
+Jaeger UI提供了延迟分布的直方图视图，帮助您快速识别异常值：
+
+```mermaid
+barChart
+    title 延迟分布(ms)
+    xAxis 延迟区间
+    yAxis 请求数量
+    series
+        "请求数量": [50, 120, 30, 5, 2]
+    categories: ["0-100", "100-200", "200-300", "300-400", "400+"]
+```
+
+### 2. 关键延迟指标
+
+- **P50（中位数）**：50%的请求快于此值
+- **P95**：95%的请求快于此值（关注长尾）
+- **P99**：99%的请求快于此值（极端情况）
+
+## 代码示例：测量延迟
+
+以下是一个使用OpenTelemetry测量HTTP请求延迟的Node.js示例：
+
+```javascript
+const { trace } = require('@opentelemetry/api');
+const axios = require('axios');
+
+async function fetchUserData(userId) {
+  // 创建Span来追踪这个操作
+  const tracer = trace.getTracer('user-service');
+  return tracer.startActiveSpan('fetchUserData', async (span) => {
+    try {
+      const start = Date.now();
+      const response = await axios.get(`https://api.example.com/users/${userId}`);
+      
+      // 记录延迟
+      span.setAttribute('http.duration_ms', Date.now() - start);
+      span.setAttribute('http.status_code', response.status);
+      
+      return response.data;
+    } catch (error) {
+      span.recordException(error);
+      throw error;
+    } finally {
+      span.end();
+    }
+  });
+}
+```
+
+## 实际案例：电商网站延迟问题
+
+**场景**：用户反映结账页面加载缓慢。
+
+**分析步骤**：
+1. 在Jaeger中过滤`POST /checkout`操作
+2. 发现P99延迟高达2秒（正常应`<500ms`）
+3. 检查Trace发现：
+   - 支付服务调用耗时1.8秒
+   - 库存服务响应快速（200ms）
+4. 深入支付服务Trace，发现数据库查询是瓶颈
+
+**解决方案**：
+- 为支付服务的数据库查询添加索引
+- 实现查询缓存
+- 优化后P99延迟降至400ms
+
+## 总结
+
+延迟监控是分布式系统可观测性的重要组成部分。通过Jaeger：
+
+✓ 可视化服务延迟分布<br />
+✓ 识别性能瓶颈<br />
+✓ 验证优化效果<br />
+✓ 改善用户体验
+
+## 附加资源
+
+1. [Jaeger官方文档：性能分析](https://jaegertracing.io/docs/)
+2. [分布式系统性能优化实践](https://example.com/perf-guide)
+3. 练习：在本地环境中部署Jaeger，并测量一个简单API的延迟分布
+
+:::tip 进一步学习
+尝试在您的服务中添加自定义延迟指标，比如：
+- 数据库查询延迟
+- 外部API调用延迟
+- 关键业务逻辑执行时间
+:::

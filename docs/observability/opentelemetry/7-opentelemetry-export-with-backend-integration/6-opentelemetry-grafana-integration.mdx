@@ -1,0 +1,143 @@
+---
+title: OpenTelemetry Grafana集成
+description: 学习如何将OpenTelemetry数据导出并可视化到Grafana中，实现分布式系统的监控与分析。
+---
+
+# OpenTelemetry Grafana集成
+
+## 介绍
+
+OpenTelemetry是一个开源的观测性框架，用于生成、收集和导出遥测数据（如指标、日志和追踪）。Grafana则是一个流行的开源可视化工具，擅长将时序数据转换为直观的仪表盘。通过将两者集成，开发者可以实时监控应用程序性能并快速定位问题。
+
+本指南将逐步展示如何通过OpenTelemetry Collector将数据导出到Prometheus，并在Grafana中创建可视化仪表盘。
+
+---
+
+## 前置条件
+
+1. 已安装OpenTelemetry Collector（如`otelcol-contrib`）
+2. 运行中的Prometheus实例
+3. 已部署Grafana服务
+
+---
+
+## 步骤1：配置OpenTelemetry导出器
+
+首先修改OpenTelemetry Collector的配置文件（`otel-config.yaml`），添加Prometheus导出器：
+
+```yaml
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"  # Prometheus将从此端点拉取数据
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]  # 启用Prometheus导出
+```
+
+启动Collector时指定该配置文件：
+```bash
+otelcol-contrib --config=otel-config.yaml
+```
+
+:::tip
+使用`curl localhost:8889/metrics`验证数据是否成功导出。
+:::
+
+---
+
+## 步骤2：配置Prometheus数据源
+
+在Prometheus的`prometheus.yml`中添加OpenTelemetry的抓取目标：
+
+```yaml
+scrape_configs:
+  - job_name: 'opentelemetry'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['otel-collector:8889']
+```
+
+重启Prometheus后，可在其Web界面（通常为`http://localhost:9090/targets`）查看数据抓取状态。
+
+---
+
+## 步骤3：Grafana数据源配置
+
+1. 登录Grafana控制台
+2. 导航至`Configuration > Data Sources`
+3. 添加Prometheus数据源：
+   - URL: `http://prometheus:9090`（根据实际地址调整）
+   - Access: `Server`
+
+```mermaid
+graph LR
+    A[应用程序] -->|OTLP| B(OpenTelemetry Collector)
+    B -->|Prometheus格式| C[Prometheus]
+    C --> D[Grafana仪表盘]
+```
+
+---
+
+## 步骤4：创建Grafana仪表盘
+
+### 示例：监控HTTP请求速率
+
+1. 新建仪表盘 → 添加面板
+2. 在PromQL查询中使用：
+   ```promql
+   sum(rate(http_server_duration_ms_count[1m])) by (service.name)
+   ```
+3. 设置可视化类型为`Time series`
+
+:::note
+常用监控指标示例：
+- 错误率：`rate(http_server_errors_total[1m])`
+- 延迟百分位：`histogram_quantile(0.95, sum(rate(http_server_duration_ms_bucket[1m])) by (le))`
+:::
+
+---
+
+## 实际案例：电商平台监控
+
+假设我们需要监控一个电商服务的API性能：
+
+1. **关键指标**：
+   - 结账API的P99延迟
+   - 商品搜索的请求量
+   - 支付服务的错误率
+
+2. **Grafana仪表盘配置**：
+   ```promql
+   # 结账延迟
+   histogram_quantile(0.99, 
+     sum(rate(checkout_api_duration_seconds_bucket[1m])) by (le)
+   
+   # 搜索请求量
+   sum(rate(search_requests_total[5m])) by (method)
+   ```
+
+---
+
+## 总结
+
+通过OpenTelemetry与Grafana的集成，我们实现了：
+- 从应用代码自动收集遥测数据
+- 通过Prometheus存储时间序列数据
+- 在Grafana中创建交互式可视化
+
+---
+
+## 扩展练习
+
+1. 尝试在仪表盘中添加告警规则
+2. 使用`$service`变量实现动态过滤
+3. 探索Grafana的`Explore`功能进行临时查询
+
+## 附加资源
+
+- [OpenTelemetry Collector文档](https://opentelemetry.io/docs/collector/)
+- [Grafana PromQL指南](https://grafana.com/docs/grafana/latest/datasources/prometheus/)

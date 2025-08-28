@@ -1,0 +1,172 @@
+---
+title: Airflow 故障恢复
+description: 学习如何识别和恢复Apache Airflow中的常见故障，确保工作流的稳定运行。
+---
+
+# Airflow 故障恢复
+
+Apache Airflow 是一个强大的工作流调度和监控工具，但在实际使用中，可能会遇到各种故障。了解如何识别和恢复这些故障是确保工作流稳定运行的关键。本文将逐步介绍常见的故障类型及其恢复方法，并通过实际案例帮助你更好地理解。
+
+## 1. 常见故障类型
+
+在 Airflow 中，常见的故障类型包括：
+
+- **任务失败**：任务执行过程中出现错误。
+- **调度器故障**：调度器无法正常调度任务。
+- **数据库连接问题**：Airflow 无法连接到元数据数据库。
+- **依赖问题**：任务之间的依赖关系未正确设置。
+
+## 2. 任务失败恢复
+
+### 2.1 识别任务失败
+
+任务失败通常会在 Airflow UI 中显示为红色状态。你可以通过查看任务日志来了解失败的具体原因。
+
+### 2.2 重新运行失败任务
+
+在 Airflow UI 中，你可以手动重新运行失败的任务。选择任务并点击“Clear”按钮，然后选择“Recursive”以清除所有下游任务的状态。
+
+```python
+# 示例：重新运行失败任务
+airflow tasks clear my_dag --task-ids my_task --start-date 2023-01-01 --end-date 2023-01-02
+```
+
+### 2.3 自动重试
+
+在 DAG 定义中，可以为任务设置 `retries` 和 `retry_delay` 参数，以便在任务失败时自动重试。
+
+```python
+from airflow import DAG
+from airflow.operators.python_operator import PythonOperator
+from datetime import datetime
+
+default_args = {
+    'owner': 'airflow',
+    'retries': 3,
+    'retry_delay': timedelta(minutes=5),
+}
+
+dag = DAG('my_dag', default_args=default_args, schedule_interval='@daily')
+
+def my_task():
+    # 任务逻辑
+    pass
+
+task = PythonOperator(
+    task_id='my_task',
+    python_callable=my_task,
+    dag=dag,
+)
+```
+
+## 3. 调度器故障恢复
+
+### 3.1 检查调度器日志
+
+调度器故障通常会导致任务无法按时调度。你可以通过查看调度器日志来识别问题。
+
+### 3.2 重启调度器
+
+如果调度器出现故障，可以尝试重启调度器服务。
+
+```bash
+# 重启调度器
+airflow scheduler --daemon
+```
+
+### 3.3 检查数据库连接
+
+调度器依赖元数据数据库来存储任务状态。确保数据库连接正常，并且数据库服务正在运行。
+
+## 4. 数据库连接问题
+
+### 4.1 检查数据库配置
+
+在 `airflow.cfg` 文件中，确保数据库连接字符串正确配置。
+
+```ini
+# 示例：PostgreSQL 数据库配置
+sql_alchemy_conn = postgresql+psycopg2://user:password@localhost:5432/airflow
+```
+
+### 4.2 测试数据库连接
+
+使用 Airflow 提供的命令行工具测试数据库连接。
+
+```bash
+airflow db check
+```
+
+## 5. 依赖问题
+
+### 5.1 检查任务依赖
+
+在 DAG 定义中，确保任务之间的依赖关系正确设置。
+
+```python
+task1 >> task2  # task1 完成后 task2 开始
+```
+
+### 5.2 使用 `TriggerDagRunOperator`
+
+如果任务依赖其他 DAG 的执行结果，可以使用 `TriggerDagRunOperator` 来触发其他 DAG。
+
+```python
+from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+
+trigger_task = TriggerDagRunOperator(
+    task_id='trigger_other_dag',
+    trigger_dag_id='other_dag',
+    dag=dag,
+)
+```
+
+## 6. 实际案例
+
+### 6.1 案例：任务失败自动重试
+
+假设你有一个每日运行的 ETL 任务，偶尔会因为外部 API 不可用而失败。通过设置 `retries` 和 `retry_delay`，任务在失败后会自动重试，确保最终成功。
+
+```python
+default_args = {
+    'owner': 'airflow',
+    'retries': 5,
+    'retry_delay': timedelta(minutes=10),
+}
+
+dag = DAG('etl_dag', default_args=default_args, schedule_interval='@daily')
+
+def extract_data():
+    # 提取数据逻辑
+    pass
+
+task = PythonOperator(
+    task_id='extract_data',
+    python_callable=extract_data,
+    dag=dag,
+)
+```
+
+### 6.2 案例：调度器故障恢复
+
+在一次系统升级后，调度器无法正常启动。通过检查调度器日志，发现数据库连接配置错误。修正配置后，调度器成功启动，任务恢复正常调度。
+
+## 7. 总结
+
+Airflow 故障恢复是确保工作流稳定运行的重要环节。通过识别常见故障类型，并采取相应的恢复措施，可以有效减少系统停机时间。本文介绍了任务失败、调度器故障、数据库连接问题和依赖问题的恢复方法，并通过实际案例展示了这些方法的应用。
+
+## 8. 附加资源
+
+- [Airflow 官方文档](https://airflow.apache.org/docs/)
+- [Airflow GitHub 仓库](https://github.com/apache/airflow)
+- [Airflow 社区论坛](https://airflow.apache.org/community/)
+
+## 9. 练习
+
+1. 创建一个包含自动重试机制的 DAG，模拟任务失败并观察重试行为。
+2. 配置 Airflow 使用 PostgreSQL 数据库，并测试数据库连接。
+3. 使用 `TriggerDagRunOperator` 创建一个依赖其他 DAG 的任务。
+
+:::tip
+在练习过程中，如果遇到问题，可以查看 Airflow 日志或参考官方文档获取帮助。
+:::

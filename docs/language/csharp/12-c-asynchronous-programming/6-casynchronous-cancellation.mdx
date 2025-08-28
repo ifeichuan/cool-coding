@@ -1,0 +1,166 @@
+---
+title: C# 异步取消
+description: 了解如何在 C# 中实现异步任务的取消操作，掌握 CancellationToken 的使用方法及其实际应用场景。
+---
+
+## 介绍
+
+在异步编程中，任务的取消是一个常见的需求。例如，当用户点击“取消”按钮时，我们希望停止正在执行的后台任务。C# 提供了 `CancellationToken` 机制来实现这一功能。通过 `CancellationToken`，我们可以优雅地取消异步操作，而不需要强制终止线程或进程。
+
+本文将逐步介绍如何在 C# 中使用 `CancellationToken` 来实现异步任务的取消，并通过实际案例展示其应用场景。
+
+## 什么是 CancellationToken？
+
+`CancellationToken` 是 C# 中用于取消异步操作的一种机制。它允许我们向异步任务发送取消请求，任务可以定期检查是否收到了取消请求，并在适当的时候停止执行。
+
+### 基本用法
+
+要使用 `CancellationToken`，首先需要创建一个 `CancellationTokenSource` 对象。`CancellationTokenSource` 是 `CancellationToken` 的工厂类，它负责生成和管理 `CancellationToken`。
+
+```csharp
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+class Program
+{
+    static async Task Main(string[] args)
+    {
+        CancellationTokenSource cts = new CancellationTokenSource();
+        CancellationToken token = cts.Token;
+
+        Task task = Task.Run(() => DoWork(token), token);
+
+        // 模拟用户取消操作
+        await Task.Delay(2000);
+        cts.Cancel();
+
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("任务已取消。");
+        }
+    }
+
+    static void DoWork(CancellationToken token)
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            token.ThrowIfCancellationRequested();
+            Console.WriteLine($"工作进度：{i + 1}/10");
+            Thread.Sleep(500);
+        }
+    }
+}
+```
+
+### 代码解释
+
+1. **创建 `CancellationTokenSource` 和 `CancellationToken`**：我们首先创建了一个 `CancellationTokenSource` 对象，并通过它的 `Token` 属性获取 `CancellationToken`。
+
+2. **启动异步任务**：我们使用 `Task.Run` 启动了一个异步任务，并将 `CancellationToken` 传递给任务。
+
+3. **模拟取消操作**：在主线程中，我们等待 2 秒后调用 `cts.Cancel()` 来取消任务。
+
+4. **任务中的取消检查**：在 `DoWork` 方法中，我们通过 `token.ThrowIfCancellationRequested()` 来检查是否收到了取消请求。如果收到了取消请求，该方法会抛出 `OperationCanceledException`。
+
+5. **捕获取消异常**：在主线程中，我们捕获了 `OperationCanceledException` 并输出“任务已取消”。
+
+### 输出
+
+```
+工作进度：1/10
+工作进度：2/10
+工作进度：3/10
+工作进度：4/10
+任务已取消。
+```
+
+## 实际应用场景
+
+### 场景：文件下载器
+
+假设我们正在开发一个文件下载器，用户可以在下载过程中点击“取消”按钮来停止下载。我们可以使用 `CancellationToken` 来实现这一功能。
+
+```csharp
+using System;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+
+class FileDownloader
+{
+    private static readonly HttpClient client = new HttpClient();
+
+    public static async Task DownloadFileAsync(string url, string destination, CancellationToken token)
+    {
+        using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, token))
+        {
+            response.EnsureSuccessStatusCode();
+            using (var fileStream = System.IO.File.Create(destination))
+            using (var httpStream = await response.Content.ReadAsStreamAsync())
+            {
+                await httpStream.CopyToAsync(fileStream, token);
+            }
+        }
+    }
+}
+
+class Program
+{
+    static async Task Main(string[] args)
+    {
+        CancellationTokenSource cts = new CancellationTokenSource();
+        CancellationToken token = cts.Token;
+
+        Console.WriteLine("开始下载文件...");
+        Task downloadTask = FileDownloader.DownloadFileAsync("https://example.com/largefile.zip", "largefile.zip", token);
+
+        // 模拟用户取消操作
+        await Task.Delay(2000);
+        cts.Cancel();
+
+        try
+        {
+            await downloadTask;
+            Console.WriteLine("文件下载完成。");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("文件下载已取消。");
+        }
+    }
+}
+```
+
+### 代码解释
+
+1. **文件下载**：我们使用 `HttpClient` 下载文件，并将 `CancellationToken` 传递给 `GetAsync` 和 `CopyToAsync` 方法。
+
+2. **取消下载**：在主线程中，我们等待 2 秒后调用 `cts.Cancel()` 来取消下载任务。
+
+3. **捕获取消异常**：如果下载任务被取消，我们会捕获 `OperationCanceledException` 并输出“文件下载已取消”。
+
+### 输出
+
+```
+开始下载文件...
+文件下载已取消。
+```
+
+## 总结
+
+`CancellationToken` 是 C# 中实现异步任务取消的强大工具。通过 `CancellationTokenSource` 和 `CancellationToken`，我们可以优雅地取消异步操作，而不需要强制终止线程或进程。本文通过简单的示例和实际应用场景，展示了如何使用 `CancellationToken` 来实现异步任务的取消。
+
+## 附加资源
+
+- [Microsoft 官方文档：CancellationToken](https://docs.microsoft.com/en-us/dotnet/api/system.threading.cancellationtoken)
+- [C# 异步编程指南](https://docs.microsoft.com/en-us/dotnet/csharp/programming-guide/concepts/async/)
+
+## 练习
+
+1. 修改文件下载器的代码，使其在取消下载时删除已下载的部分文件。
+2. 尝试在一个长时间运行的任务中使用多个 `CancellationToken`，并观察它们的行为。

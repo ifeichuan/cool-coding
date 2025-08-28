@@ -1,0 +1,180 @@
+---
+title: Swift 自动引用计数
+description: 了解Swift中的自动引用计数（ARC）机制，掌握内存管理的核心概念，并通过实际案例理解其应用场景。
+---
+
+# Swift 自动引用计数
+
+在Swift中，内存管理是一个重要的主题，尤其是当你处理类实例时。Swift使用**自动引用计数（Automatic Reference Counting, ARC）**来跟踪和管理应用程序的内存使用。ARC会自动释放不再需要的对象，从而避免内存泄漏。
+
+## 什么是自动引用计数？
+
+自动引用计数（ARC）是Swift中的一种内存管理机制。它的核心思想是：**每当创建一个类实例时，ARC会分配一块内存来存储该实例的信息。当该实例不再被任何变量或常量引用时，ARC会自动释放这块内存**。
+
+ARC通过跟踪每个类实例的引用计数来实现这一点。每当一个实例被赋值给一个变量、常量或属性时，引用计数会增加1；当引用被移除时，引用计数会减少1。当引用计数为0时，实例将被销毁，内存被释放。
+
+:::note
+ARC仅适用于类的实例。结构体和枚举是值类型，它们的实例不会被引用计数管理。
+:::
+
+## 引用计数的工作原理
+
+让我们通过一个简单的例子来理解ARC的工作原理：
+
+```swift
+class Person {
+    let name: String
+    init(name: String) {
+        self.name = name
+        print("\(name) 被初始化")
+    }
+    deinit {
+        print("\(name) 被销毁")
+    }
+}
+
+var person1: Person?
+var person2: Person?
+var person3: Person?
+
+person1 = Person(name: "Alice")  // 输出: Alice 被初始化
+person2 = person1
+person3 = person1
+```
+
+在这个例子中，`Person`类的实例被赋值给`person1`、`person2`和`person3`。此时，引用计数为3。
+
+```swift
+person1 = nil
+person2 = nil
+person3 = nil  // 输出: Alice 被销毁
+```
+
+当我们将所有引用设置为`nil`时，引用计数降为0，ARC会自动销毁该实例并释放内存。
+
+## 强引用循环
+
+虽然ARC非常强大，但它并不能处理所有情况。最常见的问题是**强引用循环**。当两个类实例相互持有对方的强引用时，它们的引用计数永远不会降为0，从而导致内存泄漏。
+
+### 示例：强引用循环
+
+```swift
+class Person {
+    let name: String
+    var apartment: Apartment?
+    init(name: String) {
+        self.name = name
+        print("\(name) 被初始化")
+    }
+    deinit {
+        print("\(name) 被销毁")
+    }
+}
+
+class Apartment {
+    let unit: String
+    var tenant: Person?
+    init(unit: String) {
+        self.unit = unit
+        print("公寓 \(unit) 被初始化")
+    }
+    deinit {
+        print("公寓 \(unit) 被销毁")
+    }
+}
+
+var john: Person?
+var unit4A: Apartment?
+
+john = Person(name: "John")
+unit4A = Apartment(unit: "4A")
+
+john!.apartment = unit4A
+unit4A!.tenant = john
+
+john = nil
+unit4A = nil
+```
+
+在这个例子中，`Person`实例和`Apartment`实例相互持有对方的强引用。即使我们将`john`和`unit4A`设置为`nil`，它们的引用计数仍然为1，因此它们不会被销毁。
+
+### 解决强引用循环
+
+Swift提供了两种方式来解决强引用循环：**弱引用（weak）**和**无主引用（unowned）**。
+
+#### 弱引用（weak）
+
+弱引用不会增加引用计数。当引用的实例被销毁时，弱引用会自动设置为`nil`。
+
+```swift
+class Apartment {
+    let unit: String
+    weak var tenant: Person?  // 使用弱引用
+    init(unit: String) {
+        self.unit = unit
+        print("公寓 \(unit) 被初始化")
+    }
+    deinit {
+        print("公寓 \(unit) 被销毁")
+    }
+}
+```
+
+#### 无主引用（unowned）
+
+无主引用也不会增加引用计数，但它假定引用的实例永远不会为`nil`。如果引用的实例被销毁，访问无主引用会导致运行时错误。
+
+```swift
+class Customer {
+    let name: String
+    var card: CreditCard?
+    init(name: String) {
+        self.name = name
+        print("\(name) 被初始化")
+    }
+    deinit {
+        print("\(name) 被销毁")
+    }
+}
+
+class CreditCard {
+    let number: UInt64
+    unowned let customer: Customer  // 使用无主引用
+    init(number: UInt64, customer: Customer) {
+        self.number = number
+        self.customer = customer
+        print("信用卡 #\(number) 被初始化")
+    }
+    deinit {
+        print("信用卡 #\(number) 被销毁")
+    }
+}
+
+var john: Customer?
+john = Customer(name: "John")
+john!.card = CreditCard(number: 1234_5678_9012_3456, customer: john!)
+
+john = nil  // 输出: John 被销毁, 信用卡 #1234567890123456 被销毁
+```
+
+## 实际应用场景
+
+在实际开发中，ARC帮助我们管理内存，但我们需要特别注意强引用循环的问题。例如，在以下场景中，ARC尤为重要：
+
+1. **视图控制器之间的引用**：在iOS开发中，视图控制器之间可能会相互引用。如果不小心，可能会导致强引用循环。
+2. **闭包中的强引用**：闭包会捕获其上下文中的变量，如果闭包持有对类实例的强引用，也可能导致强引用循环。
+
+## 总结
+
+自动引用计数（ARC）是Swift中管理内存的核心机制。它通过跟踪类实例的引用计数来自动释放不再使用的内存。然而，强引用循环是一个常见的问题，我们可以通过使用弱引用或无主引用来解决。
+
+:::tip
+在开发过程中，始终注意检查是否存在强引用循环，尤其是在处理闭包和相互引用的类实例时。
+:::
+
+## 附加资源与练习
+
+- **练习1**：创建一个包含两个相互引用的类的示例，并尝试使用弱引用或无主引用来解决强引用循环。
+- **练习2**：在闭包中捕获类实例，并观察引用计数的变化。
+
+通过理解和掌握ARC，你将能够编写更高效、更安全的Swift代码！

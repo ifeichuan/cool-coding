@@ -1,0 +1,201 @@
+---
+title: PyTorch 分布式训练基础
+description: 了解PyTorch分布式训练的基本概念、实现方法以及实际应用场景，适合初学者快速入门。
+---
+
+# PyTorch 分布式训练基础
+
+在现代深度学习任务中，模型的规模和数据集的大小都在快速增长。单机单卡的训练方式已经无法满足需求，分布式训练成为了解决这一问题的关键技术。PyTorch 提供了强大的分布式训练工具，帮助开发者高效地利用多台机器和多个 GPU 进行模型训练。本文将介绍 PyTorch 分布式训练的基础知识，并通过实际案例帮助你快速上手。
+
+## 什么是分布式训练？
+
+分布式训练是指将训练任务分配到多个计算节点（如多台机器或多个 GPU）上并行执行，以加速训练过程。PyTorch 提供了多种分布式训练的方式，包括数据并行（Data Parallelism）、模型并行（Model Parallelism）和混合并行（Hybrid Parallelism）。
+
+:::note
+**数据并行**：将数据分片，每个计算节点处理一部分数据，并在训练过程中同步模型参数。
+**模型并行**：将模型分片，每个计算节点负责模型的一部分计算。
+**混合并行**：结合数据并行和模型并行的优势，适用于超大规模模型。
+:::
+
+## PyTorch 分布式训练的核心组件
+
+PyTorch 分布式训练的核心组件包括：
+
+1. **`torch.distributed` 模块**：提供了分布式训练的基础功能，如进程组管理、通信原语等。
+2. **`torch.nn.parallel.DistributedDataParallel` (DDP)**：用于实现数据并行的分布式训练。
+3. **`torch.distributed.launch` 脚本**：用于启动分布式训练任务。
+
+接下来，我们将逐步讲解如何使用这些组件进行分布式训练。
+
+---
+
+## 1. 初始化分布式环境
+
+在开始分布式训练之前，需要初始化分布式环境。PyTorch 提供了 `torch.distributed.init_process_group` 函数来完成这一任务。
+
+```python
+import torch.distributed as dist
+
+def init_distributed(backend='nccl', world_size=2, rank=0, master_addr='localhost', master_port='12355'):
+    dist.init_process_group(
+        backend=backend,
+        init_method=f'tcp://{master_addr}:{master_port}',
+        world_size=world_size,
+        rank=rank
+    )
+```
+
+:::tip
+- `backend`：指定通信后端，常用的是 `nccl`（适用于 GPU）和 `gloo`（适用于 CPU）。
+- `world_size`：参与训练的总进程数。
+- `rank`：当前进程的编号（从 0 开始）。
+- `master_addr` 和 `master_port`：主节点的地址和端口。
+:::
+
+---
+
+## 2. 使用 DistributedDataParallel (DDP) 进行数据并行训练
+
+`DistributedDataParallel` 是 PyTorch 中用于数据并行分布式训练的核心工具。它会在每个进程中复制模型，并在反向传播时同步梯度。
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super(SimpleModel, self).__init__()
+        self.fc = nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.fc(x)
+
+def train(rank, world_size):
+    init_distributed(world_size=world_size, rank=rank)
+
+    model = SimpleModel().to(rank)
+    ddp_model = DDP(model, device_ids=[rank])
+
+    optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
+    criterion = nn.MSELoss()
+
+    for _ in range(10):
+        inputs = torch.randn(20, 10).to(rank)
+        labels = torch.randn(20, 1).to(rank)
+
+        outputs = ddp_model(inputs)
+        loss = criterion(outputs, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    dist.destroy_process_group()
+
+if __name__ == "__main__":
+    world_size = 2
+    torch.multiprocessing.spawn(train, args=(world_size,), nprocs=world_size)
+```
+
+:::caution
+- 使用 `DDP` 时，每个进程需要加载不同的数据分片。
+- 训练完成后，调用 `dist.destroy_process_group()` 清理分布式环境。
+:::
+
+---
+
+## 3. 启动分布式训练任务
+
+PyTorch 提供了 `torch.distributed.launch` 脚本来简化分布式训练的启动。假设你的训练脚本名为 `train.py`，可以通过以下命令启动分布式训练：
+
+```bash
+python -m torch.distributed.launch --nproc_per_node=2 train.py
+```
+
+:::note
+- `--nproc_per_node`：指定每个节点使用的 GPU 数量。
+- 如果你的训练任务需要跨多个节点，还需要设置 `--nnodes` 和 `--node_rank` 参数。
+:::
+
+---
+
+## 4. 实际案例：分布式训练 MNIST 分类模型
+
+以下是一个完整的分布式训练 MNIST 分类模型的示例：
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
+from torchvision import datasets, transforms
+
+class MNISTModel(nn.Module):
+    def __init__(self):
+        super(MNISTModel, self).__init__()
+        self.fc1 = nn.Linear(28 * 28, 128)
+        self.fc2 = nn.Linear(128, 10)
+
+    def forward(self, x):
+        x = x.view(-1, 28 * 28)
+        x = torch.relu(self.fc1(x))
+        return self.fc2(x)
+
+def train(rank, world_size):
+    init_distributed(world_size=world_size, rank=rank)
+
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+    dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
+    sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=64, sampler=sampler)
+
+    model = MNISTModel().to(rank)
+    ddp_model = DDP(model, device_ids=[rank])
+
+    optimizer = optim.Adam(ddp_model.parameters(), lr=0.001)
+    criterion = nn.CrossEntropyLoss()
+
+    for epoch in range(5):
+        sampler.set_epoch(epoch)
+        for inputs, labels in dataloader:
+            inputs, labels = inputs.to(rank), labels.to(rank)
+
+            outputs = ddp_model(inputs)
+            loss = criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    dist.destroy_process_group()
+
+if __name__ == "__main__":
+    world_size = 2
+    torch.multiprocessing.spawn(train, args=(world_size,), nprocs=world_size)
+```
+
+:::tip
+- 使用 `DistributedSampler` 确保每个进程加载不同的数据分片。
+- 在每个 epoch 开始时调用 `sampler.set_epoch(epoch)`，以确保数据打乱的随机性。
+:::
+
+---
+
+## 总结
+
+本文介绍了 PyTorch 分布式训练的基础知识，包括分布式环境的初始化、`DistributedDataParallel` 的使用以及如何启动分布式训练任务。通过实际案例，我们展示了如何在 MNIST 数据集上进行分布式训练。
+
+分布式训练是深度学习领域的重要技术，能够显著提升训练效率。希望本文能帮助你快速入门 PyTorch 分布式训练，并为你的深度学习项目提供支持。
+
+---
+
+## 附加资源与练习
+
+1. **官方文档**：阅读 [PyTorch 分布式训练官方文档](https://pytorch.org/docs/stable/distributed.html) 以了解更多高级功能。
+2. **练习**：尝试在 CIFAR-10 数据集上实现分布式训练，并比较单机训练和分布式训练的速度差异。
+3. **扩展阅读**：了解 PyTorch 的混合精度训练（AMP）如何与分布式训练结合使用，以进一步提升性能。
+
+Happy coding! 🚀
