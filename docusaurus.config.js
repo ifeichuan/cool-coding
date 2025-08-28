@@ -151,8 +151,8 @@ const config = {
                     rehypePlugins: [rehypeKatex],
                     // Please change this to your repo.
                     // Remove this to remove the "edit this page" links.
-                    // editUrl:
-                    //   'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+                    editUrl:
+                      'https://github.com/echo-cool-coding/cool-coding/tree/main/',
                 },
                 blog: {
                     showReadingTime: true,
@@ -163,7 +163,7 @@ const config = {
                     // Please change this to your repo.
                     // Remove this to remove the "edit this page" links.
                     editUrl:
-                        'https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/',
+                        'https://github.com/echo-cool-coding/cool-coding/tree/main/',
                     // Useful options to enforce blogging best practices
                     onInlineTags: 'warn',
                     onInlineAuthors: 'warn',
@@ -210,7 +210,7 @@ const config = {
             },
             announcementBar: {
                 id: "replay_announcement",
-                content: '我们正在将此网站迁移至 <a href="https://wiki.echo.cool/">https://wiki.echo.cool/</a> 请访问该网站获取最新的内容',
+                content: '喜欢这个项目吗？到 <a href="https://github.com/echo-cool-coding/cool-coding">GitHub</a> 给我们点个 ⭐ 支持一下吧！',
                 backgroundColor: "#312e81",
                 textColor: "#ffffff",
                 isCloseable: false,
